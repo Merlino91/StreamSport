@@ -4,6 +4,7 @@ import logging
 import re
 import time
 from typing import Any, Dict, List, Optional, Tuple
+import unicodedata
 import httpx
 
 logger = logging.getLogger("streamsport.espn")
@@ -50,6 +51,10 @@ ESPN_LEAGUE_MAP = [
     ("soccer", "fifa.friendly", "calcio_estero", "Nazionali e Amichevoli", "football"),
     ("soccer", "fifa.world", "calcio_estero", "Nazionali e Amichevoli", "football"),
     ("soccer", "uefa.euro", "calcio_estero", "Nazionali e Amichevoli", "football"),
+    ("soccer", "uefa.euroq", "calcio_estero", "Nazionali e Amichevoli", "football"),
+    ("soccer", "uefa.euro_u21", "calcio_estero", "Altri Campionati Europei", "football"),
+    ("soccer", "caf.nations_qual", "calcio_estero", "Americhe e Leghe Extra-UE", "football"),
+    ("soccer", "caf.nations", "calcio_estero", "Americhe e Leghe Extra-UE", "football"),
 
     # --- BASKET ---
     ("basketball", "nba", "basket", "NBA", "basketball"),
@@ -78,6 +83,7 @@ ESPN_LEAGUE_MAP = [
     # --- HOCKEY ---
     ("hockey", "nhl", "hockey", "NHL", "hockey"),
     ("hockey", "mens-college-hockey", "hockey", "KHL e Leghe Europee", "hockey"),
+    ("hockey", "womens-college-hockey", "hockey", "KHL e Leghe Europee", "hockey"),
 
     # --- SPORT DA COMBATTIMENTO ---
     ("mma", "ufc", "combattimento", "UFC", "fight"),
@@ -241,6 +247,71 @@ class ESPNService:
             logger.info("ESPN official sports registry loaded: %d events indexed across the week.", len(deduped))
             return self._cached_events
 
+    ESPN_NORM_ALIASES = {
+        r"\bturkey\b": "turkiye",
+        r"\bitaly\b": "italia",
+        r"\bunited states\b": "usa",
+        r"\bczech republic\b": "czechia",
+        r"\bbosnia and herzegovina\b": "bosnia",
+        r"\bbosnia herzegovina\b": "bosnia",
+        r"\bsouth korea\b": "korea",
+        r"\bnorth macedonia\b": "macedonia",
+        r"\binternazionale\b": "inter",
+        r"\bparis saint germain\b": "psg",
+        r"\bparis sg\b": "psg",
+        r"\bmanchester city\b": "man city",
+        r"\bmanchester united\b": "man utd",
+        r"\bman united\b": "man utd",
+        r"\bbayern munchen\b": "bayern",
+        r"\bbayern munich\b": "bayern",
+        r"\bborussia dortmund\b": "dortmund",
+        r"\batletico madrid\b": "atletico",
+        r"\bolympiakos\b": "olympiacos",
+    }
+
+    GENERIC_LOCATION_WORDS = {
+        "new", "york", "los", "angeles", "san", "francisco", "diego", "antonio", "jose",
+        "north", "south", "east", "west", "central", "state", "city", "de", "del", "la", "el"
+    }
+
+    @staticmethod
+    def is_category_compatible(c1: str, c2: str) -> bool:
+        c1 = (c1 or "").lower().strip()
+        c2 = (c2 or "").lower().strip()
+        if not c1 or not c2:
+            return True
+        if c1 == c2:
+            return True
+        if {c1, c2} == {"football", "soccer"}:
+            return True
+        return False
+
+    def _extract_team_words(self, match: Dict[str, Any]) -> Tuple[set, set]:
+        teams = match.get("teams")
+        if isinstance(teams, dict) and teams.get("home") and teams.get("away"):
+            h = (teams.get("home", {}).get("name") or "").lower()
+            a = (teams.get("away", {}).get("name") or "").lower()
+            h = unicodedata.normalize("NFKD", h).encode("ascii", "ignore").decode("utf-8")
+            a = unicodedata.normalize("NFKD", a).encode("ascii", "ignore").decode("utf-8")
+            for pat, rep in self.ESPN_NORM_ALIASES.items():
+                h = re.sub(pat, rep, h)
+                a = re.sub(pat, rep, a)
+            h = re.sub(r"[^a-z0-9]+", " ", h).strip()
+            a = re.sub(r"[^a-z0-9]+", " ", a).strip()
+            h_words = set(w for w in h.split() if w not in ("fc", "ac", "cf", "sc", "as", "the") and len(w) > 1)
+            a_words = set(w for w in a.split() if w not in ("fc", "ac", "cf", "sc", "as", "the") and len(w) > 1)
+            return h_words, a_words
+        return set(), set()
+
+    def _clean_tokens_with_aliases(self, title: str, clean_tokens_fn) -> set:
+        t = (title or "").lower()
+        t = unicodedata.normalize("NFKD", t).encode("ascii", "ignore").decode("utf-8")
+        t = re.sub(r"[\U0001F1E6-\U0001F1FF]{2}", "", t)
+        for pat, rep in self.ESPN_NORM_ALIASES.items():
+            t = re.sub(pat, rep, t)
+        cleaned = clean_tokens_fn(t)
+        return set(cleaned.split()) if cleaned else set()
+
     def reconcile_matches(
         self,
         stream_matches: List[Dict[str, Any]],
@@ -261,35 +332,53 @@ class ESPNService:
 
         for m in stream_matches:
             m_date = m.get("date") or 0
-            m_tokens = clean_tokens_fn(m.get("title", ""))
-            m_teams = get_teams_key_fn(m)
-            m_words = set(m_tokens.split()) if m_tokens else set()
+            m_cat = m.get("category") or ""
+            m_words = self._clean_tokens_with_aliases(m.get("title", ""), clean_tokens_fn)
+            mh, ma = self._extract_team_words(m)
 
             for espn in espn_events:
-                e_date = espn.get("date") or 0
+                # 0. Sport Category Compatibility: prevent cross-sport false positives (e.g. WNBA vs NFL)
+                e_cat = espn.get("category") or ""
+                if not self.is_category_compatible(m_cat, e_cat):
+                    continue
+
                 # 1. Date Compatibility: must coincide within 90 minutes
+                e_date = espn.get("date") or 0
                 if m_date and e_date:
                     if abs(m_date - e_date) > 90 * 60 * 1000:
                         continue
 
-                # 2. Team match or token similarity
-                e_teams = get_teams_key_fn(espn)
-                e_tokens = clean_tokens_fn(espn.get("title", ""))
-                e_words = set(e_tokens.split()) if e_tokens else set()
-
+                # 2. Team match with distinctive words (direct and inverted for "at" matches)
+                eh, ea = self._extract_team_words(espn)
                 is_same = False
-                if m_teams and e_teams and m_teams == e_teams:
-                    is_same = True
-                elif m_words and e_words:
-                    if m_words == e_words:
+                if mh and ma and eh and ea:
+                    h_match_d = bool((mh & eh) - self.GENERIC_LOCATION_WORDS)
+                    a_match_d = bool((ma & ea) - self.GENERIC_LOCATION_WORDS)
+                    if h_match_d and a_match_d:
                         is_same = True
                     else:
-                        common = m_words & e_words
-                        union = m_words | e_words
-                        sim = len(common) / len(union) if union else 0.0
-                        is_subset = len(common) >= 2 and (m_words.issubset(e_words) or e_words.issubset(m_words))
-                        if sim >= 0.55 or is_subset:
+                        h_match_i = bool((mh & ea) - self.GENERIC_LOCATION_WORDS)
+                        a_match_i = bool((ma & eh) - self.GENERIC_LOCATION_WORDS)
+                        if h_match_i and a_match_i:
                             is_same = True
+
+                # 3. Token similarity with distinctive words
+                if not is_same:
+                    e_words = self._clean_tokens_with_aliases(espn.get("title", ""), clean_tokens_fn)
+                    if m_words and e_words:
+                        if m_words == e_words:
+                            is_same = True
+                        else:
+                            common = m_words & e_words
+                            distinctive_common = common - self.GENERIC_LOCATION_WORDS
+                            if len(distinctive_common) >= 2:
+                                is_same = True
+                            else:
+                                union = m_words | e_words
+                                sim = len(common) / len(union) if union else 0.0
+                                is_subset = len(distinctive_common) >= 1 and (m_words.issubset(e_words) or e_words.issubset(m_words))
+                                if sim >= 0.45 or is_subset:
+                                    is_same = True
 
                 if is_same:
                     # Adopt official ESPN metadata

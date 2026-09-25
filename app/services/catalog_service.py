@@ -3,6 +3,7 @@ import datetime
 import logging
 import re
 import time
+import unicodedata
 import urllib.parse
 from typing import Any, Dict, List, Optional, Tuple
 import pytz
@@ -179,6 +180,7 @@ class CatalogService:
 
     def _clean_tokens(self, title: str) -> str:
         t = (title or "").lower()
+        t = unicodedata.normalize("NFKD", t).encode("ascii", "ignore").decode("utf-8")
         t = re.sub(r"\|\s*[^|]+$", "", t)
         t = re.sub(r"^[^:]+:\s*", "", t)
         t = re.sub(r"\([^)]*\)", "", t)
