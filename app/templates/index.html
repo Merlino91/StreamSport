@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>StreamSport · Stremio Addon</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🏆</text></svg>">
+</head>
+<body>
+  <header class="bar">
+    <div class="bar-inner">
+      <a class="brand" href="/configure">
+        <span class="logo-icon">🏆</span>
+        <span>StreamSport</span>
+      </a>
+      <span class="badge">Stremio Addon</span>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section class="hero">
+      <h1>Sport Addon for <span class="grad">Stremio</span></h1>
+      <p class="lead">
+        Catalogo sportivo unico con selezione per <strong>generi e campionati</strong>, flussi italiani (Sky Sport, DAZN) e internazionali, 
+        schede orarie a 20 minuti dall'inizio e sintesi/replay torrent post-partita.
+      </p>
+      
+      {% if configured %}
+      <div class="status ok">
+        <span class="dot"></span> Playback proxy collegato con successo
+      </div>
+      {% else %}
+      <div class="status warn">
+        <span class="dot"></span> Inserisci l'URL del tuo EasyProxy per installare l'addon
+      </div>
+      {% endif %}
+    </section>
+
+    <div class="grid-layout">
+      <section class="card form-card">
+        <h2>Configurazione</h2>
+        <form id="cfg" action="/configure" method="get" autocomplete="off">
+          <input type="hidden" name="save" value="1">
+          
+          <div class="form-group">
+            <label for="epUrl">Proxy URL (EasyProxy)</label>
+            <input id="epUrl" name="epUrl" type="url" placeholder="https://ep.example.com" value="{{ epUrl }}" required>
+            <span class="field-hint">L'indirizzo pubblico della tua istanza EasyProxy.</span>
+          </div>
+
+          <div class="form-group">
+            <label for="epPass">Password del Proxy (Opzionale)</label>
+            <input id="epPass" name="epPass" type="password" placeholder="Password API proxy se impostata" value="{{ epPass }}">
+          </div>
+
+          <div class="form-group">
+            <label for="tz">Fuso Orario</label>
+            <select id="tz" name="tz">
+              <option value="Europe/Rome" {% if tz == 'Europe/Rome' or not tz %}selected{% endif %}>Europa / Roma (CET / CEST)</option>
+              <option value="UTC" {% if tz == 'UTC' %}selected{% endif %}>UTC</option>
+              <option value="Europe/London" {% if tz == 'Europe/London' %}selected{% endif %}>Europa / Londra</option>
+              <option value="America/New_York" {% if tz == 'America/New_York' %}selected{% endif %}>America / New York</option>
+            </select>
+          </div>
+
+          <button type="submit" class="btn primary">Genera Link Installazione</button>
+        </form>
+
+        {% if install_url %}
+        <div class="install-block">
+          <h3>Installazione su Stremio</h3>
+          <p>Clicca sul pulsante sottostante o copia l'URL nel campo di ricerca addon di Stremio:</p>
+          <div class="btn-group">
+            <a href="{{ stremio_url }}" class="btn stremio">🚀 Installa su Stremio</a>
+            <button class="btn secondary" onclick="navigator.clipboard.writeText('{{ install_url }}'); alert('URL Copiato!');">📋 Copia Link</button>
+          </div>
+          <input type="text" class="copy-field" readonly value="{{ install_url }}">
+        </div>
+        {% endif %}
+      </section>
+
+      <section class="card info-card">
+        <h2>Generi e Campionati Inclusi</h2>
+        <p class="field-hint">Tutti gli eventi sono filtrabili direttamente da Stremio tramite il menu a tendina "Genere":</p>
+        <ul class="genre-list">
+          {% for genre in genres %}
+          <li><span class="genre-tag">{{ genre }}</span></li>
+          {% endfor %}
+        </ul>
+      </section>
+    </div>
+  </main>
+</body>
+</html>

@@ -1,0 +1,27 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+
+# IDE / Editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# StreamSport Runtime Data (do not commit dynamic cache & databases)
+data/*.db
+data/*.sqlite
+data/posters/*.jpg
+data/posters/athletes/
+
+# Ensure static assets and backgrounds are tracked by Git
+!data/posters/backgrounds/
+!data/posters/assets/

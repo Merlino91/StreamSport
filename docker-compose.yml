@@ -1,0 +1,14 @@
+services:
+  streamsport:
+    build: .
+    container_name: streamsport
+    restart: unless-stopped
+    ports:
+      - "7002:7002"
+    environment:
+      - STREAMSPORT_HOST=0.0.0.0
+      - STREAMSPORT_PORT=7002
+      - STREAMED_API_HOST=streamed.pk
+      - STREAMED_CACHE_TTL=60
+    volumes:
+      - ./data:/app/data

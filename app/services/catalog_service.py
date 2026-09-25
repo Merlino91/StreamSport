@@ -1,0 +1,533 @@
+import asyncio
+import datetime
+import logging
+import re
+import time
+import urllib.parse
+from typing import Any, Dict, List, Optional, Tuple
+import pytz
+
+from app.config import (
+    CATALOG_ID,
+    CATALOG_NAME,
+    CATALOG_SYNC_INTERVAL,
+    CATALOG_TYPE,
+    SPORT_GENRES,
+    STREAMED_API_HOST,
+)
+from app.services.daddylive_api import daddylive_api
+from app.services.db_service import db_service
+from app.services.espn_service import espn_service
+from app.services.genre_classifier import genre_classifier
+from app.services.streamed_api import streamed_api
+from app.services.tennis_poster_service import tennis_poster_service
+from app.services.thesportsdb_service import thesportsdb_service
+
+logger = logging.getLogger("streamsport.catalog")
+
+class CatalogService:
+    """
+    Builds Stremio Catalog and Meta objects for StreamSport with granular genre filtering.
+    """
+
+    def __init__(self):
+        self._cached_matches: List[Dict[str, Any]] = []
+        self._last_sync_time: float = 0.0
+        self._sync_lock: asyncio.Lock = asyncio.Lock()
+        self._background_task: Optional[asyncio.Task] = None
+        self._is_running: bool = False
+
+    def format_event_date(self, timestamp_ms: int, user_tz: Optional[str] = None) -> str:
+        """Converts timestamp in ms to localized Italian date string (e.g. '21 Sep 2026, 20:45')."""
+        try:
+            tz = pytz.timezone(user_tz or "Europe/Rome")
+        except Exception:
+            tz = pytz.timezone("Europe/Rome")
+
+        dt_utc = datetime.datetime.fromtimestamp(timestamp_ms / 1000, tz=datetime.timezone.utc)
+        dt_local = dt_utc.astimezone(tz)
+        return dt_local.strftime("%d %b %Y, %H:%M").lstrip("0")
+
+    def normalize_image_url(self, path: Optional[str], base_url: Optional[str] = None) -> Optional[str]:
+        """Routes image URL through addon image proxy to bypass ISP blocks."""
+        if not path:
+            return None
+        if path.startswith("/posters/"):
+            return f"{base_url}{path}" if base_url else path
+        if not path.startswith("http://") and not path.startswith("https://"):
+            full_url = f"https://{STREAMED_API_HOST}{path}"
+        else:
+            full_url = path
+
+        if base_url:
+            encoded = urllib.parse.quote(full_url, safe="")
+            return f"{base_url}/image-proxy?url={encoded}"
+
+        return full_url
+
+    @staticmethod
+    def split_title_and_competition(raw_title: str, genre: Optional[str] = None) -> Tuple[str, str]:
+        """
+        Splits raw title into (clean_title, competition_name).
+        clean_title contains only competitors and preserves team flag emojis,
+        while removing decorative emojis.
+        competition_name is stripped of all emojis and prefixes.
+        """
+        title = (raw_title or "").strip()
+        comp = ""
+
+        # 1. Colon pattern: 'Prefix / League: Competitors'
+        if ":" in title:
+            parts = title.split(":", 1)
+            if any(sep in parts[1].lower() for sep in (" vs ", " v ")):
+                comp = parts[0].strip()
+                title = parts[1].strip()
+
+        # 2. Parentheses pattern: 'Competitors (Tournament)'
+        m = re.search(r"^(.*?)\s*\(([^)]+)\)\s*$", title)
+        if m:
+            c1, c2 = m.group(1).strip(), m.group(2).strip()
+            if any(sep in c1.lower() for sep in (" vs ", " v ")):
+                title = c1
+                comp = c2
+
+        # Strip non-flag decorative emojis from title (preserve flag emojis)
+        non_flag_pattern = (
+            r"[\U0001F300-\U0001F5FF\U0001F600-\U0001F64F\U0001F680-\U0001F6FF"
+            r"\U0001F700-\U0001F77F\U0001F780-\U0001F7FF\U0001F800-\U0001F8FF"
+            r"\U0001F900-\U0001F9FF\U0001FA00-\U0001FA6F\U0001FA70-\U0001FAFF"
+            r"\U00002600-\U000026FF\U00002700-\U000027BF\U00002B50]"
+        )
+        clean_title = re.sub(non_flag_pattern, "", title).strip()
+        clean_title = re.sub(r"^\s*[-–:|]\s*", "", clean_title).strip()
+        clean_title = re.sub(r"\s+", " ", clean_title).strip()
+
+        # Clean competition: strip ALL emojis (flags, cups, and non-flags)
+        all_emoji_pattern = r"[\U0001F1E6-\U0001F1FF]{2}|" + non_flag_pattern
+        clean_comp = re.sub(all_emoji_pattern, "", comp).strip()
+        clean_comp = re.sub(r"^\s*[-–:|]\s*", "", clean_comp).strip()
+        clean_comp = re.sub(r"\s+", " ", clean_comp).strip()
+
+        if not clean_comp and genre:
+            clean_comp = re.sub(all_emoji_pattern, "", genre).strip()
+
+        return clean_title, clean_comp
+
+    def build_meta_item(
+        self,
+        match: Dict[str, Any],
+        genre: str,
+        user_tz: Optional[str] = None,
+        base_url: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Converts a raw match object into a Stremio meta preview object."""
+        match_id = match.get("id", "")
+        title = match.get("title", "Live Sports")
+        date_ms = match.get("date", 0)
+        is_popular = match.get("popular", False)
+        poster_url = self.normalize_image_url(match.get("poster"), base_url=base_url)
+
+        clean_title, comp_name = self.split_title_and_competition(title, genre)
+
+        now_ms = time.time() * 1000
+        desc_parts = []
+
+        if not date_ms:
+            formatted_date = "Live"
+            status_text = "🔴 LIVE ORA"
+        else:
+            formatted_date = self.format_event_date(date_ms, user_tz)
+            diff_mins = int((date_ms - now_ms) / 60000)
+
+            if diff_mins < -240:
+                status_text = "🏁 Conclusa • Replay e Sintesi"
+            elif diff_mins <= 0:
+                status_text = "🔴 LIVE ORA"
+            elif diff_mins <= 20:
+                status_text = f"⏳ Inizio tra {diff_mins} min"
+            elif diff_mins < 1440:
+                status_text = f"📅 Inizio tra {diff_mins // 60}h {diff_mins % 60}m"
+            else:
+                days_left = diff_mins // 1440
+                status_text = f"📅 Tra {days_left} giorni"
+
+        # Description structure: Status first -> Competition without emoji -> Competitors
+        desc_parts.append(status_text)
+        if comp_name:
+            desc_parts.append(comp_name)
+        if clean_title:
+            desc_parts.append(clean_title)
+
+        if is_popular:
+            desc_parts.append("⭐ In Evidenza")
+
+        description = " • ".join(desc_parts)
+        stremio_id = f"streamsport:{match_id}"
+
+        item = {
+            "id": stremio_id,
+            "type": CATALOG_TYPE,
+            "name": clean_title if clean_title else title,
+            "genres": [genre],
+            "poster": poster_url,
+            "posterShape": "landscape",
+            "description": description,
+            "releaseInfo": formatted_date,
+            "_date_ms": date_ms,
+        }
+        return item
+
+    def _clean_tokens(self, title: str) -> str:
+        t = (title or "").lower()
+        t = re.sub(r"\|\s*[^|]+$", "", t)
+        t = re.sub(r"^[^:]+:\s*", "", t)
+        t = re.sub(r"\([^)]*\)", "", t)
+        t = re.sub(r"^(?:italy|england|spain|germany|france|uefa|fifa|brazil|usa|[a-z]+)\s*-\s*", "", t)
+        t = re.sub(r"[^a-z0-9]+", " ", t).strip()
+        words = sorted([w for w in t.split() if w not in ("vs", "the", "fc", "ac", "cf", "sc", "as", "at", "live", "stream") and len(w) > 1])
+        return " ".join(words)
+
+    def _get_teams_key(self, match: Dict[str, Any]) -> Optional[Any]:
+        teams = match.get("teams")
+        if isinstance(teams, dict) and teams.get("home") and teams.get("away"):
+            h = re.sub(r"[^a-z0-9]+", " ", (teams.get("home", {}).get("name") or "").lower()).strip()
+            a = re.sub(r"[^a-z0-9]+", " ", (teams.get("away", {}).get("name") or "").lower()).strip()
+            h_words = frozenset([w for w in h.split() if w not in ("fc", "ac", "cf", "sc", "as", "the") and len(w) > 1])
+            a_words = frozenset([w for w in a.split() if w not in ("fc", "ac", "cf", "sc", "as", "the") and len(w) > 1])
+            if h_words and a_words:
+                return frozenset([h_words, a_words])
+        return None
+
+    def merge_and_deduplicate(
+        self,
+        primary_matches: List[Dict[str, Any]],
+        secondary_matches: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        """Merges duplicate events into a single card, combining their streams and best metadata."""
+        merged_list: List[Dict[str, Any]] = [dict(m) for m in primary_matches]
+
+        for m2 in secondary_matches:
+            m2_tokens = self._clean_tokens(m2.get("title", ""))
+            m2_teams = self._get_teams_key(m2)
+            m2_date = m2.get("date") or 0
+            m2_words = set(m2_tokens.split()) if m2_tokens else set()
+
+            matched_idx = -1
+            for idx, existing in enumerate(merged_list):
+                ex_teams = self._get_teams_key(existing)
+                ex_tokens = self._clean_tokens(existing.get("title", ""))
+                ex_date = existing.get("date") or 0
+                ex_words = set(ex_tokens.split()) if ex_tokens else set()
+
+                # 1. Date Compatibility: Must coincide 100% (same time, or within 45m for broadcast pre-game offsets)
+                if ex_date and m2_date:
+                    if ex_date != m2_date and abs(ex_date - m2_date) > 45 * 60 * 1000:
+                        continue
+
+                # 2. Title & Team Similarity (>= 70% similarity or subset with at least 2 common words)
+                is_same = False
+                if m2_teams and ex_teams and m2_teams == ex_teams:
+                    is_same = True
+                elif m2_tokens and ex_tokens:
+                    if m2_tokens == ex_tokens:
+                        is_same = True
+                    else:
+                        common = m2_words & ex_words
+                        union = m2_words | ex_words
+                        sim = len(common) / len(union) if union else 0.0
+                        is_subset = len(common) >= 2 and (m2_words.issubset(ex_words) or ex_words.issubset(m2_words))
+                        if sim >= 0.70 or is_subset:
+                            is_same = True
+
+                if is_same:
+                    matched_idx = idx
+                    break
+
+            if matched_idx >= 0:
+                existing = merged_list[matched_idx]
+                existing_sources = existing.setdefault("sources", [])
+                existing_ids = {str(s.get("id")) for s in existing_sources if isinstance(s, dict)}
+
+                for s in m2.get("sources", []):
+                    if isinstance(s, dict) and str(s.get("id")) not in existing_ids:
+                        existing_sources.append(s)
+                        existing_ids.add(str(s.get("id")))
+
+                if not existing.get("poster") and m2.get("poster"):
+                    existing["poster"] = m2["poster"]
+                if not existing.get("date") and m2.get("date"):
+                    existing["date"] = m2["date"]
+            else:
+                merged_list.append(dict(m2))
+
+        return merged_list
+
+    @staticmethod
+    def is_real_match(m: Dict[str, Any]) -> bool:
+        date_ms = m.get("date") or 0
+        if date_ms <= 0:
+            return False
+        title = (m.get("title") or "").lower()
+        if any(w in title for w in ("schedule", "channel", "24/7", "tv shows", "big brother", "live camera")):
+            return False
+        m_id = str(m.get("id") or "").lower()
+        if m_id.startswith("admin-") or m_id.endswith("_live"):
+            return False
+
+        # Must have at least one real playable stream source
+        sources = m.get("sources") or []
+        valid_sources = [
+            s for s in sources
+            if isinstance(s, dict)
+            and str(s.get("id", "")).strip() not in ("0", "00", "")
+            and "channel not listed" not in (s.get("name") or "").lower()
+            and "just ask in chat" not in (s.get("name") or "").lower()
+        ]
+        if not valid_sources:
+            return False
+
+        return True
+
+    async def sync_matches(self, force: bool = False) -> None:
+        """
+        Synchronizes matches from upstream providers and SQLite database in the background.
+        Runs deduplication, persists to DB, and pre-classifies all events into RAM cache.
+        """
+        async with self._sync_lock:
+            now = time.time()
+            if not force and self._cached_matches and (now - self._last_sync_time < CATALOG_SYNC_INTERVAL):
+                return
+
+            logger.info("Starting background sports schedule sync...")
+            try:
+                # 1. Fetch live matches from StreamedAPI, DaddyLiveAPI, and official ESPN registry concurrently
+                tasks = [
+                    streamed_api.get_all_matches(force_refresh=True),
+                    daddylive_api.get_matches(force=True),
+                    espn_service.get_official_events(),
+                ]
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+                streamed_raw = results[0] if isinstance(results[0], list) else []
+                daddylive_raw = results[1] if isinstance(results[1], list) else []
+                espn_events = results[2] if isinstance(results[2], list) else []
+
+                streamed_matches = [m for m in streamed_raw if self.is_real_match(m)]
+                daddylive_matches = [m for m in daddylive_raw if self.is_real_match(m)]
+
+                # Merge streamed and daddylive matches into combined fresh
+                combined_fresh = self.merge_and_deduplicate(streamed_matches, daddylive_matches)
+
+                # 2. Pull all active matches from DB to retain existing enriched posters
+                all_db_matches = [m for m in db_service.get_active_matches() if self.is_real_match(m)]
+                all_matches = self.merge_and_deduplicate(combined_fresh, all_db_matches) if all_db_matches else combined_fresh
+
+                # 3. Persist merged matches in DB for 72h retention
+                if all_matches:
+                    db_service.save_matches(all_matches)
+
+                # Purge matches older than 72h from DB
+                db_service.purge_expired_matches(72)
+
+                # 4. Reconcile against official ESPN registry (names, exact UTC time, official catalog/genre)
+                if espn_events:
+                    espn_service.reconcile_matches(all_matches, espn_events, self._clean_tokens, self._get_teams_key)
+
+                # 5. Pre-classify every match into catalog and genre (if not already officially classified by ESPN)
+                for m in all_matches:
+                    if not m.get("_espn_matched"):
+                        cat, genre = genre_classifier.classify(m)
+                        m["_catalog"] = cat
+                        m["_genre"] = genre
+
+                self._cached_matches = all_matches
+                self._last_sync_time = time.time()
+                logger.info("Background sports sync complete. %d active events indexed in RAM.", len(all_matches))
+
+                # 6. Fallback poster enrichment from TheSportsDB (non-blocking, auto-retrying)
+                thesportsdb_service.start_background_enrichment(all_matches)
+
+                # 7. Dynamic 16:9 poster generation for Tennis events lacking artwork
+                tennis_poster_service.start_background_enrichment(all_matches)
+            except Exception as e:
+                logger.error("Error during background sports schedule sync: %s", e, exc_info=True)
+
+    def start_background_sync(self):
+        """Starts the periodic background sync task."""
+        if self._is_running:
+            return
+        self._is_running = True
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = asyncio.get_event_loop()
+        self._background_task = loop.create_task(self._background_loop())
+        logger.info("CatalogService background sync scheduled every %d seconds.", CATALOG_SYNC_INTERVAL)
+
+    def stop_background_sync(self):
+        """Stops the periodic background sync task."""
+        self._is_running = False
+        if self._background_task and not self._background_task.done():
+            self._background_task.cancel()
+            logger.info("CatalogService background sync stopped.")
+
+    async def _background_loop(self):
+        """Periodic background loop running every CATALOG_SYNC_INTERVAL seconds."""
+        while self._is_running:
+            try:
+                await self.sync_matches()
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.warning("Unexpected error in background sync loop: %s", e)
+
+            try:
+                await asyncio.sleep(CATALOG_SYNC_INTERVAL)
+            except asyncio.CancelledError:
+                break
+
+    async def ensure_synced(self):
+        """Ensures that at least one sync has completed before serving requests."""
+        if not self._cached_matches:
+            await self.sync_matches()
+
+    async def get_catalog(
+        self,
+        catalog_id: Optional[str] = None,
+        genre_filter: Optional[str] = None,
+        search_query: Optional[str] = None,
+        skip: int = 0,
+        limit: int = 50,
+        user_tz: Optional[str] = None,
+        base_url: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Returns catalog items filtered by catalog, genre, and optional search query.
+        Served instantly from RAM cache with real-time countdown minutes and localization.
+        """
+        if not self._cached_matches:
+            await self.ensure_synced()
+
+        matches_to_use = self._cached_matches
+
+        # Classify and filter by catalog and genre
+        filtered: List[Dict[str, Any]] = []
+        target_genre = (genre_filter or "").strip()
+        is_all_genre = not target_genre or target_genre in (
+            "Tutti gli Eventi", "all", "All", "All Sports", "Tutti i Generi", "Tutti", "Tutti i generi"
+        )
+        filter_catalog = catalog_id if catalog_id and catalog_id not in ("streamsport_events", "all", "All") else None
+
+        def norm_g(s: str) -> str:
+            return s.lower().replace("&", "e").replace("  ", " ").strip()
+
+        norm_target = norm_g(target_genre)
+
+        for m in matches_to_use:
+            if not self.is_real_match(m):
+                continue
+            item_catalog = m.get("_catalog")
+            item_genre = m.get("_genre")
+            if not item_catalog or not item_genre:
+                item_catalog, item_genre = genre_classifier.classify(m)
+                m["_catalog"] = item_catalog
+                m["_genre"] = item_genre
+
+            if filter_catalog and item_catalog != filter_catalog:
+                continue
+
+            if not is_all_genre:
+                norm_item = norm_g(item_genre)
+                if norm_item != norm_target:
+                    # Backward compatibility for legacy ampersand genres or truncated queries
+                    if "americhe" in norm_target and "americhe" in norm_item:
+                        pass
+                    elif "nazionali" in norm_target and "nazionali" in norm_item:
+                        pass
+                    elif "europa" in norm_target and "europa" in norm_item:
+                        pass
+                    else:
+                        continue
+
+            # Search filter
+            if search_query:
+                q = search_query.lower()
+                m_title = (m.get("title") or "").lower()
+                teams = m.get("teams") or {}
+                home = (teams.get("home", {}).get("name") or "").lower() if isinstance(teams, dict) else ""
+                away = (teams.get("away", {}).get("name") or "").lower() if isinstance(teams, dict) else ""
+                if q not in m_title and q not in home and q not in away:
+                    continue
+
+            meta_item = self.build_meta_item(m, item_genre, user_tz=user_tz, base_url=base_url)
+            filtered.append(meta_item)
+
+        # 5. Sort matches chronologically:
+        # Priority 0: LIVE matches now (diff <= 0 and diff >= -240)
+        # Priority 1: IMMINENT & UPCOMING (diff > 0) -> SORTED CLOSEST FIRST (ASCENDING DATE)
+        # Priority 2: CONCLUDED REPLAYS (diff < -240) -> SORTED MOST RECENT FIRST
+        # Priority 3: No date
+        now_ms = time.time() * 1000
+
+        def sort_priority(item: Dict[str, Any]) -> Tuple[int, float]:
+            d = item.get("_date_ms") or 0
+            if not d:
+                return (3, 0.0)
+            diff = (d - now_ms) / 60000
+            if -240 <= diff <= 0:
+                return (0, -float(d))  # Live now: most recently started first
+            elif diff > 0:
+                return (1, float(d))   # Upcoming: CLOSEST TO START FIRST
+            else:
+                return (2, -float(d))  # Concluded: most recently concluded first
+
+        filtered.sort(key=sort_priority)
+
+        # 6. Pagination
+        return filtered[skip : skip + limit]
+
+    async def get_meta_detail(
+        self,
+        slug_id: str,
+        user_tz: Optional[str] = None,
+        base_url: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Retrieves full meta details for a single match by slug or ID.
+        """
+        clean_id = slug_id.split(":", 1)[1] if ":" in slug_id else slug_id
+
+        # 0. Check in-memory cached matches first (instant!)
+        match = None
+        if self._cached_matches:
+            for m in self._cached_matches:
+                if m.get("id") == clean_id or clean_id in str(m.get("id", "")):
+                    match = m
+                    break
+
+        # 1. Check Streamed
+        if not match:
+            match = await streamed_api.find_match_by_slug_and_id(clean_id)
+
+        # 2. Check DaddyLive
+        if not match:
+            dl_matches = await daddylive_api.get_matches()
+            for m in dl_matches:
+                if m.get("id") == clean_id or clean_id in str(m.get("id", "")):
+                    match = m
+                    break
+
+        # 3. Check SQLite DB
+        if not match:
+            match = db_service.get_match_by_id(clean_id)
+
+        if not match:
+            return None
+
+        genre = match.get("_genre")
+        if not genre:
+            _, genre = genre_classifier.classify(match)
+        meta = self.build_meta_item(match, genre, user_tz=user_tz, base_url=base_url)
+        meta["background"] = meta.get("poster")
+        return meta
+
+catalog_service = CatalogService()
