@@ -308,6 +308,9 @@ class StreamSportTestCase(unittest.TestCase):
         self.assertTrue(catalog_service.is_replay_eligible({"_catalog": "basket", "_genre": "Eurolega ed Eurocup", "title": "Olimpia Milano vs Virtus Bologna"}))
         self.assertTrue(catalog_service.is_replay_eligible({"_catalog": "combattimento", "_genre": "UFC", "title": "UFC 305: Main Card"}))
         self.assertTrue(catalog_service.is_replay_eligible({"_catalog": "football_americano", "_genre": "NFL", "title": "Chiefs vs 49ers"}))
+        # National teams and friendlies: ONLY eligible if Italy is playing
+        self.assertTrue(catalog_service.is_replay_eligible({"_catalog": "calcio_estero", "_genre": "Nazionali e Amichevoli", "title": "Italy vs France (UEFA Nations League)"}))
+        self.assertTrue(catalog_service.is_replay_eligible({"_catalog": "calcio_estero", "_genre": "Nazionali e Amichevoli", "title": "Germania vs Italia (Amichevole)"}))
 
     def test_is_replay_ineligible_blacklist(self):
         from app.services.catalog_service import catalog_service
@@ -319,6 +322,9 @@ class StreamSportTestCase(unittest.TestCase):
         self.assertFalse(catalog_service.is_replay_eligible({"_catalog": "hockey", "_genre": "NHL", "title": "Bruins vs Rangers"}))
         self.assertFalse(catalog_service.is_replay_eligible({"_catalog": "altri_sport", "_genre": "Darts", "title": "PDC Darts Championship"}))
         self.assertFalse(catalog_service.is_replay_eligible({"_catalog": "tennis", "_genre": "Challenger e Altri", "title": "Challenger Biella"}))
+        # National teams and friendlies without Italy are NOT eligible
+        self.assertFalse(catalog_service.is_replay_eligible({"_catalog": "calcio_estero", "_genre": "Nazionali e Amichevoli", "title": "Portugal vs Wales (UEFA Nations League)"}))
+        self.assertFalse(catalog_service.is_replay_eligible({"_catalog": "calcio_estero", "_genre": "Nazionali e Amichevoli", "title": "Brazil vs Argentina (Amichevole)"}))
 
 if __name__ == "__main__":
     unittest.main()

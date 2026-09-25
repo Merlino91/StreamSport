@@ -307,17 +307,29 @@ class CatalogService:
 
         # 1. Calcio Italiano: All top and professional divisions
         if cat == "calcio_italiano":
+            if genre == "Nazionali e Amichevoli":
+                teams = match.get("teams") or {}
+                home = (teams.get("home", {}).get("name") or "").lower() if isinstance(teams, dict) else ""
+                away = (teams.get("away", {}).get("name") or "").lower() if isinstance(teams, dict) else ""
+                combined_check = f"{title} {home} {away}"
+                return bool(re.search(r"\b(italia|italy|azzurr[ie])\b", combined_check))
             return True
 
         # 2. Calcio Internazionale: Top European leagues, UEFA cups, and National team tournaments
         if cat == "calcio_estero":
+            if genre == "Nazionali e Amichevoli":
+                teams = match.get("teams") or {}
+                home = (teams.get("home", {}).get("name") or "").lower() if isinstance(teams, dict) else ""
+                away = (teams.get("away", {}).get("name") or "").lower() if isinstance(teams, dict) else ""
+                combined_check = f"{title} {home} {away}"
+                return bool(re.search(r"\b(italia|italy|azzurr[ie])\b", combined_check))
+
             allowed_genres = {
                 "Champions League",
                 "Europa e Conference League",
                 "Premier League",
                 "La Liga",
                 "Bundesliga e Ligue 1",
-                "Nazionali e Amichevoli",
             }
             return genre in allowed_genres
 
