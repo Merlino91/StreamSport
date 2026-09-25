@@ -288,6 +288,74 @@ class CatalogService:
 
         return True
 
+    @staticmethod
+    def is_replay_eligible(match: Dict[str, Any]) -> bool:
+        """
+        Determines whether a concluded event should be kept in the replay/highlights catalog.
+        Strictly keeps only top-tier and Italian events where official highlights/replays exist.
+        Excludes all US college/NCAA sports, minor baseball/hockey, and niche sports.
+        """
+        cat = match.get("_catalog") or ""
+        genre = match.get("_genre") or ""
+        title = (match.get("title") or "").lower()
+
+        # Immediate rejection of all US college / NCAA sports across any category
+        if any(w in title for w in ("ncaa", "college", "cws", "cfb", "march madness")):
+            return False
+        if any(w in genre.lower() for w in ("ncaa", "college")):
+            return False
+
+        # 1. Calcio Italiano: All top and professional divisions
+        if cat == "calcio_italiano":
+            return True
+
+        # 2. Calcio Internazionale: Top European leagues, UEFA cups, and National team tournaments
+        if cat == "calcio_estero":
+            allowed_genres = {
+                "Champions League",
+                "Europa e Conference League",
+                "Premier League",
+                "La Liga",
+                "Bundesliga e Ligue 1",
+                "Nazionali e Amichevoli",
+            }
+            return genre in allowed_genres
+
+        # 3. Motori: Formula 1, MotoGP, Superbike
+        if cat == "motori":
+            if genre in ("Formula 1", "MotoGP e Moto2/3", "Superbike"):
+                return True
+            if any(w in title for w in ("formula 1", "f1", "motogp", "superbike")):
+                return True
+            return False
+
+        # 4. Tennis: Grand Slams, ATP Tour, WTA Tour, Davis Cup
+        if cat == "tennis":
+            return genre in ("Grandi Slam", "ATP", "WTA", "Coppa Davis e BJK Cup")
+
+        # 5. Basket: EuroLeague, NBA, Italian Serie A (LBA), FIBA tournaments
+        if cat == "basket":
+            allowed_genres = {
+                "NBA",
+                "Eurolega ed Eurocup",
+                "LBA Serie A",
+                "FIBA e Tornei Nazionali",
+            }
+            return genre in allowed_genres
+
+        # 6. Sport da Combattimento: UFC and major Boxing
+        if cat == "combattimento":
+            if genre in ("UFC", "Boxe"):
+                return True
+            return any(w in title for w in ("ufc", "boxing", "championship"))
+
+        # 7. Football Americano: NFL only
+        if cat == "football_americano":
+            return genre == "NFL" or "nfl" in title
+
+        # All other categories (baseball, hockey, altri_sport) have NO replays
+        return False
+
     async def sync_matches(self, force: bool = False) -> None:
         """
         Synchronizes matches from upstream providers and SQLite database in the background.
@@ -339,14 +407,37 @@ class CatalogService:
                         m["_catalog"] = cat
                         m["_genre"] = genre
 
+                # 6. Replay Whitelist Filter: purge and discard concluded matches that don't belong to top/Italian replay sports
+                now_ms = time.time() * 1000
+                ids_to_purge = []
+                filtered_matches = []
+                for m in all_matches:
+                    d = m.get("date") or 0
+                    is_concluded = (d > 0) and ((d - now_ms) / 60000 < -240)
+                    if is_concluded:
+                        if self.is_replay_eligible(m):
+                            filtered_matches.append(m)
+                        else:
+                            m_id = m.get("id")
+                            if m_id:
+                                ids_to_purge.append(m_id)
+                    else:
+                        filtered_matches.append(m)
+
+                if ids_to_purge:
+                    db_service.delete_matches_by_ids(ids_to_purge)
+                    logger.info("Purged %d concluded non-replay events (e.g. College, minor sports).", len(ids_to_purge))
+
+                all_matches = filtered_matches
+
                 self._cached_matches = all_matches
                 self._last_sync_time = time.time()
                 logger.info("Background sports sync complete. %d active events indexed in RAM.", len(all_matches))
 
-                # 6. Fallback poster enrichment from TheSportsDB (non-blocking, auto-retrying)
+                # 7. Fallback poster enrichment from TheSportsDB (non-blocking, auto-retrying)
                 thesportsdb_service.start_background_enrichment(all_matches)
 
-                # 7. Dynamic 16:9 poster generation for Tennis events lacking artwork
+                # 8. Dynamic 16:9 poster generation for Tennis events lacking artwork
                 tennis_poster_service.start_background_enrichment(all_matches)
             except Exception as e:
                 logger.error("Error during background sports schedule sync: %s", e, exc_info=True)
@@ -410,6 +501,7 @@ class CatalogService:
         matches_to_use = self._cached_matches
 
         # Classify and filter by catalog and genre
+        now_ms = time.time() * 1000
         filtered: List[Dict[str, Any]] = []
         target_genre = (genre_filter or "").strip()
         is_all_genre = not target_genre or target_genre in (
@@ -431,6 +523,12 @@ class CatalogService:
                 item_catalog, item_genre = genre_classifier.classify(m)
                 m["_catalog"] = item_catalog
                 m["_genre"] = item_genre
+
+            # Concluded match filter: only keep replay-eligible matches
+            d = m.get("date") or 0
+            if d > 0 and ((d - now_ms) / 60000 < -240):
+                if not self.is_replay_eligible(m):
+                    continue
 
             if filter_catalog and item_catalog != filter_catalog:
                 continue

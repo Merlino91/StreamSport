@@ -187,6 +187,31 @@ class ESPNService:
                                     item = self.parse_espn_event(ev, cat_id, genre, category)
                                     if item:
                                         parsed.append(item)
+
+                                # Query remaining scheduled dates in the next 7 days from the league calendar
+                                cal = data.get("leagues", [{}])[0].get("calendar", [])
+                                extra_dates = set()
+                                now_dt = datetime.datetime.now(datetime.timezone.utc)
+                                for c in cal:
+                                    if isinstance(c, str):
+                                        try:
+                                            dt = datetime.datetime.fromisoformat(c.replace("Z", "+00:00"))
+                                            if 0 <= (dt.date() - now_dt.date()).days <= 7:
+                                                extra_dates.add(dt.strftime("%Y%m%d"))
+                                        except Exception:
+                                            pass
+
+                                for ed in extra_dates:
+                                    try:
+                                        res2 = await client.get(f"{url}?dates={ed}", headers=headers)
+                                        if res2.status_code == 200:
+                                            for ev2 in res2.json().get("events", []):
+                                                item2 = self.parse_espn_event(ev2, cat_id, genre, category)
+                                                if item2:
+                                                    parsed.append(item2)
+                                    except Exception:
+                                        pass
+
                                 return parsed
                         except Exception as e:
                             logger.debug("Failed fetching ESPN %s/%s: %s", sport, league, e)
@@ -202,9 +227,18 @@ class ESPNService:
                     if isinstance(res, list):
                         all_events.extend(res)
 
-            self._cached_events = all_events
+            # Deduplicate by event ID
+            seen_ids = set()
+            deduped = []
+            for ev in all_events:
+                eid = ev.get("id")
+                if eid and eid not in seen_ids:
+                    seen_ids.add(eid)
+                    deduped.append(ev)
+
+            self._cached_events = deduped
             self._cache_time = now
-            logger.info("ESPN official sports registry loaded: %d events indexed.", len(all_events))
+            logger.info("ESPN official sports registry loaded: %d events indexed across the week.", len(deduped))
             return self._cached_events
 
     def reconcile_matches(

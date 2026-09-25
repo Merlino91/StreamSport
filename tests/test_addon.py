@@ -293,5 +293,32 @@ class StreamSportTestCase(unittest.TestCase):
         self.assertEqual(raw_streamed[1]["_catalog"], "calcio_italiano")
         self.assertEqual(raw_streamed[1]["_genre"], "Serie A")
 
+    def test_is_replay_eligible_whitelist(self):
+        from app.services.catalog_service import catalog_service
+
+        # Eligible events
+        self.assertTrue(catalog_service.is_replay_eligible({"_catalog": "calcio_italiano", "_genre": "Serie A", "title": "Inter vs Milan"}))
+        self.assertTrue(catalog_service.is_replay_eligible({"_catalog": "calcio_estero", "_genre": "Champions League", "title": "Real Madrid vs Manchester City"}))
+        self.assertTrue(catalog_service.is_replay_eligible({"_catalog": "calcio_estero", "_genre": "Premier League", "title": "Arsenal vs Chelsea"}))
+        self.assertTrue(catalog_service.is_replay_eligible({"_catalog": "motori", "_genre": "Formula 1", "title": "F1 Gran Premio d'Italia"}))
+        self.assertTrue(catalog_service.is_replay_eligible({"_catalog": "motori", "_genre": "MotoGP e Moto2/3", "title": "MotoGP Mugello"}))
+        self.assertTrue(catalog_service.is_replay_eligible({"_catalog": "tennis", "_genre": "ATP", "title": "Jannik Sinner vs Carlos Alcaraz"}))
+        self.assertTrue(catalog_service.is_replay_eligible({"_catalog": "tennis", "_genre": "Grandi Slam", "title": "Wimbledon Final"}))
+        self.assertTrue(catalog_service.is_replay_eligible({"_catalog": "basket", "_genre": "NBA", "title": "Boston Celtics vs LA Lakers"}))
+        self.assertTrue(catalog_service.is_replay_eligible({"_catalog": "basket", "_genre": "Eurolega ed Eurocup", "title": "Olimpia Milano vs Virtus Bologna"}))
+        self.assertTrue(catalog_service.is_replay_eligible({"_catalog": "combattimento", "_genre": "UFC", "title": "UFC 305: Main Card"}))
+        self.assertTrue(catalog_service.is_replay_eligible({"_catalog": "football_americano", "_genre": "NFL", "title": "Chiefs vs 49ers"}))
+
+    def test_is_replay_ineligible_blacklist(self):
+        from app.services.catalog_service import catalog_service
+
+        # Ineligible events (College / NCAA, minor sports, MLB, NHL)
+        self.assertFalse(catalog_service.is_replay_eligible({"_catalog": "basket", "_genre": "NCAA e College Basket", "title": "The Citadel vs UNC Greensboro"}))
+        self.assertFalse(catalog_service.is_replay_eligible({"_catalog": "calcio_estero", "_genre": "Americhe e Leghe Extra-UE", "title": "Women's College Soccer: Citadel vs UNC"}))
+        self.assertFalse(catalog_service.is_replay_eligible({"_catalog": "baseball", "_genre": "MLB", "title": "Yankees vs Red Sox"}))
+        self.assertFalse(catalog_service.is_replay_eligible({"_catalog": "hockey", "_genre": "NHL", "title": "Bruins vs Rangers"}))
+        self.assertFalse(catalog_service.is_replay_eligible({"_catalog": "altri_sport", "_genre": "Darts", "title": "PDC Darts Championship"}))
+        self.assertFalse(catalog_service.is_replay_eligible({"_catalog": "tennis", "_genre": "Challenger e Altri", "title": "Challenger Biella"}))
+
 if __name__ == "__main__":
     unittest.main()

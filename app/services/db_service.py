@@ -207,6 +207,25 @@ class DBService:
                 logger.info("Purged %d expired matches older than %d hours", deleted, max_age_hours)
             return deleted
 
+    def delete_matches_by_ids(self, match_ids: List[str]) -> int:
+        """Deletes specific matches by their IDs from the database."""
+        if not match_ids:
+            return 0
+        total_deleted = 0
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            # Batch in chunks of 500 to stay well under SQLite parameter limits
+            chunk_size = 500
+            for i in range(0, len(match_ids), chunk_size):
+                chunk = match_ids[i:i + chunk_size]
+                placeholders = ",".join("?" for _ in chunk)
+                cursor.execute(f"DELETE FROM matches WHERE id IN ({placeholders})", chunk)
+                total_deleted += cursor.rowcount
+            conn.commit()
+            if total_deleted > 0:
+                logger.info("Purged %d ineligible concluded matches from SQLite database.", total_deleted)
+            return total_deleted
+
     def _row_to_match(self, row: sqlite3.Row) -> Dict[str, Any]:
         sources = []
         try:
