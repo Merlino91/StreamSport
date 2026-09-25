@@ -20,9 +20,11 @@ from app.services.daddylive_api import daddylive_api
 from app.services.db_service import db_service
 from app.services.espn_service import espn_service
 from app.services.genre_classifier import genre_classifier
+from app.services.ocblacktop_service import ocblacktop_service
 from app.services.streamed_api import streamed_api
 from app.services.tennis_poster_service import tennis_poster_service
 from app.services.thesportsdb_service import thesportsdb_service
+
 
 logger = logging.getLogger("streamsport.catalog")
 
@@ -382,16 +384,18 @@ class CatalogService:
 
             logger.info("Starting background sports schedule sync...")
             try:
-                # 1. Fetch live matches from StreamedAPI, DaddyLiveAPI, and official ESPN registry concurrently
+                # 1. Fetch live matches from StreamedAPI, DaddyLiveAPI, and official ESPN & OCB registries concurrently
                 tasks = [
                     streamed_api.get_all_matches(force_refresh=True),
                     daddylive_api.get_matches(force=True),
                     espn_service.get_official_events(),
+                    ocblacktop_service.get_official_sessions(),
                 ]
                 results = await asyncio.gather(*tasks, return_exceptions=True)
                 streamed_raw = results[0] if isinstance(results[0], list) else []
                 daddylive_raw = results[1] if isinstance(results[1], list) else []
                 espn_events = results[2] if isinstance(results[2], list) else []
+                ocb_sessions = results[3] if isinstance(results[3], list) else []
 
                 streamed_matches = [m for m in streamed_raw if self.is_real_match(m)]
                 daddylive_matches = [m for m in daddylive_raw if self.is_real_match(m)]
@@ -414,12 +418,20 @@ class CatalogService:
                 if espn_events:
                     espn_service.reconcile_matches(all_matches, espn_events, self._clean_tokens, self._get_teams_key)
 
-                # 5. Pre-classify every match into catalog and genre (if not already officially classified by ESPN)
+                # 4b. Reconcile motorsport events against official Orange Cat Blacktop session registry
+                if ocb_sessions:
+                    ocblacktop_service.reconcile_matches(all_matches, ocb_sessions)
+
+                # 5. Pre-classify every match into catalog and genre (if not already officially classified by ESPN or OCB)
                 for m in all_matches:
-                    if not m.get("_espn_matched"):
+                    if not m.get("_espn_matched") and not m.get("_ocb_matched"):
                         cat, genre = genre_classifier.classify(m)
+                        # Strict rule: only officially verified events can enter Formula 1 or MotoGP e Superbike
+                        if cat == "motori" and genre in ("Formula 1", "MotoGP e Superbike"):
+                            genre = "NASCAR e IndyCar"
                         m["_catalog"] = cat
                         m["_genre"] = genre
+
 
                 # 6. Replay Whitelist Filter: purge and discard concluded matches that don't belong to top/Italian replay sports
                 now_ms = time.time() * 1000
@@ -535,8 +547,11 @@ class CatalogService:
             item_genre = m.get("_genre")
             if not item_catalog or not item_genre:
                 item_catalog, item_genre = genre_classifier.classify(m)
+                if item_catalog == "motori" and item_genre in ("Formula 1", "MotoGP e Superbike") and not m.get("_ocb_matched") and not m.get("_espn_matched"):
+                    item_genre = "NASCAR e IndyCar"
                 m["_catalog"] = item_catalog
                 m["_genre"] = item_genre
+
 
             # Concluded match filter: only keep replay-eligible matches
             d = m.get("date") or 0

@@ -294,7 +294,7 @@ class GenreClassifier:
         # 2. MOTORI (Dedicated Catalog: 'motori')
         # ------------------------------------------------------------------
         if cat in ("motor-sports", "motorsports", "motorsport") or any(k in title_lower for k in ("formula 1", "motogp", "nascar", "rally", "f1")):
-            if re.search(r"\b(f1|formula\s*1|formula\s*one|grand\s*prix|gp\b)", title_lower) and not re.search(r"\b(moto|rally|nascar)\b", title_lower):
+            if re.search(r"\b(f1|formula\s*1|formula\s*one)\b", title_lower) or "formula 1" in title_lower:
                 return "motori", "Formula 1"
             if re.search(r"\b(motogp|moto\s*gp|moto2|moto3|superbike|wsbk)\b", title_lower):
                 return "motori", "MotoGP e Superbike"
@@ -302,7 +302,10 @@ class GenreClassifier:
                 return "motori", "Rally e WRC"
             if re.search(r"\b(nascar|indycar|indy\s*500|supercars|dtm|le\s*mans)\b", title_lower):
                 return "motori", "NASCAR e IndyCar"
-            return "motori", "Formula 1"
+            # Default fallback for grassroots/unclassified motor racing (dirt tracks, local ovals)
+            return "motori", "NASCAR e IndyCar"
+
+
 
         # ------------------------------------------------------------------
         # 3. BASKET (Dedicated Catalog: 'basket')

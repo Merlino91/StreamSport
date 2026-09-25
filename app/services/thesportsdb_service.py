@@ -333,7 +333,7 @@ class TheSportsDBService:
             # Step 1: Immediate local cache resolution (0 network cost)
             # Filter strictly to active or upcoming team matches without posters.
             # Skip tennis (handled by tennis_poster_service) and individual sports without TSDB match thumbs.
-            non_tsdb_cats = {"tennis", "motor-sports", "golf", "darts", "cycling"}
+            non_tsdb_cats = {"tennis", "golf", "darts", "cycling"}
             missing = [
                 m for m in matches
                 if not m.get("poster")
@@ -348,6 +348,10 @@ class TheSportsDBService:
 
             for m in missing:
                 query_key, home, away = self.clean_event_query(m.get("title", ""), m.get("teams"))
+                if m.get("_tsdb_query"):
+                    query_key = m.get("_tsdb_query")
+                    home, away = "", ""
+
                 if not query_key or len(query_key) < 3:
                     continue
 
@@ -362,8 +366,8 @@ class TheSportsDBService:
                         # Skip re-querying known missing events for 12 hours
                         continue
 
-                # Skip generic non-match entries (e.g. channel roundups without teams or vs)
-                if not home and not away and " vs " not in (m.get("title") or "").lower():
+                # Skip generic non-match entries (e.g. channel roundups without teams or vs, unless it has a specific _tsdb_query)
+                if not m.get("_tsdb_query") and not home and not away and " vs " not in (m.get("title") or "").lower():
                     db_service.save_poster_to_cache(query_key, None, "not_found")
                     continue
 
@@ -384,6 +388,9 @@ class TheSportsDBService:
                     continue
 
                 query_key, home, away = self.clean_event_query(m.get("title", ""), m.get("teams"))
+                if m.get("_tsdb_query"):
+                    query_key = m.get("_tsdb_query")
+                    home, away = "", ""
 
                 # Check if we are currently rate-limited/blocked
                 now = time.time()
@@ -405,6 +412,7 @@ class TheSportsDBService:
                     date_ms=m.get("date"),
                     category=m.get("category"),
                 )
+
 
                 if retry_after:
                     # Rate limit encountered: add 10 seconds of safety margin to prevent early retries

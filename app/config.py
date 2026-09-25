@@ -1,11 +1,15 @@
 import os
 from pathlib import Path
+from dotenv import load_dotenv
 
 # Base Paths
 BASE_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = BASE_DIR.parent
 CONFIG_DIR = PROJECT_DIR / "config"
 TV_CHANNELS_FILE = CONFIG_DIR / "tv_channels.json"
+
+# Load local environment variables from .env
+load_dotenv(PROJECT_DIR / ".env")
 
 # Server configuration
 HOST = os.getenv("STREAMSPORT_HOST", "0.0.0.0")
@@ -18,6 +22,12 @@ STREAMED_FALLBACK_HOSTS = ["streamed.su", "streamed.pk"]
 STREAMED_DOH_RESOLVER = "https://cloudflare-dns.com/dns-query"
 STREAMED_CACHE_TTL = int(os.getenv("STREAMED_CACHE_TTL", "3600"))  # seconds (1 hour)
 CATALOG_SYNC_INTERVAL = int(os.getenv("CATALOG_SYNC_INTERVAL", "3600"))  # seconds (1 hour)
+
+# Motorsport Official Registry API (Orange Cat Blacktop)
+OCBLACKTOP_API_KEY = os.getenv("OCBLACKTOP_API_KEY", "")
+OCBLACKTOP_API_BASE = os.getenv("OCBLACKTOP_API_BASE", "https://api.ocblacktop.com/v1")
+
+
 
 # Addon Metadata
 ADDON_ID = "com.streamsport.addon"

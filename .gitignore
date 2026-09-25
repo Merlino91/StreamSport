@@ -25,3 +25,7 @@ data/posters/athletes/
 # Ensure static assets and backgrounds are tracked by Git
 !data/posters/backgrounds/
 !data/posters/assets/
+
+# Local backup files (never push to GitHub)
+*_backup.py
+
