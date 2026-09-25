@@ -275,7 +275,10 @@ async def unconfigured_catalog(
         user_tz="Europe/Rome",
         base_url=base_url,
     )
-    return JSONResponse(content={"metas": metas})
+    return JSONResponse(
+        content={"metas": metas},
+        headers={"Cache-Control": "public, max-age=180"},
+    )
 
 
 @app.get("/{config}/catalog/{type}/{id}.json")
@@ -298,7 +301,10 @@ async def configured_catalog(
         user_tz=tz,
         base_url=base_url,
     )
-    return JSONResponse(content={"metas": metas})
+    return JSONResponse(
+        content={"metas": metas},
+        headers={"Cache-Control": "public, max-age=180"},
+    )
 
 
 @app.get("/meta/{type}/{id}.json")
@@ -307,7 +313,10 @@ async def unconfigured_meta(request: Request, type: str, id: str):
     meta = await catalog_service.get_meta_detail(id, user_tz="Europe/Rome", base_url=base_url)
     if not meta:
         raise HTTPException(status_code=404, detail="Meta not found")
-    return JSONResponse(content={"meta": meta})
+    return JSONResponse(
+        content={"meta": meta},
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+    )
 
 
 @app.get("/{config}/meta/{type}/{id}.json")
@@ -317,7 +326,10 @@ async def configured_meta(request: Request, config: str, type: str, id: str):
     meta = await catalog_service.get_meta_detail(id, user_tz=tz, base_url=base_url)
     if not meta:
         raise HTTPException(status_code=404, detail="Meta not found")
-    return JSONResponse(content={"meta": meta})
+    return JSONResponse(
+        content={"meta": meta},
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+    )
 
 
 @app.get("/stream/{type}/{id}.json")
@@ -397,7 +409,7 @@ async def image_proxy(url: str):
     if not content:
         raise HTTPException(status_code=502, detail="Failed to proxy image")
 
-    return Response(content=content, media_type=content_type, headers={"Cache-Control": "public, max-age=7200"})
+    return Response(content=content, media_type=content_type, headers={"Cache-Control": "public, max-age=86400"})
 
 
 @app.get("/health")

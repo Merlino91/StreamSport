@@ -25,7 +25,7 @@ class DoHClient:
 
         # In-memory image cache: url -> (content_bytes, content_type, expire_timestamp)
         self._image_cache: Dict[str, Tuple[bytes, str, float]] = {}
-        self._image_cache_ttl = 7200  # 2 hours
+        self._image_cache_ttl = 86400  # 24 hours
         self._image_cache_max = 600
 
         # Shared singleton transport and client with expanded connection pooling

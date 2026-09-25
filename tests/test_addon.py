@@ -326,5 +326,26 @@ class StreamSportTestCase(unittest.TestCase):
         self.assertFalse(catalog_service.is_replay_eligible({"_catalog": "calcio_estero", "_genre": "Nazionali e Amichevoli", "title": "Portugal vs Wales (UEFA Nations League)"}))
         self.assertFalse(catalog_service.is_replay_eligible({"_catalog": "calcio_estero", "_genre": "Nazionali e Amichevoli", "title": "Brazil vs Argentina (Amichevole)"}))
 
+    def test_cache_control_headers(self):
+        # 1. Catalog list: 3 minutes (180s)
+        resp_cat = client.get("/catalog/Live Sports/calcio_italiano.json")
+        self.assertEqual(resp_cat.status_code, 200)
+        self.assertEqual(resp_cat.headers.get("cache-control"), "public, max-age=180")
+
+        # 2. Configured Catalog list: 3 minutes (180s)
+        dummy_cfg = base64.b64encode(b"https://ep.test|pass|Europe/Rome").decode("utf-8")
+        resp_cfg_cat = client.get(f"/{dummy_cfg}/catalog/Live Sports/calcio_estero.json")
+        self.assertEqual(resp_cfg_cat.status_code, 200)
+        self.assertEqual(resp_cfg_cat.headers.get("cache-control"), "public, max-age=180")
+
+        # 3. Meta detail: no-cache
+        # Test with existing match if available, or verify header on 200 response
+        from app.services.catalog_service import catalog_service
+        if catalog_service._cached_matches:
+            m_id = catalog_service._cached_matches[0]["id"]
+            resp_meta = client.get(f"/meta/Live Sports/{m_id}.json")
+            if resp_meta.status_code == 200:
+                self.assertEqual(resp_meta.headers.get("cache-control"), "no-cache, no-store, must-revalidate")
+
 if __name__ == "__main__":
     unittest.main()
