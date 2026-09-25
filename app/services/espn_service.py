@@ -52,9 +52,11 @@ ESPN_LEAGUE_MAP = [
     ("soccer", "fifa.world", "calcio_estero", "Nazionali e Amichevoli", "football"),
     ("soccer", "uefa.euro", "calcio_estero", "Nazionali e Amichevoli", "football"),
     ("soccer", "uefa.euroq", "calcio_estero", "Nazionali e Amichevoli", "football"),
-    ("soccer", "uefa.euro_u21", "calcio_estero", "Altri Campionati Europei", "football"),
-    ("soccer", "caf.nations_qual", "calcio_estero", "Americhe e Leghe Extra-UE", "football"),
-    ("soccer", "caf.nations", "calcio_estero", "Americhe e Leghe Extra-UE", "football"),
+    ("soccer", "caf.nations_qual", "calcio_estero", "Nazionali e Amichevoli", "football"),
+    ("soccer", "caf.nations", "calcio_estero", "Nazionali e Amichevoli", "football"),
+
+    # Nazionali Giovanili
+    ("soccer", "uefa.euro_u21", "calcio_estero", "Europei Under 21 e Nazionali Giovanili", "football"),
 
     # --- BASKET ---
     ("basketball", "nba", "basket", "NBA", "basketball"),
@@ -171,7 +173,7 @@ class ESPNService:
                 return self._cached_events
 
             logger.info("Fetching official sports events registry from ESPN Scoreboard API...")
-            sem = asyncio.Semaphore(15)
+            sem = asyncio.Semaphore(25)
             headers = {
                 "User-Agent": "curl/8.4.0",
                 "Accept": "*/*",
@@ -198,14 +200,20 @@ class ESPNService:
                                 cal = data.get("leagues", [{}])[0].get("calendar", [])
                                 extra_dates = set()
                                 now_dt = datetime.datetime.now(datetime.timezone.utc)
-                                for c in cal:
-                                    if isinstance(c, str):
+
+                                if cal and isinstance(cal[0], str):
+                                    for c in cal:
                                         try:
                                             dt = datetime.datetime.fromisoformat(c.replace("Z", "+00:00"))
                                             if 0 <= (dt.date() - now_dt.date()).days <= 7:
                                                 extra_dates.add(dt.strftime("%Y%m%d"))
                                         except Exception:
                                             pass
+                                else:
+                                    # Tournaments, cups or non-string calendars (e.g. UEFA, cups, playoffs):
+                                    # Scan the 7 upcoming days
+                                    for i in range(1, 8):
+                                        extra_dates.add((now_dt + datetime.timedelta(days=i)).strftime("%Y%m%d"))
 
                                 for ed in extra_dates:
                                     try:

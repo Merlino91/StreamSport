@@ -347,5 +347,26 @@ class StreamSportTestCase(unittest.TestCase):
             if resp_meta.status_code == 200:
                 self.assertEqual(resp_meta.headers.get("cache-control"), "no-cache, no-store, must-revalidate")
 
+    def test_extra_eu_confederations_and_youth_classification(self):
+        # 1. COSAFA Youth tournament must be Europei Under 21 e Nazionali Giovanili (NOT Champions League)
+        cat1, genre1 = genre_classifier.classify({"title": "Namibia U20 vs Mozambique U20 (COSAFA Champions League)", "category": "football"})
+        self.assertEqual(cat1, "calcio_estero")
+        self.assertEqual(genre1, "Europei Under 21 e Nazionali Giovanili")
+
+        # 2. African CAF Champions League must be Americhe e Leghe Extra-UE (NOT UEFA Champions League)
+        cat2, genre2 = genre_classifier.classify({"title": "Al Ahly vs Esperance (CAF Champions League)", "category": "football"})
+        self.assertEqual(cat2, "calcio_estero")
+        self.assertEqual(genre2, "Americhe e Leghe Extra-UE")
+
+        # 3. Asian AFC Champions League must be Americhe e Leghe Extra-UE
+        cat3, genre3 = genre_classifier.classify({"title": "Yokohama F. Marinos vs Al Ain (AFC Champions League)", "category": "football"})
+        self.assertEqual(cat3, "calcio_estero")
+        self.assertEqual(genre3, "Americhe e Leghe Extra-UE")
+
+        # 4. UEFA Champions League remains Champions League
+        cat4, genre4 = genre_classifier.classify({"title": "Real Madrid vs Manchester City (UEFA Champions League)", "category": "football"})
+        self.assertEqual(cat4, "calcio_estero")
+        self.assertEqual(genre4, "Champions League")
+
 if __name__ == "__main__":
     unittest.main()

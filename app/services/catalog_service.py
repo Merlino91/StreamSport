@@ -321,7 +321,7 @@ class CatalogService:
 
         # 2. Calcio Internazionale: Top European leagues, UEFA cups, and National team tournaments
         if cat == "calcio_estero":
-            if genre == "Nazionali e Amichevoli":
+            if genre in ("Nazionali e Amichevoli", "Europei Under 21 e Nazionali Giovanili"):
                 teams = match.get("teams") or {}
                 home = (teams.get("home", {}).get("name") or "").lower() if isinstance(teams, dict) else ""
                 away = (teams.get("away", {}).get("name") or "").lower() if isinstance(teams, dict) else ""

@@ -64,6 +64,7 @@ CATALOG_DEFINITIONS = [
             "Bundesliga e Ligue 1",
             "Altri Campionati Europei",
             "Americhe e Leghe Extra-UE",
+            "Europei Under 21 e Nazionali Giovanili",
             "Nazionali e Amichevoli",
         ],
     },
