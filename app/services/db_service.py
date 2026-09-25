@@ -136,6 +136,13 @@ class DBService:
             """, (query_key, thumb_url, status, now))
             conn.commit()
 
+    def clear_failed_poster_cache(self):
+        """Clears all 'not_found' entries from thesportsdb_cache so they can be re-evaluated."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM thesportsdb_cache WHERE status = 'not_found'")
+            conn.commit()
+
     def get_match_by_id(self, match_id: str) -> Optional[Dict[str, Any]]:
         """Retrieves a single match from the database by ID."""
         with self._get_connection() as conn:

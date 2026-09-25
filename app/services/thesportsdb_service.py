@@ -40,7 +40,7 @@ class TheSportsDBService:
     """
 
     def __init__(self):
-        self._min_interval: float = 2.5  # Seconds between requests to respect free tier (max 24 req/min)
+        self._min_interval: float = 1.2  # Throttling interval for web search and API requests
         self._blocked_until: float = 0.0
         self._rate_limit_reason: str = ""
         self._enrichment_task: Optional[asyncio.Task] = None
@@ -131,11 +131,80 @@ class TheSportsDBService:
         if not thumb:
             return None
         t = thumb.strip()
-        if "thesportsdb.com" in t and not (
-            t.endswith("/medium") or t.endswith("/small") or t.endswith("/tiny") or t.endswith("/preview")
-        ):
+        t = re.sub(r"/(?:small|tiny|preview)$", "", t)
+        if "thesportsdb.com" in t and not t.endswith("/medium"):
             t = f"{t}/medium"
         return t
+
+    def parse_browse_events(self, html: str) -> List[Dict[str, Any]]:
+        """Parses TheSportsDB web search results (/browse?s=...) into event dicts."""
+        if "<b>Events</b>" not in html:
+            return []
+
+        events_section = html.split("<b>Events</b>")[1].split("</div>")[0]
+        pattern = re.compile(
+            r"<a\s+href=['\"]/event/(\d+)-([^'\"]+)['\"][^>]*>"
+            r"(.*?)"
+            r"</a>\s*(?:\(([0-9]{4}-[0-9]{2}-[0-9]{2})\))?",
+            re.DOTALL | re.IGNORECASE,
+        )
+
+        results = []
+        for match in pattern.finditer(events_section):
+            ev_id = match.group(1)
+            slug = match.group(2)
+            inner_html = match.group(3)
+            date_str = match.group(4) or ""
+
+            thumb_match = re.search(r"src=['\"](https?://[^'\" >]+/thumb/[^'\" >]+)['\"]", inner_html)
+            thumb = thumb_match.group(1) if thumb_match else ""
+            if "no_thumb" in thumb:
+                thumb = ""
+
+            sport_match = re.search(r"/sports/([^/'\" >]+)\.svg", inner_html, re.I)
+            sport = sport_match.group(1).lower() if sport_match else ""
+
+            clean_name = re.sub(r"<[^>]+>", " ", inner_html).strip()
+            clean_name = re.sub(r"\s+", " ", clean_name)
+
+            results.append({
+                "idEvent": ev_id,
+                "strEvent": clean_name,
+                "strSport": sport,
+                "dateEvent": date_str,
+                "strThumb": thumb,
+            })
+        return results
+
+    def get_candidate_queries(self, query: str, home: Optional[str] = None, away: Optional[str] = None) -> List[str]:
+        """Generates fuzzy search variants (normalizations, inverted order, token simplifications)."""
+        candidates = [query]
+
+        # 1. Spelling normalization (e.g. Olympiakos -> Olympiacos)
+        if "olympiakos" in query.lower():
+            candidates.append(re.sub(r"\bolympiakos\b", "Olympiacos", query, flags=re.I))
+
+        # 2. Inverted Away vs Home
+        if home and away:
+            inv = f"{away} vs {home}"
+            if inv.lower() not in [c.lower() for c in candidates]:
+                candidates.append(inv)
+            if "olympiakos" in inv.lower():
+                candidates.append(re.sub(r"\bolympiakos\b", "Olympiacos", inv, flags=re.I))
+
+            # 3. Clean secondary suffixes from home / away (e.g. "Zalgiris Kaunas" -> "Zalgiris")
+            suffix_clean = lambda s: re.sub(r"\b(kaunas|bc|sk|fc|baskets|basket|club|baloncesto|basketbol)\b", "", s, flags=re.I).strip()
+            h_clean = suffix_clean(home)
+            a_clean = suffix_clean(away)
+            if (h_clean != home or a_clean != away) and h_clean and a_clean:
+                cleaned_q = f"{h_clean} vs {a_clean}"
+                if cleaned_q.lower() not in [c.lower() for c in candidates]:
+                    candidates.append(cleaned_q)
+                cleaned_inv = f"{a_clean} vs {h_clean}"
+                if cleaned_inv.lower() not in [c.lower() for c in candidates]:
+                    candidates.append(cleaned_inv)
+
+        return candidates
 
     async def search_event_thumb(
         self,
@@ -147,10 +216,8 @@ class TheSportsDBService:
     ) -> Tuple[Optional[str], Optional[int]]:
         """
         Queries TheSportsDB for an event matching the query or home/away teams.
-        Supports date refinement, sport suffix fallback (e.g. basketball), and inverted teams.
-        Returns:
-            (thumb_url, None) if successful or not found.
-            (None, retry_after_seconds) if rate limited or blocked.
+        Uses intelligent web search engine (/browse?s=...) with fuzzy matching,
+        falling back to JSON API (searchevents.php).
         """
         now = time.time()
         if now < self._blocked_until:
@@ -159,7 +226,7 @@ class TheSportsDBService:
 
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
-            "Accept": "application/json",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,application/json,*/*;q=0.8",
         }
 
         date_str = None
@@ -171,102 +238,70 @@ class TheSportsDBService:
             except Exception:
                 date_str = None
 
+        candidates = self.get_candidate_queries(query, home, away)
+
         async with httpx.AsyncClient(timeout=10.0) as client:
-            async def _do_query(search_query: str, query_date: Optional[str] = None) -> Tuple[Optional[List[dict]], Optional[int]]:
-                encoded = urllib.parse.quote(search_query)
-                url = f"{THESPORTSDB_API_BASE}/searchevents.php?e={encoded}"
-                if query_date:
-                    url += f"&d={query_date}"
+            # 1. Smart Web Browse Search (full-text search engine across all sports and team variants)
+            for cand in candidates:
+                encoded_browse = urllib.parse.quote_plus(cand)
+                browse_url = f"https://www.thesportsdb.com/browse?s={encoded_browse}"
                 try:
-                    res = await client.get(url, headers=headers)
+                    res = await client.get(browse_url, headers=headers)
                     if res.status_code == 429 or "retry" in res.text.lower() or "too many requests" in res.text.lower():
                         delay = self.parse_retry_delay(res.text, dict(res.headers))
                         return None, delay
                     if res.status_code == 200:
-                        data = res.json()
-                        return (data.get("event") or []), None
+                        text = res.text.strip()
+                        events = []
+                        if text.startswith("{") or text.startswith("["):
+                            try:
+                                data = res.json()
+                                events = data.get("event") or data.get("events") or []
+                            except Exception:
+                                pass
+                        elif "<b>Events</b>" in text:
+                            events = self.parse_browse_events(text)
+
+                        if events:
+                            # Filter by sport if category is provided
+                            if category:
+                                cat_k = category.lower()
+                                expected_sports = CATEGORY_SPORT_MAP.get(cat_k)
+                                if expected_sports:
+                                    events = [
+                                        ev for ev in events
+                                        if not ev.get("strSport") or ev.get("strSport").lower() in expected_sports
+                                    ]
+
+                            # Check date match
+                            best_thumb = None
+                            if date_str:
+                                for ev in events:
+                                    if ev.get("dateEvent") == date_str and ev.get("strThumb"):
+                                        best_thumb = ev.get("strThumb")
+                                        break
+                            if not best_thumb and date_str:
+                                try:
+                                    target_dt = datetime.datetime.strptime(date_str, "%Y-%m-%d").date()
+                                    for ev in events:
+                                        ev_d = ev.get("dateEvent")
+                                        if ev_d and ev.get("strThumb"):
+                                            ev_dt = datetime.datetime.strptime(ev_d, "%Y-%m-%d").date()
+                                            if abs((target_dt - ev_dt).days) <= 3:
+                                                best_thumb = ev.get("strThumb")
+                                                break
+                                except Exception:
+                                    pass
+                            if not best_thumb and not date_str:
+                                for ev in events:
+                                    if ev.get("strThumb"):
+                                        best_thumb = ev.get("strThumb")
+                                        break
+
+                            if best_thumb:
+                                return self.format_thumb_url(best_thumb), None
                 except Exception as e:
-                    logger.debug("Error querying TheSportsDB for '%s': %s", search_query, e)
-                return None, None
-
-            # 1. Primary search with date if available
-            events = None
-            if date_str:
-                events, retry = await _do_query(query, query_date=date_str)
-                if retry:
-                    return None, retry
-
-            # 2. If no events with date, search query without date
-            if not events:
-                if date_str:
-                    await asyncio.sleep(self._min_interval)
-                events, retry = await _do_query(query)
-                if retry:
-                    return None, retry
-
-            # 3. If still no events, try basketball smart fallback if applicable
-            cat_lower = (category or "").lower()
-            q_lower = query.lower()
-            if not events and home and away and ("basket" in cat_lower or "basket" in q_lower):
-                if "basketball" not in q_lower and "baloncesto" not in q_lower:
-                    await asyncio.sleep(self._min_interval)
-                    events, retry = await _do_query(f"{home} Basketball vs {away}")
-                    if retry:
-                        return None, retry
-                    if not events:
-                        await asyncio.sleep(self._min_interval)
-                        events, retry = await _do_query(f"{home} vs {away} Baloncesto")
-                        if retry:
-                            return None, retry
-
-            # 4. If still no events, try inverted Away vs Home
-            if not events and home and away and f"{away} vs {home}".lower() != query.lower():
-                await asyncio.sleep(self._min_interval)
-                events, retry = await _do_query(f"{away} vs {home}")
-                if retry:
-                    return None, retry
-
-            # Filter returned events by expected sport to prevent cross-sport pollution (e.g. basketball poster on soccer)
-            if events and category:
-                cat_k = category.lower()
-                expected_sports = CATEGORY_SPORT_MAP.get(cat_k)
-                if expected_sports:
-                    events = [
-                        ev for ev in events
-                        if (ev.get("strSport") or "").lower() in expected_sports
-                    ]
-
-            # Inspect returned events for strThumb
-            if events:
-                best_thumb = None
-                # 1. Exact date match
-                if date_str:
-                    for ev in events:
-                        if ev.get("dateEvent") == date_str and ev.get("strThumb"):
-                            best_thumb = ev.get("strThumb")
-                            break
-                # 2. Close date match (within 3 days of requested date)
-                if not best_thumb and date_str:
-                    try:
-                        target_dt = datetime.datetime.strptime(date_str, "%Y-%m-%d").date()
-                        for ev in events:
-                            ev_d = ev.get("dateEvent")
-                            if ev_d and ev.get("strThumb"):
-                                ev_dt = datetime.datetime.strptime(ev_d, "%Y-%m-%d").date()
-                                if abs((target_dt - ev_dt).days) <= 3:
-                                    best_thumb = ev.get("strThumb")
-                                    break
-                    except Exception:
-                        pass
-                # 3. Fallback only if NO date was provided at all
-                if not best_thumb and not date_str:
-                    for ev in events:
-                        thumb = ev.get("strThumb")
-                        if thumb and thumb.strip():
-                            best_thumb = thumb
-                            break
-                if best_thumb:
-                    return self.format_thumb_url(best_thumb), None
+                    logger.debug("Error in TheSportsDB web browse for '%s': %s", cand, e)
 
         return None, None
 
@@ -323,8 +358,8 @@ class TheSportsDBService:
                         m["poster"] = thumb_url
                         db_service.update_match_poster(m["id"], thumb_url)
                         continue
-                    elif status == "not_found" and (time.time() - checked_at < 3 * 86400):
-                        # Skip re-querying known missing events for 3 days
+                    elif status == "not_found" and (time.time() - checked_at < 12 * 3600):
+                        # Skip re-querying known missing events for 12 hours
                         continue
 
                 # Skip generic non-match entries (e.g. channel roundups without teams or vs)

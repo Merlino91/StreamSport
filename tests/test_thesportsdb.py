@@ -93,7 +93,7 @@ class TheSportsDBTestCase(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(
             thesportsdb_service.format_thumb_url("https://r2.thesportsdb.com/images/media/event/thumb/test.jpg/small"),
-            "https://r2.thesportsdb.com/images/media/event/thumb/test.jpg/small",
+            "https://r2.thesportsdb.com/images/media/event/thumb/test.jpg/medium",
         )
         self.assertIsNone(thesportsdb_service.format_thumb_url(None))
 
