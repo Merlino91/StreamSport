@@ -154,6 +154,44 @@ class StreamSportTestCase(unittest.TestCase):
         # Even with raw ampersand in old URL, it must not crash or be truncated to 0 matches
         self.assertTrue(len(data["metas"]) > 0)
 
+    def test_genre_isolation_nazionali_vs_u21(self):
+        """Verifies that senior Nations League / Nazionali matches NEVER bleed into Under 21 and vice-versa."""
+        import asyncio
+        from app.services.catalog_service import catalog_service
+
+        # Mock matches: 1 senior Nations League and 1 U21 match
+        mock_matches = [
+            {
+                "id": "nl-ice-est",
+                "title": "Iceland vs Estonia",
+                "date": int(time.time() * 1000) + 3600000,
+                "_catalog": "calcio_estero",
+                "_genre": "Nazionali e Amichevoli",
+                "sources": [{"id": "s1"}],
+            },
+            {
+                "id": "u21-ita-fra",
+                "title": "Italy U21 vs France U21",
+                "date": int(time.time() * 1000) + 3600000,
+                "_catalog": "calcio_estero",
+                "_genre": "Europei Under 21 e Nazionali Giovanili",
+                "sources": [{"id": "s2"}],
+            },
+        ]
+        catalog_service._cached_matches = mock_matches
+
+        # Query Nazionali e Amichevoli
+        res_senior = asyncio.run(catalog_service.get_catalog(catalog_id="calcio_estero", genre_filter="Nazionali e Amichevoli"))
+        senior_ids = [m["id"] for m in res_senior]
+        self.assertIn("streamsport:nl-ice-est", senior_ids)
+        self.assertNotIn("streamsport:u21-ita-fra", senior_ids)
+
+        # Query Europei Under 21 e Nazionali Giovanili
+        res_u21 = asyncio.run(catalog_service.get_catalog(catalog_id="calcio_estero", genre_filter="Europei Under 21 e Nazionali Giovanili"))
+        u21_ids = [m["id"] for m in res_u21]
+        self.assertIn("streamsport:u21-ita-fra", u21_ids)
+        self.assertNotIn("streamsport:nl-ice-est", u21_ids)
+
     def test_deduplication(self):
         from app.services.catalog_service import catalog_service
         list1 = [

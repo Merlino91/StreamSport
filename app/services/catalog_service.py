@@ -638,16 +638,9 @@ class CatalogService:
 
             if not is_all_genre:
                 norm_item = norm_g(item_genre)
-                if norm_item != norm_target:
-                    # Backward compatibility for legacy ampersand genres or truncated queries
-                    if "americhe" in norm_target and "americhe" in norm_item:
-                        pass
-                    elif "nazionali" in norm_target and "nazionali" in norm_item:
-                        pass
-                    elif "europa" in norm_target and "europa" in norm_item:
-                        pass
-                    else:
-                        continue
+                legacy_target = {"americhe e altre leghe": "americhe e leghe extra-ue"}.get(norm_target, norm_target)
+                if norm_item != norm_target and norm_item != legacy_target:
+                    continue
 
             # Search filter
             if search_query:
