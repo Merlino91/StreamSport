@@ -208,6 +208,9 @@ class StreamSportTestCase(unittest.TestCase):
             "Marist vs Presbyterian",
             "Sacred Heart vs New Hampshire",
             "Oberlin Yeomen vs Washington Bears",
+            "Kutztown Golden Bears vs Shepherd Rams",
+            "Hillsdale Chargers vs Thomas More Saints",
+            "Bowdoin Polar Bears vs Middlebury Panthers",
         ]
         for title in small_colleges:
             cat_af, genre_af = genre_classifier.classify({"title": title, "category": "american-football"})

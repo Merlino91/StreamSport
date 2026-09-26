@@ -413,17 +413,26 @@ class GenreClassifier:
             if re.search(r"\b(ufl|elf|european\s*league\s*of\s*football|stallions|renegades|defenders|roughnecks|showboats|brahmas|battlehawks)\b", title_lower):
                 return "football_americano", "CFL e Altre Leghe"
 
-            # 3. NFL (Strict: full franchise names, unambiguous NFL keywords, or exclusive nicknames without college indicators)
-            is_explicit_college = bool(re.search(r"\b(cfb|ncaa|college|univ|university|d-?iii|d-?ii|d-?1|fbs|fcs)\b", title_lower))
+            # 3. NFL (Strict: full franchise names, unambiguous NFL keywords, or ESPN certification)
+            m_id = str(match.get("id") or "").lower()
+            sources = match.get("sources") or []
+            source_ids = " ".join(str(s.get("id", "")) for s in sources if isinstance(s, dict)).lower()
+            comp_lower = comp.lower()
+
+            is_explicit_college = (
+                bool(re.search(r"\b(cfb|ncaa|college|univ|university|d-?iii|d-?ii|d-?1|fbs|fcs)\b", title_lower))
+                or bool(re.search(r"\b(cfb|ncaa|college)\b", comp_lower))
+                or "_cfb_" in m_id
+                or m_id.startswith("live_cfb_")
+                or "_cfb_" in source_ids
+            )
+
+            has_nfl_keyword = bool(re.search(r"\b(nfl|redzone|super\s*bowl|manningcast|pro\s*bowl)\b", title_lower)) or "nfl" in comp_lower
             nfl_full = any(team in title_lower for team in self.NFL_FULL_TEAMS)
-            nfl_exclusive = any(re.search(rf"\b{nick}\b", title_lower) for nick in self.NFL_EXCLUSIVE_NICKNAMES)
-            has_nfl_keyword = bool(re.search(r"\b(nfl|redzone|super\s*bowl|manningcast|pro\s*bowl)\b", title_lower))
-            nfl_nickname_matches = sum(1 for nick in self.NFL_TEAMS if re.search(rf"\b{nick}\b", title_lower))
+            is_espn_nfl = bool(match.get("_espn_matched") and match.get("_genre") == "NFL")
 
             if not is_explicit_college:
-                if has_nfl_keyword or nfl_full:
-                    return "football_americano", "NFL"
-                if (nfl_exclusive or nfl_nickname_matches >= 2) and not any(k in title_lower for k in self.NCAA_KEYWORDS):
+                if has_nfl_keyword or nfl_full or is_espn_nfl:
                     return "football_americano", "NFL"
 
             # 4. All other American Football (including Division I/II/III and regional colleges) belongs to NCAA!
