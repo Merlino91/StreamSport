@@ -530,12 +530,12 @@ class CatalogService:
                 all_db_matches = [m for m in db_service.get_active_matches() if self.is_real_match(m)]
                 all_matches = self.merge_and_deduplicate_by_silos(combined_fresh, all_db_matches) if all_db_matches else combined_fresh
 
-                # 3. Persist merged matches in DB for 72h retention
+                # 3. Persist merged matches in DB
                 if all_matches:
                     db_service.save_matches(all_matches)
 
-                # Purge matches older than 72h from DB
-                db_service.purge_expired_matches(72)
+                # Purge matches older than retention window from DB (6h if ENABLE_REPLAYS=False, 72h if True)
+                db_service.purge_expired_matches()
 
                 # 4. Reconcile against official ESPN registry (names, exact UTC time, official catalog/genre)
                 if espn_events:

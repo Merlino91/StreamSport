@@ -5,13 +5,17 @@ import json
 import logging
 import re
 import time
-import urllib.request
+import httpx
 from typing import Any, Dict, List, Optional, Tuple
 from zoneinfo import ZoneInfo
 
 logger = logging.getLogger("streamsport.daddylive")
 
-REMOTE_SCHEDULE_URL = "https://raw.githubusercontent.com/qwertyuiop8899/logo/main/daddyliveSchedule.json"
+REMOTE_SCHEDULE_URLS = [
+    "https://raw.githubusercontent.com/qwertyuiop8899/logo/main/daddyliveSchedule.json",
+    "https://cdn.jsdelivr.net/gh/qwertyuiop8899/logo@main/daddyliveSchedule.json",
+]
+REMOTE_SCHEDULE_URL = REMOTE_SCHEDULE_URLS[0]
 LOGO_BASE = "https://raw.githubusercontent.com/qwertyuiop8899/logo/main"
 
 _MONTHS = {
@@ -46,27 +50,23 @@ class DaddyLiveAPI:
         if now - self._last_domain_check < 21600 and self._active_domain:
             return self._active_domain
 
-        loop = asyncio.get_running_loop()
         try:
-            def _check():
-                headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36'}
-                status_url = "https://daddylive.pk/check_status.php?url=https://dlhd.pk"
-                req = urllib.request.Request(status_url, headers=headers)
-                with urllib.request.urlopen(req, timeout=5) as res:
-                    data = json.loads(res.read().decode('utf-8'))
+            headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36'}
+            status_url = "https://daddylive.pk/check_status.php?url=https://dlhd.pk"
+            async with httpx.AsyncClient(timeout=5.0, headers=headers, follow_redirects=True) as client:
+                res = await client.get(status_url)
+                if res.status_code == 200:
+                    data = res.json()
                     if data.get('status') == 'online':
                         final_url = data.get('final_url') or "https://dlive.sx"
                         from urllib.parse import urlparse
                         netloc = urlparse(final_url).netloc.lower()
                         if netloc:
-                            return netloc
-                return "dlive.sx"
-
-            domain = await loop.run_in_executor(None, _check)
-            if domain:
-                self._active_domain = domain
-                self._last_domain_check = now
-                logger.info("DaddyLive active domain confirmed: %s", self._active_domain)
+                            self._active_domain = netloc
+                            self._last_domain_check = now
+                            logger.info("DaddyLive active domain confirmed: %s", self._active_domain)
+                            return self._active_domain
+            return "dlive.sx"
         except Exception as e:
             logger.debug("DaddyLive domain check fallback: %s", e)
             self._last_domain_check = now
@@ -263,19 +263,29 @@ class DaddyLiveAPI:
         if not force and self._cache and (now - self._cache_time < self._cache_ttl):
             return self._cache
 
-        loop = asyncio.get_running_loop()
+        schedule_data = None
+        headers = {"User-Agent": "Mozilla/5.0"}
         try:
-            def _fetch():
-                req = urllib.request.Request(
-                    REMOTE_SCHEDULE_URL,
-                    headers={"User-Agent": "Mozilla/5.0"}
-                )
-                with urllib.request.urlopen(req, timeout=15) as res:
-                    return json.loads(res.read().decode("utf-8"))
-
-            schedule_data = await loop.run_in_executor(None, _fetch)
+            async with httpx.AsyncClient(timeout=15.0, headers=headers, follow_redirects=True) as client:
+                for url in REMOTE_SCHEDULE_URLS:
+                    for attempt in range(2):
+                        try:
+                            res = await client.get(url)
+                            if res.status_code == 200:
+                                schedule_data = res.json()
+                                break
+                        except Exception as e:
+                            if attempt == 0:
+                                await asyncio.sleep(1.0)
+                            else:
+                                logger.debug("DaddyLive schedule attempt failed for %s: %s", url, e)
+                    if schedule_data:
+                        break
         except Exception as e:
             logger.warning("Failed to fetch DaddyLive schedule: %s", e)
+
+        if not schedule_data:
+            logger.warning("Failed to fetch DaddyLive schedule from all mirror endpoints")
             return self._cache
 
         matches: List[Dict[str, Any]] = []

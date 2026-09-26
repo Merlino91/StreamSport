@@ -6,6 +6,8 @@ import sqlite3
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
+from app.config import ENABLE_REPLAYS
+
 logger = logging.getLogger("easysports.db")
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -185,10 +187,13 @@ class DBService:
         """Alias for upsert_matches."""
         self.upsert_matches(matches)
 
-    def get_active_matches(self, max_age_hours: int = 72) -> List[Dict[str, Any]]:
+    def get_active_matches(self, max_age_hours: Optional[int] = None) -> List[Dict[str, Any]]:
         """
         Returns all active matches: current/upcoming or concluded within max_age_hours.
+        Defaults to 72h if ENABLE_REPLAYS is True, else 6h.
         """
+        if max_age_hours is None:
+            max_age_hours = 72 if ENABLE_REPLAYS else 6
         now_ms = int(time.time() * 1000)
         cutoff_oldest = now_ms - (max_age_hours * 3600 * 1000)
         with self._get_connection() as conn:
@@ -201,8 +206,10 @@ class DBService:
             rows = cursor.fetchall()
             return [self._row_to_match(r) for r in rows]
 
-    def purge_expired_matches(self, max_age_hours: int = 72) -> int:
-        """Deletes matches concluded more than max_age_hours ago."""
+    def purge_expired_matches(self, max_age_hours: Optional[int] = None) -> int:
+        """Deletes matches concluded more than max_age_hours ago (defaults to 72h if ENABLE_REPLAYS else 6h)."""
+        if max_age_hours is None:
+            max_age_hours = 72 if ENABLE_REPLAYS else 6
         now_ms = int(time.time() * 1000)
         cutoff_oldest = now_ms - (max_age_hours * 3600 * 1000)
         with self._get_connection() as conn:
@@ -211,7 +218,7 @@ class DBService:
             deleted = cursor.rowcount
             conn.commit()
             if deleted > 0:
-                logger.info("Purged %d expired matches older than %d hours", deleted, max_age_hours)
+                logger.info("Purged %d expired matches older than %d hours (ENABLE_REPLAYS=%s)", deleted, max_age_hours, ENABLE_REPLAYS)
             return deleted
 
     def delete_matches_by_ids(self, match_ids: List[str]) -> int:
