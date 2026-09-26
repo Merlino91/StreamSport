@@ -236,13 +236,15 @@ class CatalogService:
             "type": CATALOG_TYPE,
             "name": clean_title if clean_title else title,
             "genres": [genre],
-            "poster": poster_url,
             "posterShape": "landscape",
             "description": description,
             "releaseInfo": formatted_date,
             "_date_ms": date_ms,
             "_live_window": live_window,
         }
+        if poster_url:
+            item["poster"] = poster_url
+            item["background"] = poster_url
         return item
 
     def _clean_tokens(self, title: str) -> str:
@@ -268,19 +270,41 @@ class CatalogService:
         return None
 
     @staticmethod
-    def is_silo_compatible(s1: str, s2: str) -> bool:
+    def get_canonical_silo(m: Dict[str, Any]) -> str:
+        """
+        Determines the canonical sport silo for a match, reconciling
+        inconsistencies between _silo tags and category strings.
+        """
+        s = (m.get("_silo") or "").lower().strip()
+        if s:
+            if s in ("soccer", "football"): return "football"
+            if s in ("basket", "basketball"): return "basketball"
+            if s in ("volleyball", "volley"): return "volley"
+            if s in ("motor-sports", "motorsport", "motori"): return "motor-sports"
+            if s in ("fight", "combattimento", "boxe", "boxing", "mma", "ufc"): return "fight"
+            return s
+        cat = (m.get("category") or "").lower().strip()
+        if cat in ("soccer", "football"): return "football"
+        if cat in ("basket", "basketball"): return "basketball"
+        if cat in ("volleyball", "volley"): return "volley"
+        if cat in ("motor-sports", "motorsport", "motori"): return "motor-sports"
+        if cat in ("fight", "combattimento", "boxe", "boxing", "mma", "ufc"): return "fight"
+        if cat in ("baseball",): return "baseball"
+        if cat in ("hockey",): return "hockey"
+        if cat in ("american-football", "nfl", "cfl"): return "american-football"
+        if cat in ("tennis",): return "tennis"
+        return "altri_sport"
+
+    @classmethod
+    def is_silo_compatible(cls, s1: str, s2: str) -> bool:
         """Determines if two sport silo names are compatible for deduplication."""
         s1 = (s1 or "").lower().strip()
         s2 = (s2 or "").lower().strip()
         if not s1 or not s2:
             return True
-        if s1 == s2:
-            return True
-        if {s1, s2} == {"football", "soccer"}:
-            return True
-        if {s1, s2} == {"motorsport", "motor-sports"}:
-            return True
-        return False
+        c1 = cls.get_canonical_silo({"_silo": s1, "category": s1})
+        c2 = cls.get_canonical_silo({"_silo": s2, "category": s2})
+        return c1 == c2
 
     def merge_and_deduplicate(
         self,
@@ -291,47 +315,57 @@ class CatalogService:
         merged_list: List[Dict[str, Any]] = [dict(m) for m in primary_matches]
 
         for m2 in secondary_matches:
+            m2_id = m2.get("id")
             m2_tokens = self._clean_tokens(m2.get("title", ""))
             m2_teams = self._get_teams_key(m2)
             m2_date = m2.get("date") or 0
             m2_words = set(m2_tokens.split()) if m2_tokens else set()
-            m2_silo = m2.get("_silo") or m2.get("category")
+            m2_silo = self.get_canonical_silo(m2)
 
             matched_idx = -1
-            for idx, existing in enumerate(merged_list):
-                # 0. Sport Silo Compatibility: NEVER merge events across different sport silos!
-                ex_silo = existing.get("_silo") or existing.get("category")
-                if ex_silo and m2_silo and not self.is_silo_compatible(ex_silo, m2_silo):
-                    continue
 
-                ex_teams = self._get_teams_key(existing)
-                ex_tokens = self._clean_tokens(existing.get("title", ""))
-                ex_date = existing.get("date") or 0
-                ex_words = set(ex_tokens.split()) if ex_tokens else set()
+            # 0. Direct ID matching: identical ID is 100% the exact same match!
+            if m2_id:
+                for idx, existing in enumerate(merged_list):
+                    if existing.get("id") == m2_id:
+                        matched_idx = idx
+                        break
 
-                # 1. Date Compatibility: Must coincide 100% (same time, or within 45m for broadcast pre-game offsets)
-                if ex_date and m2_date:
-                    if ex_date != m2_date and abs(ex_date - m2_date) > 45 * 60 * 1000:
+            # 1. Similarity and fuzzy matching within the same silo
+            if matched_idx < 0:
+                for idx, existing in enumerate(merged_list):
+                    ex_silo = self.get_canonical_silo(existing)
+                    if ex_silo != m2_silo:
                         continue
 
-                # 2. Title & Team Similarity (>= 70% similarity or subset with at least 2 common words)
-                is_same = False
-                if m2_teams and ex_teams and m2_teams == ex_teams:
-                    is_same = True
-                elif m2_tokens and ex_tokens:
-                    if m2_tokens == ex_tokens:
-                        is_same = True
-                    else:
-                        common = m2_words & ex_words
-                        union = m2_words | ex_words
-                        sim = len(common) / len(union) if union else 0.0
-                        is_subset = len(common) >= 2 and (m2_words.issubset(ex_words) or ex_words.issubset(m2_words))
-                        if sim >= 0.70 or is_subset:
-                            is_same = True
+                    ex_teams = self._get_teams_key(existing)
+                    ex_tokens = self._clean_tokens(existing.get("title", ""))
+                    ex_date = existing.get("date") or 0
+                    ex_words = set(ex_tokens.split()) if ex_tokens else set()
 
-                if is_same:
-                    matched_idx = idx
-                    break
+                    # Date Compatibility: Must coincide 100% (same time, or within 45m for broadcast pre-game offsets)
+                    if ex_date and m2_date:
+                        if ex_date != m2_date and abs(ex_date - m2_date) > 45 * 60 * 1000:
+                            continue
+
+                    # Title & Team Similarity (>= 70% similarity or subset with at least 2 common words)
+                    is_same = False
+                    if m2_teams and ex_teams and m2_teams == ex_teams:
+                        is_same = True
+                    elif m2_tokens and ex_tokens:
+                        if m2_tokens == ex_tokens:
+                            is_same = True
+                        else:
+                            common = m2_words & ex_words
+                            union = m2_words | ex_words
+                            sim = len(common) / len(union) if union else 0.0
+                            is_subset = len(common) >= 2 and (m2_words.issubset(ex_words) or ex_words.issubset(m2_words))
+                            if sim >= 0.70 or is_subset:
+                                is_same = True
+
+                    if is_same:
+                        matched_idx = idx
+                        break
 
             if matched_idx >= 0:
                 existing = merged_list[matched_idx]
@@ -351,6 +385,8 @@ class CatalogService:
                     existing["competition"] = m2["competition"]
                 if not existing.get("_competition") and m2.get("_competition"):
                     existing["_competition"] = m2["_competition"]
+                if not existing.get("_silo") and m2.get("_silo"):
+                    existing["_silo"] = m2["_silo"]
             else:
                 merged_list.append(dict(m2))
 
@@ -370,15 +406,11 @@ class CatalogService:
         s_by_silo = defaultdict(list)
 
         for m in primary_matches:
-            silo = m.get("_silo") or m.get("category") or "altri_sport"
-            if silo == "soccer":
-                silo = "football"
+            silo = self.get_canonical_silo(m)
             p_by_silo[silo].append(m)
 
         for m in secondary_matches:
-            silo = m.get("_silo") or m.get("category") or "altri_sport"
-            if silo == "soccer":
-                silo = "football"
+            silo = self.get_canonical_silo(m)
             s_by_silo[silo].append(m)
 
         all_silos = set(p_by_silo.keys()) | set(s_by_silo.keys())
@@ -737,8 +769,24 @@ class CatalogService:
 
         filtered.sort(key=sort_priority)
 
-        # 6. Pagination
-        return filtered[skip : skip + limit]
+        # 6. Safety Deduplication: Guarantee 100% unique IDs for Android Jetpack Compose
+        seen_ids = set()
+        unique_filtered = []
+        for meta_item in filtered:
+            mid = meta_item.get("id")
+            if mid and mid in seen_ids:
+                continue
+            seen_ids.add(mid)
+            unique_filtered.append(meta_item)
+        filtered = unique_filtered
+
+        # 7. Pagination & Schema Cleanup
+        page = filtered[skip : skip + limit]
+        for item in page:
+            item.pop("_date_ms", None)
+            item.pop("_live_window", None)
+
+        return page
 
     async def get_meta_detail(
         self,
