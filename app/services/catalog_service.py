@@ -13,6 +13,7 @@ from app.config import (
     CATALOG_NAME,
     CATALOG_SYNC_INTERVAL,
     CATALOG_TYPE,
+    ENABLE_REPLAYS,
     SPORT_GENRES,
     STREAMED_API_HOST,
 )
@@ -116,6 +117,66 @@ class CatalogService:
 
         return clean_title, clean_comp
 
+    @staticmethod
+    def get_live_window_minutes(match: Dict[str, Any]) -> int:
+        """
+        Returns the duration in minutes an event remains 'LIVE ORA' after its kickoff/start time.
+        Tailored to each sport's real-world duration.
+        Falls back to 240 minutes (4 hours) for unrecognized or uncategorized events.
+        """
+        cat = (match.get("category") or match.get("_catalog") or "").lower()
+        title = (match.get("title") or "").lower()
+        genre = (match.get("_genre") or "").lower()
+
+        # 1. Tennis: marathons up to 5 hours (especially Grand Slams)
+        if "tennis" in cat or "tennis" in genre:
+            return 300  # 5 hours
+
+        # 2. Football Americano (NFL / NCAA / CFL / UFL) - must precede regular football/soccer!
+        if any(k in cat for k in ("american-football", "football_americano", "nfl", "cfl", "ufl")) or "nfl" in genre:
+            return 230  # 3h 50m
+
+        # 3. Calcio / Football (Soccer): 150m for regular league matches, 170m for knockout cup competitions
+        if any(k in cat for k in ("football", "soccer", "calcio")) or "calcio" in genre:
+            if any(k in title for k in ("cup", "coppa", "champions", "europa", "conference", "trophy", "pokal", "del rey", "supercup", "supercoppa")):
+                return 170  # ~2h 50m
+            return 150  # 2h 30m
+
+        # 4. Basket: 150m (Eurolega / Serie A / NBA)
+        if "basket" in cat or "basket" in genre:
+            return 150  # 2h 30m
+
+        # 5. Motori: sprints/practice/qualifying vs full races
+        if any(k in cat for k in ("motor", "racing", "motori")) or "motori" in genre:
+            if any(k in title for k in ("practice", "fp1", "fp2", "fp3", "qualif", "sprint", "warm up", "warm-up")):
+                return 80  # 1h 20m
+            if any(k in title for k in ("nascar", "indycar", "wec", "endurance", "24h")):
+                return 210  # 3h 30m
+            return 160  # ~2h 40m for F1 / MotoGP Grand Prix
+
+        # 6. Baseball (MLB)
+        if "baseball" in cat or "baseball" in genre:
+            return 200  # 3h 20m
+
+        # 7. Hockey (NHL)
+        if "hockey" in cat or "hockey" in genre:
+            return 170  # 2h 50m
+
+        # 8. Sport da combattimento (UFC / Boxe / MMA)
+        if any(k in cat for k in ("fight", "combattimento", "mma", "ufc", "boxing")):
+            return 240  # 4 hours (covers 5-fight main cards)
+
+        # 9. Volley / Pallavolo
+        if any(k in cat for k in ("volley", "pallavolo")):
+            return 150  # 2h 30m
+
+        # 10. Rugby
+        if "rugby" in cat or "rugby" in genre:
+            return 140  # 2h 20m
+
+        # Fallback for uncategorized or any other sport: 240 minutes (4 hours)
+        return 240
+
     def build_meta_item(
         self,
         match: Dict[str, Any],
@@ -141,8 +202,9 @@ class CatalogService:
         else:
             formatted_date = self.format_event_date(date_ms, user_tz)
             diff_mins = int((date_ms - now_ms) / 60000)
+            live_window = self.get_live_window_minutes(match)
 
-            if diff_mins < -240:
+            if diff_mins < -live_window:
                 status_text = "🏁 Conclusa • Replay e Sintesi"
             elif diff_mins <= 0:
                 status_text = "🔴 LIVE ORA"
@@ -177,6 +239,7 @@ class CatalogService:
             "description": description,
             "releaseInfo": formatted_date,
             "_date_ms": date_ms,
+            "_live_window": live_window,
         }
         return item
 
@@ -433,15 +496,22 @@ class CatalogService:
                         m["_genre"] = genre
 
 
-                # 6. Replay Whitelist Filter: purge and discard concluded matches that don't belong to top/Italian replay sports
+                # 6. Replay Whitelist & Concluded Purge Filter:
+                # If ENABLE_REPLAYS=False, purge ALL concluded matches immediately from DB and memory!
+                # If ENABLE_REPLAYS=True, purge only non-eligible replays (retain Serie A, F1, NBA, etc. for 72h).
                 now_ms = time.time() * 1000
                 ids_to_purge = []
                 filtered_matches = []
                 for m in all_matches:
                     d = m.get("date") or 0
-                    is_concluded = (d > 0) and ((d - now_ms) / 60000 < -240)
+                    live_window = self.get_live_window_minutes(m)
+                    is_concluded = (d > 0) and ((d - now_ms) / 60000 < -live_window)
                     if is_concluded:
-                        if self.is_replay_eligible(m):
+                        if not ENABLE_REPLAYS:
+                            m_id = m.get("id")
+                            if m_id:
+                                ids_to_purge.append(m_id)
+                        elif self.is_replay_eligible(m):
                             filtered_matches.append(m)
                         else:
                             m_id = m.get("id")
@@ -452,7 +522,7 @@ class CatalogService:
 
                 if ids_to_purge:
                     db_service.delete_matches_by_ids(ids_to_purge)
-                    logger.info("Purged %d concluded non-replay events (e.g. College, minor sports).", len(ids_to_purge))
+                    logger.info("Purged %d concluded events from SQLite (ENABLE_REPLAYS=%s).", len(ids_to_purge), ENABLE_REPLAYS)
 
                 all_matches = filtered_matches
 
@@ -553,9 +623,13 @@ class CatalogService:
                 m["_genre"] = item_genre
 
 
-            # Concluded match filter: only keep replay-eligible matches
+            # Concluded match filter: only keep replay-eligible matches (or discard if replays disabled)
             d = m.get("date") or 0
-            if d > 0 and ((d - now_ms) / 60000 < -240):
+            live_window = self.get_live_window_minutes(m)
+            is_concluded = (d > 0) and ((d - now_ms) / 60000 < -live_window)
+            if is_concluded:
+                if not ENABLE_REPLAYS:
+                    continue
                 if not self.is_replay_eligible(m):
                     continue
 
@@ -589,9 +663,9 @@ class CatalogService:
             filtered.append(meta_item)
 
         # 5. Sort matches chronologically:
-        # Priority 0: LIVE matches now (diff <= 0 and diff >= -240)
+        # Priority 0: LIVE matches now (diff <= 0 and diff >= -live_window)
         # Priority 1: IMMINENT & UPCOMING (diff > 0) -> SORTED CLOSEST FIRST (ASCENDING DATE)
-        # Priority 2: CONCLUDED REPLAYS (diff < -240) -> SORTED MOST RECENT FIRST
+        # Priority 2: CONCLUDED REPLAYS (diff < -live_window) -> SORTED MOST RECENT FIRST
         # Priority 3: No date
         now_ms = time.time() * 1000
 
@@ -600,7 +674,8 @@ class CatalogService:
             if not d:
                 return (3, 0.0)
             diff = (d - now_ms) / 60000
-            if -240 <= diff <= 0:
+            live_window = item.get("_live_window", 240)
+            if -live_window <= diff <= 0:
                 return (0, -float(d))  # Live now: most recently started first
             elif diff > 0:
                 return (1, float(d))   # Upcoming: CLOSEST TO START FIRST

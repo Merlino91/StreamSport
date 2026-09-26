@@ -4,6 +4,8 @@ import time
 import urllib.parse
 from typing import Any, Dict, List, Optional
 
+from app.config import ENABLE_REPLAYS
+from app.services.catalog_service import CatalogService
 from app.services.daddylive_api import daddylive_api
 from app.services.dailymotion_service import dailymotion_service
 from app.services.db_service import db_service
@@ -163,20 +165,21 @@ class StreamService:
                 "url": "",
                 "behaviorHints": {"notWebReady": True},
             }]
-        elif diff_mins >= -240:
-            return [{
-                "name": "🔴 Partita in corso (Nessun flusso)",
-                "title": f"Iniziata alle {start_time_str} • Nessuna sorgente attiva al momento",
-                "url": "",
-                "behaviorHints": {"notWebReady": True},
-            }]
-        else:
-            return [{
-                "name": "🏁 Evento Terminato",
-                "title": f"Questa partita si è conclusa (iniziata il {start_time_str})",
-                "url": "",
-                "behaviorHints": {"notWebReady": True},
-            }]
+            live_window = CatalogService.get_live_window_minutes(match) if match else 240
+            if diff_mins >= -live_window:
+                return [{
+                    "name": "🔴 Partita in corso (Nessun flusso)",
+                    "title": f"Iniziata alle {start_time_str} • Nessuna sorgente attiva al momento",
+                    "url": "",
+                    "behaviorHints": {"notWebReady": True},
+                }]
+            else:
+                return [{
+                    "name": "🏁 Evento Terminato",
+                    "title": f"Questa partita si è conclusa (iniziata il {start_time_str})",
+                    "url": "",
+                    "behaviorHints": {"notWebReady": True},
+                }]
 
     async def get_streams_for_event(
         self,
@@ -237,18 +240,27 @@ class StreamService:
         if not match:
             return self.generate_status_card(None, user_tz)
 
-        # Time-window check: 20 min before start, 4 hours (240 min) after start
+        # Time-window check: 20 min before start, live_window minutes after start
         date_ms = match.get("date", 0)
         if date_ms:
             now_ms = time.time() * 1000
             diff_mins = int((date_ms - now_ms) / 60000)
+            live_window = CatalogService.get_live_window_minutes(match)
 
             # Pre-match: more than 20 minutes before start -> show countdown card
             if diff_mins > 20:
                 return self.generate_status_card(match, user_tz)
 
-            # Concluded match: more than 4 hours after start -> highlights & full match replays
-            if diff_mins < -240:
+            # Concluded match: more than live_window minutes after start -> highlights & full match replays
+            if diff_mins < -live_window:
+                if not ENABLE_REPLAYS:
+                    return [{
+                        "name": "🏁 Evento Concluso",
+                        "title": "Questo evento si è concluso. Lo streaming in diretta è terminato.",
+                        "url": "",
+                        "behaviorHints": {"notWebReady": True},
+                    }]
+
                 title = match.get("title", "")
                 category = match.get("category", "")
                 recap_tasks = [

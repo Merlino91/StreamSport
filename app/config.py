@@ -27,6 +27,9 @@ CATALOG_SYNC_INTERVAL = int(os.getenv("CATALOG_SYNC_INTERVAL", "3600"))  # secon
 OCBLACKTOP_API_KEY = os.getenv("OCBLACKTOP_API_KEY", "")
 OCBLACKTOP_API_BASE = os.getenv("OCBLACKTOP_API_BASE", "https://api.ocblacktop.com/v1")
 
+# Concluded Events, Highlights and Replays Toggle
+ENABLE_REPLAYS = os.getenv("ENABLE_REPLAYS", "false").lower() in ("true", "1", "yes")
+
 
 
 # Addon Metadata

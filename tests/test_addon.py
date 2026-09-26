@@ -368,5 +368,51 @@ class StreamSportTestCase(unittest.TestCase):
         self.assertEqual(cat4, "calcio_estero")
         self.assertEqual(genre4, "Champions League")
 
+    def test_dynamic_live_window_and_replay_toggle(self):
+        import asyncio
+        import time
+        from app.services.catalog_service import CatalogService, catalog_service
+        from app.services.stream_service import stream_service
+
+        # 1. Sport-specific dynamic live windows
+        # Tennis: 300 minutes (5 hours)
+        self.assertEqual(CatalogService.get_live_window_minutes({"category": "tennis", "title": "Sinner vs Alcaraz"}), 300)
+        # Football regular: 150 minutes
+        self.assertEqual(CatalogService.get_live_window_minutes({"category": "football", "title": "Inter vs Milan"}), 150)
+        # Football cup: 170 minutes
+        self.assertEqual(CatalogService.get_live_window_minutes({"category": "football", "title": "Real Madrid vs Man City (Champions League)"}), 170)
+        self.assertEqual(CatalogService.get_live_window_minutes({"category": "football", "title": "Juventus vs Lazio (Coppa Italia)"}), 170)
+        # Basket: 150 minutes
+        self.assertEqual(CatalogService.get_live_window_minutes({"category": "basketball", "title": "Olimpia Milano vs Virtus Bologna"}), 150)
+        # Motori GP: 160 minutes
+        self.assertEqual(CatalogService.get_live_window_minutes({"category": "motor-sports", "title": "Gran Premio d'Italia Gara"}), 160)
+        # Motori Practice / Qualifying: 80 minutes
+        self.assertEqual(CatalogService.get_live_window_minutes({"category": "motor-sports", "title": "Gran Premio d'Italia Qualifiche"}), 80)
+        # NFL: 230 minutes
+        self.assertEqual(CatalogService.get_live_window_minutes({"category": "american-football", "title": "Kansas City Chiefs vs 49ers"}), 230)
+        # Baseball: 200 minutes
+        self.assertEqual(CatalogService.get_live_window_minutes({"category": "baseball", "title": "New York Yankees vs Boston Red Sox"}), 200)
+        # Hockey: 170 minutes
+        self.assertEqual(CatalogService.get_live_window_minutes({"category": "hockey", "title": "New York Rangers vs Boston Bruins"}), 170)
+        # UFC: 240 minutes
+        self.assertEqual(CatalogService.get_live_window_minutes({"category": "fight", "title": "UFC 310: Jones vs Miocic"}), 240)
+        # Unrecognized / uncategorized fallback: exactly 240 minutes (4 hours)
+        self.assertEqual(CatalogService.get_live_window_minutes({"category": "unknown_sport_xyz", "title": "Team X vs Team Y"}), 240)
+
+        # 2. Concluded streams behavior when ENABLE_REPLAYS=False
+        past_date_ms = (time.time() - (4 * 3600)) * 1000  # 4 hours ago
+        concluded_match = {
+            "id": "test_concluded_match",
+            "title": "Inter vs Milan",
+            "category": "football",
+            "date": past_date_ms,
+            "sources": []
+        }
+        catalog_service._cached_matches.append(concluded_match)
+        streams = asyncio.run(stream_service.get_streams_for_event(concluded_match["id"], "https://ep.example.com", user_tz="Europe/Rome"))
+        # When ENABLE_REPLAYS is False, stream service immediately returns Evento Concluso without calling highlights
+        self.assertTrue(len(streams) >= 1)
+        self.assertIn("Concluso", streams[0].get("name", ""))
+
 if __name__ == "__main__":
     unittest.main()
