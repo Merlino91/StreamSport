@@ -243,6 +243,20 @@ class StreamSportTestCase(unittest.TestCase):
         self.assertEqual(len(nbl_merged[0]["sources"]), 2)
         self.assertEqual(nbl_merged[0]["poster"], "http://img/nbl.png")
 
+    def test_silo_deduplication_isolation(self):
+        """Verifies that events with identical tokens from different sport silos NEVER merge together."""
+        from app.services.catalog_service import catalog_service
+
+        m_foot = {"id": "f1", "title": "Bears vs Lions", "date": 1780000000000, "category": "football", "_silo": "football", "sources": [{"id": "s_f"}]}
+        m_af = {"id": "af1", "title": "Bears vs Lions", "date": 1780000000000, "category": "american-football", "_silo": "american-football", "sources": [{"id": "s_af"}]}
+
+        # Merging across different silos must preserve both distinct events!
+        merged = catalog_service.merge_and_deduplicate_by_silos([m_foot], [m_af])
+        self.assertEqual(len(merged), 2)
+        silos = [m.get("_silo") for m in merged]
+        self.assertIn("football", silos)
+        self.assertIn("american-football", silos)
+
     def test_title_and_description_formatting(self):
         from app.services.catalog_service import catalog_service
         now_ms = int(time.time() * 1000)

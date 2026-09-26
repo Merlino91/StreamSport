@@ -6,7 +6,7 @@ import logging
 import re
 import time
 import urllib.request
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from zoneinfo import ZoneInfo
 
 logger = logging.getLogger("streamsport.daddylive")
@@ -179,6 +179,85 @@ class DaddyLiveAPI:
         t = re.sub(r"^[\s\U0001F300-\U0001F5FF\U0001F680-\U0001F6FF\U00002600-\U000027BF]+", "", t).strip()
         return re.sub(r"\s+", " ", t).strip()
 
+    DADDYLIVE_EXCLUDED_CATEGORIES = (
+        "big brother", "tv show", "reality", "movies", "horse racing", "upcoming events",
+        "college soccer", "women's college soccer",
+        "women's college volleyball", "women's college ice hockey",
+        "minor league baseball"
+    )
+
+    @classmethod
+    def map_daddylive_category_to_silo(cls, cat_raw: str, clean_title: str) -> Optional[Tuple[str, str]]:
+        """
+        Maps a DaddyLive raw category string and title to (silo_id, sport_category).
+        Returns None if the category is excluded.
+        """
+        cat_lower = (cat_raw or "").lower()
+        if any(k in cat_lower for k in cls.DADDYLIVE_EXCLUDED_CATEGORIES):
+            return None
+
+        title_lower = (clean_title or "").lower()
+
+        # 1. Football (Soccer)
+        if any(k in cat_lower for k in ("soccer", "league one", "league two", "national league", "mls", "usl")):
+            return "football", "football"
+        if "football" in cat_lower and "american" not in cat_lower and "cfl" not in cat_lower and "college" not in cat_lower:
+            return "football", "football"
+
+        # 2. Tennis
+        if "tennis" in cat_lower:
+            return "tennis", "tennis"
+
+        # 3. Motorsport
+        if "motor" in cat_lower or "formula" in cat_lower:
+            return "motor-sports", "motor-sports"
+
+        # 4. Basketball
+        if "basket" in cat_lower or "nba" in cat_lower:
+            return "basketball", "basketball"
+
+        # 5. Combat / Fight
+        if any(k in cat_lower for k in ("boxing", "mma", "ufc", "wrestling")):
+            return "fight", "fight"
+
+        # 6. Baseball
+        if "baseball" in cat_lower or "mlb" in cat_lower:
+            return "baseball", "baseball"
+
+        # 7. American Football (NFL, CFL, UFL & College Football)
+        if any(k in cat_lower for k in ("am. football", "american football", "cfl", "nfl", "ufl", "college football")):
+            return "american-football", "american-football"
+
+        # 8. Hockey
+        if "hockey" in cat_lower or any(k in cat_lower for k in ("nhl", "shl", "ohl", "ushl")):
+            return "hockey", "hockey"
+
+        # 9. Volleyball
+        if "volleyball" in cat_lower:
+            return "volley", "volleyball"
+
+        # 10. Altri Sport
+        if "golf" in cat_lower or "golf" in title_lower:
+            return "altri_sport", "golf"
+        if "rugby" in cat_lower:
+            return "altri_sport", "rugby"
+        if "cricket" in cat_lower:
+            return "altri_sport", "cricket"
+        if "darts" in cat_lower:
+            return "altri_sport", "darts"
+        if "cycling" in cat_lower or "ciclismo" in title_lower:
+            return "altri_sport", "cycling"
+        if "handball" in cat_lower or "pallamano" in title_lower:
+            return "altri_sport", "handball"
+        if "futsal" in cat_lower:
+            return "altri_sport", "futsal"
+        if "afl" in cat_lower or "aussie" in cat_lower:
+            return "altri_sport", "afl"
+        if "billiards" in cat_lower or "snooker" in title_lower:
+            return "altri_sport", "billiards"
+
+        return "altri_sport", "other"
+
     async def get_matches(self, force: bool = False) -> List[Dict[str, Any]]:
         now = time.time()
         if not force and self._cache and (now - self._cache_time < self._cache_ttl):
@@ -264,42 +343,10 @@ class DaddyLiveAPI:
                             "home": {"name": home_raw},
                             "away": {"name": away_raw}
                         }
-
-                    # Determine category from title and DaddyLive cat_raw
-                    title_lower = clean_title.lower()
-                    if "cycling" in cat_lower or any(k in title_lower for k in ("uci", "road race", "time trial", "tour de france", "giro d'italia", "vuelta", "ciclismo", "cycling")):
-                        category = "cycling"
-                    elif "handball" in cat_lower or any(k in title_lower for k in ("handball", "pallamano", "ihf", "ehf")):
-                        category = "handball"
-                    elif "soccer" in cat_lower or "football" in cat_lower or (
-                        any(k in title_lower for k in ("serie a", "serie b", "serie c", "liga", "copa", "fifa", "premier league", "bundesliga"))
-                        or bool(re.search(r"\b(champions\s*league|uefa\s*champions)\b", title_lower))
-                    ):
-                        category = "football"
-                    elif "motor" in cat_lower or "formula" in cat_lower or any(k in title_lower for k in ("formula 1", "grand prix", "motogp", "f1", "nascar", "rally")):
-                        category = "motor-sports"
-                    elif "basket" in cat_lower or "nba" in title_lower:
-                        category = "basketball"
-                    elif "tennis" in cat_lower or any(k in title_lower for k in ("tennis", "atp", "wta", "laver cup", "cup finals")):
-                        category = "tennis"
-                    elif "fight" in cat_lower or any(k in title_lower for k in ("fight", "boxing", "mma", "wrestling", "wwe", "ufc")):
-                        category = "fight"
-                    elif "hockey" in cat_lower or "nhl" in title_lower:
-                        category = "hockey"
-                    elif "baseball" in cat_lower or "mlb" in title_lower:
-                        category = "baseball"
-                    elif "nfl" in cat_lower or "american football" in cat_lower:
-                        category = "american-football"
-                    elif "golf" in cat_lower or "presidents cup" in title_lower or "golf" in title_lower:
-                        category = "golf"
-                    elif "darts" in cat_lower:
-                        category = "darts"
-                    elif "rugby" in cat_lower or "afl" in cat_lower:
-                        category = "rugby"
-                    elif "cricket" in cat_lower or any(k in title_lower for k in ("cricket", "one day international", "t20", "twenty20", "test match", "ipl", "the hundred", "big bash", "ashes", "odi")):
-                        category = "cricket"
-                    else:
-                        category = "other"
+                    silo_info = self.map_daddylive_category_to_silo(cat_raw, clean_title)
+                    if not silo_info:
+                        continue
+                    silo_id, category = silo_info
 
                     slug = re.sub(r"[^a-z0-9]+", "-", clean_title.lower()).strip("-")[:60]
                     match_id = f"dlhd-{slug}-{str(date_ms)[-6:]}"
@@ -308,6 +355,7 @@ class DaddyLiveAPI:
                         "id": match_id,
                         "title": clean_title,
                         "category": category,
+                        "_silo": silo_id,
                         "date": date_ms,
                         "poster": None,
                         "popular": False,

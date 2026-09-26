@@ -265,6 +265,21 @@ class CatalogService:
                 return frozenset([h_words, a_words])
         return None
 
+    @staticmethod
+    def is_silo_compatible(s1: str, s2: str) -> bool:
+        """Determines if two sport silo names are compatible for deduplication."""
+        s1 = (s1 or "").lower().strip()
+        s2 = (s2 or "").lower().strip()
+        if not s1 or not s2:
+            return True
+        if s1 == s2:
+            return True
+        if {s1, s2} == {"football", "soccer"}:
+            return True
+        if {s1, s2} == {"motorsport", "motor-sports"}:
+            return True
+        return False
+
     def merge_and_deduplicate(
         self,
         primary_matches: List[Dict[str, Any]],
@@ -278,9 +293,15 @@ class CatalogService:
             m2_teams = self._get_teams_key(m2)
             m2_date = m2.get("date") or 0
             m2_words = set(m2_tokens.split()) if m2_tokens else set()
+            m2_silo = m2.get("_silo") or m2.get("category")
 
             matched_idx = -1
             for idx, existing in enumerate(merged_list):
+                # 0. Sport Silo Compatibility: NEVER merge events across different sport silos!
+                ex_silo = existing.get("_silo") or existing.get("category")
+                if ex_silo and m2_silo and not self.is_silo_compatible(ex_silo, m2_silo):
+                    continue
+
                 ex_teams = self._get_teams_key(existing)
                 ex_tokens = self._clean_tokens(existing.get("title", ""))
                 ex_date = existing.get("date") or 0
@@ -328,6 +349,39 @@ class CatalogService:
                 merged_list.append(dict(m2))
 
         return merged_list
+
+    def merge_and_deduplicate_by_silos(
+        self,
+        primary_matches: List[Dict[str, Any]],
+        secondary_matches: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        """
+        Groups matches by sport silo and performs deduplication within each silo,
+        completely eliminating cross-sport collisions and accelerating merge operations.
+        """
+        from collections import defaultdict
+        p_by_silo = defaultdict(list)
+        s_by_silo = defaultdict(list)
+
+        for m in primary_matches:
+            silo = m.get("_silo") or m.get("category") or "altri_sport"
+            if silo == "soccer":
+                silo = "football"
+            p_by_silo[silo].append(m)
+
+        for m in secondary_matches:
+            silo = m.get("_silo") or m.get("category") or "altri_sport"
+            if silo == "soccer":
+                silo = "football"
+            s_by_silo[silo].append(m)
+
+        all_silos = set(p_by_silo.keys()) | set(s_by_silo.keys())
+        all_merged: List[Dict[str, Any]] = []
+        for silo in sorted(all_silos):
+            merged_silo = self.merge_and_deduplicate(p_by_silo[silo], s_by_silo[silo])
+            all_merged.extend(merged_silo)
+
+        return all_merged
 
     @staticmethod
     def is_real_match(m: Dict[str, Any]) -> bool:
@@ -463,12 +517,12 @@ class CatalogService:
                 streamed_matches = [m for m in streamed_raw if self.is_real_match(m)]
                 daddylive_matches = [m for m in daddylive_raw if self.is_real_match(m)]
 
-                # Merge streamed and daddylive matches into combined fresh
-                combined_fresh = self.merge_and_deduplicate(streamed_matches, daddylive_matches)
+                # Merge streamed and daddylive matches silo-by-silo into combined fresh
+                combined_fresh = self.merge_and_deduplicate_by_silos(streamed_matches, daddylive_matches)
 
                 # 2. Pull all active matches from DB to retain existing enriched posters
                 all_db_matches = [m for m in db_service.get_active_matches() if self.is_real_match(m)]
-                all_matches = self.merge_and_deduplicate(combined_fresh, all_db_matches) if all_db_matches else combined_fresh
+                all_matches = self.merge_and_deduplicate_by_silos(combined_fresh, all_db_matches) if all_db_matches else combined_fresh
 
                 # 3. Persist merged matches in DB for 72h retention
                 if all_matches:
