@@ -5,6 +5,7 @@ import logging
 import re
 import time
 import urllib.parse
+import unicodedata
 from typing import Any, Dict, List, Optional, Tuple
 import httpx
 
@@ -265,45 +266,113 @@ class TheSportsDBService:
             logger.info("TheSportsDB calendario completato: %d eventi totali indicizzati in memoria.", len(all_events))
             return all_events
 
+    TSDB_ALIASES = {
+        r"\blafc\b": "los angeles fc",
+        r"\bwolves\b": "wolverhampton",
+        r"\bman city\b": "manchester city",
+        r"\bman utd\b": "manchester united",
+        r"\bman united\b": "manchester united",
+        r"\bspurs\b": "tottenham",
+        r"\bpsg\b": "paris saint germain",
+        r"\bparis sg\b": "paris saint germain",
+        r"\binter\b": "internazionale",
+        r"\bbayern\b": "bayern munchen",
+        r"\bbayern munich\b": "bayern munchen",
+        r"\bdortmund\b": "borussia dortmund",
+        r"\batletico\b": "atletico madrid",
+        r"\bnewcastle\b": "newcastle united",
+        r"\bleicester\b": "leicester city",
+        r"\bwest ham\b": "west ham united",
+        r"\bvirtus bologna\b": "virtus",
+        r"\bsegafredo virtus bologna\b": "virtus",
+        r"\bolimpia milano\b": "milano",
+        r"\bea7 emporio armani milano\b": "milano",
+        r"\bea7 milano\b": "milano",
+        r"\bsir safety perugia\b": "perugia",
+        r"\bitas trentino\b": "trentino",
+        r"\btrentino volley\b": "trentino",
+        r"\bcucine lube civitanova\b": "lube",
+        r"\blube civitanova\b": "lube",
+        r"\bvalsa group modena\b": "modena",
+        r"\bmodena volley\b": "modena",
+        r"\bsavino del bene scandicci\b": "scandicci",
+        r"\bprosecco doc imoco conegliano\b": "conegliano",
+        r"\bimoco conegliano\b": "conegliano",
+        r"\bigor gorgonzola novara\b": "novara",
+        r"\bmint vero volley monza\b": "monza",
+        r"\bvero volley monza\b": "monza",
+        r"\bgas sales bluenergy piacenza\b": "piacenza",
+        r"\bgas sales piacenza\b": "piacenza",
+        r"\brana verona\b": "verona",
+        r"\bsonepar padova\b": "padova",
+        r"\bgioiella prisma taranto\b": "taranto",
+        r"\byuasa battery grottazzolina\b": "grottazzolina",
+        r"\bcisterna volley\b": "cisterna",
+    }
+
     def _clean_team_name(self, name: str) -> str:
         s = (name or "").lower()
+        s = unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode("utf-8")
         s = re.sub(r"[\U0001F1E6-\U0001F1FF]", "", s)
-        s = re.sub(r"\b(fc|cf|bc|sc|ac|as|ss|ssd|asd|basket|calcio)\b", "", s)
+        for pat, rep in self.TSDB_ALIASES.items():
+            s = re.sub(pat, rep, s)
+        s = re.sub(r"\b(fc|cf|bc|sc|ac|as|ss|ssd|asd|basket|pallacanestro|calcio|volley|pallavolo|the)\b", "", s)
+        s = re.sub(r"[^a-z0-9]+", " ", s)
         s = re.sub(r"\s+", " ", s).strip()
         return s
 
-    def enrich_matches(self, matches: List[Dict[str, Any]]) -> int:
+    def _extract_teams(self, match: Dict[str, Any]) -> Tuple[str, str]:
+        teams = match.get("teams")
+        home = ""
+        away = ""
+        if isinstance(teams, dict) and teams.get("home") and teams.get("away"):
+            home = self._clean_team_name(teams.get("home", {}).get("name", ""))
+            away = self._clean_team_name(teams.get("away", {}).get("name", ""))
+
+        if not home or not away:
+            raw_title = match.get("title", "")
+            # Strip time prefix, e.g. "24-09 20:45 "
+            clean_t = re.sub(r"^[0-9:\s-]+(?:\s*:\s*)?", "", raw_title)
+            # Strip category / league prefix, e.g. "Italy - Serie C : " or "ITA D1 : "
+            clean_t = re.sub(r"^[A-Za-z0-9\s-]+:\s*", "", clean_t)
+            # Remove parenthesized notes
+            clean_t = re.sub(r"\([^)]*\)", "", clean_t)
+            for sep in (" vs ", " - ", " v "):
+                if sep in clean_t:
+                    parts = clean_t.split(sep, 1)
+                    home = self._clean_team_name(parts[0])
+                    away = self._clean_team_name(parts[1])
+                    break
+        return home, away
+
+    def reconcile_matches(self, matches: List[Dict[str, Any]]) -> int:
         """
-        Cross-matches upstream matches with the cached official TheSportsDB calendar.
-        Enriches missing posters (strThumb) and competition names with high confidence.
+        LEVEL 1 RECONCILIATION:
+        Matches upstream matches (Streamed, DaddyLive) against the official TheSportsDB Calendar.
+        Prioritizes:
+        1. Official 16:9 event poster (cal['thumb'])
+        2. Official competition name (cal['competition'])
+        3. Canonical home/away team names
+        4. Tags match with _tsdb_matched = True
         """
-        enriched_count = 0
-        if not self._calendar_cache:
+        if not self._calendar_cache or not matches:
             return 0
 
+        reconciled_count = 0
         for m in matches:
             silo = m.get("_silo") or m.get("category") or ""
             candidates = self._calendar_by_silo.get(silo, [])
             if not candidates:
                 candidates = self._calendar_cache
 
-            m_teams = m.get("teams") or {}
-            m_home = self._clean_team_name((m_teams.get("home", {}) or {}).get("name") if isinstance(m_teams, dict) else "")
-            m_away = self._clean_team_name((m_teams.get("away", {}) or {}).get("name") if isinstance(m_teams, dict) else "")
-
-            if not m_home or not m_away:
-                title = m.get("title", "")
-                if " vs " in title:
-                    parts = title.split(" vs ", 1)
-                    m_home = self._clean_team_name(parts[0])
-                    m_away = self._clean_team_name(parts[1])
-
+            m_home, m_away = self._extract_teams(m)
             if not m_home or not m_away:
                 continue
 
             m_date = m.get("date", 0)
+            m_h_words = set(w for w in m_home.split() if len(w) > 2)
+            m_a_words = set(w for w in m_away.split() if len(w) > 2)
 
-            # Search in candidates
             best_match = None
             for cal in candidates:
                 cal_home = self._clean_team_name(cal.get("home", ""))
@@ -311,11 +380,20 @@ class TheSportsDBService:
                 if not cal_home or not cal_away:
                     continue
 
-                home_match = (m_home in cal_home) or (cal_home in m_home)
-                away_match = (m_away in cal_away) or (cal_away in m_away)
+                # 1. Substring matching
+                h_match = (m_home in cal_home) or (cal_home in m_home)
+                a_match = (m_away in cal_away) or (cal_away in m_away)
 
-                if home_match and away_match:
-                    # Check date proximity (+/- 14 hours for timezone differences)
+                # 2. Significant word set intersection fallback
+                if not (h_match and a_match):
+                    c_h_words = set(w for w in cal_home.split() if len(w) > 2)
+                    c_a_words = set(w for w in cal_away.split() if len(w) > 2)
+                    if (m_h_words & c_h_words) and (m_a_words & c_a_words):
+                        h_match = True
+                        a_match = True
+
+                if h_match and a_match:
+                    # Check date proximity (+/- 14 hours for timezone flexibility)
                     cal_date = cal.get("date_ms", 0)
                     if m_date and cal_date:
                         diff_hours = abs(m_date - cal_date) / 3600000.0
@@ -327,26 +405,40 @@ class TheSportsDBService:
                         break
 
             if best_match:
-                # 1. Enrich poster if available
+                # 1. Poster assignment
                 cal_thumb = best_match.get("thumb")
-                if cal_thumb and (not m.get("poster") or "nostream" in m.get("poster", "")):
+                if cal_thumb and (not m.get("poster") or "nostream" in m.get("poster", "") or not str(m.get("poster")).startswith("http")):
                     m["poster"] = cal_thumb
                     db_service.update_match_poster(m["id"], cal_thumb)
                     q_key = f"{best_match['home']} vs {best_match['away']}"
                     db_service.save_poster_to_cache(q_key, cal_thumb, "found")
-                    enriched_count += 1
 
-                # 2. Enrich competition metadata if missing
+                # 2. Official competition assignment
                 cal_comp = best_match.get("competition")
                 if cal_comp:
-                    if not m.get("competition"):
-                        m["competition"] = cal_comp
-                    if not m.get("_competition"):
-                        m["_competition"] = cal_comp
+                    m["competition"] = cal_comp
+                    m["_competition"] = cal_comp
+
+                # 3. Canonical team names if missing
+                if not m.get("teams") or not isinstance(m.get("teams"), dict):
+                    m["teams"] = {
+                        "home": {"name": best_match["home"]},
+                        "away": {"name": best_match["away"]},
+                    }
 
                 m["_tsdb_matched"] = True
+                reconciled_count += 1
 
-        return enriched_count
+        if reconciled_count > 0:
+            logger.info("TheSportsDB Level 1: %d match allacciati con successo al calendario ufficiale.", reconciled_count)
+        return reconciled_count
+
+    def enrich_matches(self, matches: List[Dict[str, Any]]) -> int:
+        """
+        Cross-matches upstream matches with the cached official TheSportsDB calendar.
+        Delegates to Level 1 reconcile_matches.
+        """
+        return self.reconcile_matches(matches)
 
     def start_background_enrichment(self, matches: List[Dict[str, Any]]):
         """

@@ -365,23 +365,23 @@ class GenreClassifier:
                 return "basket", "FIBA e Tornei Nazionali"
 
             # C) Eurolega & Eurocup (Coppe Europee)
-            if re.search(r"\b(euroleague|eurocup|eurolega|bcl|basketball\s*champions|fiba\s*europe\s*cup)\b", title_lower):
+            if re.search(r"\b(euroleague|eurocup|eurolega|bcl|basketball\s*champions|fiba\s*europe\s*cup)\b", eval_text):
                 return "basket", "Eurolega ed Eurocup"
 
             # D) LBA Serie A (Italiana)
-            if re.search(r"\b(lba|serie\s*a\s*basket|lega\s*a|coppa\s*italia\s*basket|serie\s*a2)\b", title_lower) or any(t in home or t in away or t in title_lower for t in self.LBA_BASKET_TEAMS):
+            if re.search(r"\b(lba|serie\s*a\s*basket|lega\s*a|coppa\s*italia\s*basket|serie\s*a2|italian\s*lega\s*basket)\b", eval_text) or any(t in home or t in away or t in eval_text for t in self.LBA_BASKET_TEAMS):
                 return "basket", "LBA Serie A"
 
             # E) NCAA & College Basket
-            if re.search(r"\b(ncaa|college\s*basketball|march\s*madness)\b", title_lower):
+            if re.search(r"\b(ncaa|college\s*basketball|march\s*madness)\b", eval_text):
                 return "basket", "NCAA e College Basket"
 
             # F) Campionati Esteri & NBL
-            if "nbl" in title_lower or any(t in title_lower for t in self.NBL_TEAMS) or re.search(r"\b(acb|endesa|cba|super\s*cup|skl|bsl|bbl|liga\s*femenina|pro\s*a|aba\s*league)\b", title_lower):
+            if "nbl" in eval_text or any(t in eval_text for t in self.NBL_TEAMS) or re.search(r"\b(acb|endesa|cba|super\s*cup|skl|bsl|bbl|liga\s*femenina|pro\s*a|aba\s*league)\b", eval_text):
                 return "basket", "Campionati Esteri ed NBL"
 
             # G) NBA (Men's professional USA league)
-            if re.search(r"\b(nba)\b", title_lower) or any(t in home or t in away or t in title_lower for t in self.NBA_TEAMS):
+            if re.search(r"\b(nba)\b", eval_text) or any(t in home or t in away or t in eval_text for t in self.NBA_TEAMS):
                 return "basket", "NBA"
 
             # Default fallback for unlisted foreign basketball games
@@ -390,14 +390,14 @@ class GenreClassifier:
         # ------------------------------------------------------------------
         # 4. VOLLEY (Dedicated Catalog: 'volley')
         # ------------------------------------------------------------------
-        if cat in ("volleyball", "volley") or any(k in title_lower for k in ("volleyball", "pallavolo", "superlega")):
-            if is_women or "femminile" in title_lower:
+        if cat in ("volleyball", "volley") or any(k in eval_text for k in ("volleyball", "pallavolo", "superlega")):
+            if is_women or "femminile" in eval_text:
                 return "volley", "Volley Femminile"
-            if re.search(r"\b(champions|cev)\b", title_lower):
+            if re.search(r"\b(champions|cev)\b", eval_text):
                 return "volley", "Champions League Volley"
-            if re.search(r"\b(superlega|serie\s*a1)\b", title_lower) or any(t in home or t in away or t in title_lower for t in self.SUPERLEGA_VOLLEY_TEAMS):
+            if re.search(r"\b(superlega|serie\s*a1|italy\s*-\s*superlega)\b", eval_text) or any(t in home or t in away or t in eval_text for t in self.SUPERLEGA_VOLLEY_TEAMS):
                 return "volley", "Superlega e Serie A1"
-            if re.search(r"\b(nazionale|vnl|mondiali|europei)\b", title_lower):
+            if re.search(r"\b(nazionale|vnl|mondiali|europei)\b", eval_text):
                 return "volley", "Nazionali e Internazionale"
             return "volley", "Superlega e Serie A1"
 
@@ -517,7 +517,7 @@ class GenreClassifier:
             all_ita_teams = self.SERIE_A_TEAMS | self.SERIE_B_TEAMS | self.SERIE_C_TEAMS
             is_ita_home = bool(home_ita_check) and (home_ita_check in all_ita_teams or any(re.search(rf"\b{re.escape(t)}\b", home_ita_check) for t in all_ita_teams))
             is_ita_away = bool(away_ita_check) and (away_ita_check in all_ita_teams or any(re.search(rf"\b{re.escape(t)}\b", away_ita_check) for t in all_ita_teams))
-            has_explicit_ita_keyword = bool(re.search(r"\b(serie\s*a|serie\s*b|serie\s*c|coppa\s*italia|supercoppa\s*italiana|primavera)\b", title_lower)) or "italy -" in title_lower or "italia -" in title_lower
+            has_explicit_ita_keyword = bool(re.search(r"\b(serie\s*a|serie\s*b|serie\s*c|coppa\s*italia|supercoppa\s*italiana|primavera)\b", eval_text)) or "italy -" in eval_text or "italia -" in eval_text
             is_italian = (is_ita_home or is_ita_away or has_explicit_ita_keyword) and not is_foreign and not is_extra_eu
 
             top_leagues = [
@@ -533,7 +533,7 @@ class GenreClassifier:
             # Cross-league (e.g. Manchester City [Premier] vs Inter [Serie A]) -> Champions League / Coppe
             is_cross_league = bool(home_leagues and away_leagues and home_leagues[0] != away_leagues[0])
             is_euro_cup = (
-                (bool(re.search(r"\b(champions\s*league|europa\s*league|conference\s*league|uefa\s*super\s*cup|uefa)\b", title_lower)) or is_cross_league)
+                (bool(re.search(r"\b(champions\s*league|europa\s*league|conference\s*league|uefa\s*super\s*cup|uefa)\b", eval_text)) or is_cross_league)
                 and not is_extra_eu_confed
             )
 
@@ -541,21 +541,21 @@ class GenreClassifier:
             # A) CALCIO ITALIANO
             # ---------------------------
             # Distinguish Italian club youth (Primavera, U23, Next Gen, Futuro) vs National Youth (Italy U21)
-            is_club_youth = bool(re.search(r"\b(primavera|u23|next\s*gen|futuro|allievi|giovanissimi)\b", title_lower))
+            is_club_youth = bool(re.search(r"\b(primavera|u23|next\s*gen|futuro|allievi|giovanissimi)\b", eval_text))
             is_national_youth = is_youth and not is_club_youth
 
-            if is_italian and not is_euro_cup and not is_national_youth and not self._FRIENDLY_REGEX.search(title_lower):
+            if is_italian and not is_euro_cup and not is_national_youth and not self._FRIENDLY_REGEX.search(eval_text):
                 if is_women:
                     return "calcio_italiano", "Calcio Femminile"
                 if is_youth:
                     return "calcio_italiano", "Primavera e Giovanili"
-                if re.search(r"\b(coppa\s*italia|supercoppa\s*italiana)\b", title_lower):
+                if re.search(r"\b(coppa\s*italia|supercoppa\s*italiana)\b", eval_text):
                     return "calcio_italiano", "Coppa Italia e Supercoppa"
-                if re.search(r"\b(serie\s*c|italy\s*-\s*serie\s*c)\b", title_lower) or home in self.SERIE_C_TEAMS or away in self.SERIE_C_TEAMS or any(re.search(rf"\b{re.escape(t)}\b", home) or re.search(rf"\b{re.escape(t)}\b", away) for t in self.SERIE_C_TEAMS):
+                if re.search(r"\b(serie\s*c|italy\s*-\s*serie\s*c)\b", eval_text) or home in self.SERIE_C_TEAMS or away in self.SERIE_C_TEAMS or any(re.search(rf"\b{re.escape(t)}\b", home) or re.search(rf"\b{re.escape(t)}\b", away) for t in self.SERIE_C_TEAMS):
                     return "calcio_italiano", "Serie C"
-                if re.search(r"\b(serie\s*b|italy\s*-\s*serie\s*b)\b", title_lower) or home in self.SERIE_B_TEAMS or away in self.SERIE_B_TEAMS or any(re.search(rf"\b{re.escape(t)}\b", home) or re.search(rf"\b{re.escape(t)}\b", away) for t in self.SERIE_B_TEAMS):
+                if re.search(r"\b(serie\s*b|italy\s*-\s*serie\s*b)\b", eval_text) or home in self.SERIE_B_TEAMS or away in self.SERIE_B_TEAMS or any(re.search(rf"\b{re.escape(t)}\b", home) or re.search(rf"\b{re.escape(t)}\b", away) for t in self.SERIE_B_TEAMS):
                     return "calcio_italiano", "Serie B"
-                if re.search(r"\b(serie\s*a|italy\s*-\s*serie\s*a)\b", title_lower) or home in self.SERIE_A_TEAMS or away in self.SERIE_A_TEAMS or any(re.search(rf"\b{re.escape(t)}\b", home) or re.search(rf"\b{re.escape(t)}\b", away) for t in self.SERIE_A_TEAMS):
+                if re.search(r"\b(serie\s*a|italy\s*-\s*serie\s*a)\b", eval_text) or home in self.SERIE_A_TEAMS or away in self.SERIE_A_TEAMS or any(re.search(rf"\b{re.escape(t)}\b", home) or re.search(rf"\b{re.escape(t)}\b", away) for t in self.SERIE_A_TEAMS):
                     return "calcio_italiano", "Serie A"
                 # If neither Serie A, B nor C team matches, it is NOT Italian Serie A!
                 return "calcio_estero", "Altri Campionati Europei"

@@ -375,6 +375,108 @@ class StreamSportTestCase(unittest.TestCase):
         self.assertEqual(raw_streamed[1]["_catalog"], "calcio_italiano")
         self.assertEqual(raw_streamed[1]["_genre"], "Serie A")
 
+    def test_thesportsdb_reconciliation_and_tiered_precedence(self):
+        from app.services.thesportsdb_service import thesportsdb_service
+        from app.services.genre_classifier import genre_classifier
+
+        # 1. Setup mock official calendar cache in TheSportsDBService
+        thesportsdb_service._calendar_cache = [
+            {
+                "title": "Catania vs Benevento",
+                "home": "Catania",
+                "away": "Benevento",
+                "sport": "Soccer",
+                "_silo": "football",
+                "competition": "Italy - Serie C",
+                "date_ms": 1790000000000,
+                "thumb": "https://www.thesportsdb.com/images/media/event/thumb/catania_benevento.jpg/medium",
+            },
+            {
+                "title": "Segafredo Virtus Bologna vs EA7 Emporio Armani Milano",
+                "home": "Segafredo Virtus Bologna",
+                "away": "EA7 Emporio Armani Milano",
+                "sport": "Basketball",
+                "_silo": "basketball",
+                "competition": "Italian Lega Basket",
+                "date_ms": 1790000000000,
+                "thumb": "https://www.thesportsdb.com/images/media/event/thumb/virtus_milano.jpg/medium",
+            },
+            {
+                "title": "Sir Safety Perugia vs Itas Trentino",
+                "home": "Sir Safety Perugia",
+                "away": "Itas Trentino",
+                "sport": "Volleyball",
+                "_silo": "volley",
+                "competition": "Italy - SuperLega",
+                "date_ms": 1790000000000,
+                "thumb": "https://www.thesportsdb.com/images/media/event/thumb/perugia_trento.jpg/medium",
+            },
+        ]
+        thesportsdb_service._calendar_by_silo = {
+            "football": [thesportsdb_service._calendar_cache[0]],
+            "basketball": [thesportsdb_service._calendar_cache[1]],
+            "volley": [thesportsdb_service._calendar_cache[2]],
+        }
+
+        # Raw streamed matches with informal titles / prefixes
+        raw_matches = [
+            {
+                "id": "raw-c1",
+                "title": "Italy - Serie C : Catania vs Benevento",
+                "category": "football",
+                "_silo": "football",
+                "date": 1790000000000,
+                "poster": None,
+            },
+            {
+                "id": "raw-b1",
+                "title": "Lega Basket: Virtus Bologna vs Olimpia Milano",
+                "category": "basketball",
+                "_silo": "basketball",
+                "date": 1790000000000,
+                "poster": None,
+            },
+            {
+                "id": "raw-v1",
+                "title": "SuperLega: Perugia vs Trentino",
+                "category": "volley",
+                "_silo": "volley",
+                "date": 1790000000000,
+                "poster": None,
+            },
+        ]
+
+        # Execute Level 1 Reconciliation
+        reconciled = thesportsdb_service.reconcile_matches(raw_matches)
+        self.assertEqual(reconciled, 3)
+
+        # Check Match 1 (Serie C)
+        m1 = raw_matches[0]
+        self.assertTrue(m1.get("_tsdb_matched"))
+        self.assertEqual(m1["poster"], "https://www.thesportsdb.com/images/media/event/thumb/catania_benevento.jpg/medium")
+        self.assertEqual(m1["competition"], "Italy - Serie C")
+        cat1, genre1 = genre_classifier.classify(m1)
+        self.assertEqual(cat1, "calcio_italiano")
+        self.assertEqual(genre1, "Serie C")
+
+        # Check Match 2 (LBA Basket)
+        m2 = raw_matches[1]
+        self.assertTrue(m2.get("_tsdb_matched"))
+        self.assertEqual(m2["poster"], "https://www.thesportsdb.com/images/media/event/thumb/virtus_milano.jpg/medium")
+        self.assertEqual(m2["competition"], "Italian Lega Basket")
+        cat2, genre2 = genre_classifier.classify(m2)
+        self.assertEqual(cat2, "basket")
+        self.assertEqual(genre2, "LBA Serie A")
+
+        # Check Match 3 (Volley SuperLega)
+        m3 = raw_matches[2]
+        self.assertTrue(m3.get("_tsdb_matched"))
+        self.assertEqual(m3["poster"], "https://www.thesportsdb.com/images/media/event/thumb/perugia_trento.jpg/medium")
+        self.assertEqual(m3["competition"], "Italy - SuperLega")
+        cat3, genre3 = genre_classifier.classify(m3)
+        self.assertEqual(cat3, "volley")
+        self.assertEqual(genre3, "Superlega e Serie A1")
+
     def test_is_replay_eligible_whitelist(self):
         from app.services.catalog_service import catalog_service
 

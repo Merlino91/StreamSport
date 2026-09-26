@@ -539,12 +539,13 @@ class CatalogService:
 
             logger.info("Starting background sports schedule sync...")
             try:
-                # 1. Fetch live matches from StreamedAPI, DaddyLiveAPI, and official ESPN & OCB registries concurrently
+                # 1. Fetch live matches from StreamedAPI, DaddyLiveAPI, and official registries (ESPN, OCB, TheSportsDB) concurrently
                 tasks = [
                     streamed_api.get_all_matches(force_refresh=True),
                     daddylive_api.get_matches(force=True),
                     espn_service.get_official_events(),
                     ocblacktop_service.get_official_sessions(),
+                    thesportsdb_service.fetch_multi_day_calendar(days_ahead=2),
                 ]
                 results = await asyncio.gather(*tasks, return_exceptions=True)
                 streamed_raw = results[0] if isinstance(results[0], list) else []
@@ -569,15 +570,21 @@ class CatalogService:
                 # Purge matches older than retention window from DB (6h if ENABLE_REPLAYS=False, 72h if True)
                 db_service.purge_expired_matches()
 
-                # 4. Reconcile against official ESPN registry (names, exact UTC time, official catalog/genre)
+                # 4a. LEVEL 1: Reconcile against official TheSportsDB Calendar registry
+                # (Awards official 16:9 poster, competition name, and canonical teams)
+                thesportsdb_service.reconcile_matches(all_matches)
+
+                # 4b. LEVEL 2: Reconcile against official ESPN registry (names, exact UTC time, official catalog/genre)
                 if espn_events:
                     espn_service.reconcile_matches(all_matches, espn_events, self._clean_tokens, self._get_teams_key)
 
-                # 4b. Reconcile motorsport events against official Orange Cat Blacktop session registry
+                # 4c. Reconcile motorsport events against official Orange Cat Blacktop session registry
                 if ocb_sessions:
                     ocblacktop_service.reconcile_matches(all_matches, ocb_sessions)
 
-                # 5. Pre-classify every match into catalog and genre (if not already officially classified by ESPN or OCB)
+                # 5. LEVEL 3: Pre-classify every match into catalog and genre
+                # Matches with _tsdb_matched have competition set, enabling exact genre matching;
+                # Unmatched matches use the 5-layer heuristic fallback.
                 for m in all_matches:
                     if not m.get("_espn_matched") and not m.get("_ocb_matched"):
                         cat, genre = genre_classifier.classify(m)
@@ -622,10 +629,7 @@ class CatalogService:
                 self._last_sync_time = time.time()
                 logger.info("Background sports sync complete. %d active events indexed in RAM.", len(all_matches))
 
-                # 7. Fallback poster enrichment from TheSportsDB (non-blocking, auto-retrying)
-                thesportsdb_service.start_background_enrichment(all_matches)
-
-                # 8. Dynamic 16:9 poster generation for Tennis events lacking artwork
+                # 7. Dynamic 16:9 poster generation for Tennis events lacking artwork
                 tennis_poster_service.start_background_enrichment(all_matches)
             except Exception as e:
                 logger.error("Error during background sports schedule sync: %s", e, exc_info=True)
