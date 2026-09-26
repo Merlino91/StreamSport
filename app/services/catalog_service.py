@@ -192,6 +192,8 @@ class CatalogService:
         poster_url = self.normalize_image_url(match.get("poster"), base_url=base_url)
 
         clean_title, comp_name = self.split_title_and_competition(title, genre)
+        if not comp_name:
+            comp_name = match.get("competition") or match.get("_competition") or ""
 
         now_ms = time.time() * 1000
         desc_parts = []
@@ -345,6 +347,10 @@ class CatalogService:
                     existing["poster"] = m2["poster"]
                 if not existing.get("date") and m2.get("date"):
                     existing["date"] = m2["date"]
+                if not existing.get("competition") and m2.get("competition"):
+                    existing["competition"] = m2["competition"]
+                if not existing.get("_competition") and m2.get("_competition"):
+                    existing["_competition"] = m2["_competition"]
             else:
                 merged_list.append(dict(m2))
 

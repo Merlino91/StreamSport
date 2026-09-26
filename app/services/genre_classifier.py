@@ -25,7 +25,25 @@ class GenreClassifier:
 
     # Extra-European confederations and regional cups (CAF, AFC, CONCACAF, COSAFA, etc.)
     _EXTRA_EU_CONFED_REGEX = re.compile(
-        r"\b(caf|cosafa|afc|concacaf|ofc|cecafa|unaf|wafu|conmebol|asean)\b",
+        r"\b(caf|cosafa|afc\s*(?:champions|cup|asian|u-?\d+|qualif)|concacaf|ofc|cecafa|unaf|wafu|conmebol|asean)\b",
+        re.IGNORECASE,
+    )
+
+    # Extra-European leagues & tournaments (Americas, Asia, Africa, Oceania)
+    _EXTRA_EU_LEAGUES_REGEX = re.compile(
+        r"\b("
+        r"mls|major\s*league\s*soccer|usl|nwsl|cpl|canadian\s*premier|"
+        r"liga\s*mx|mexico|mexican|asenso\s*mx|"
+        r"libertadores|sudamericana|recopa|copa\s*libertadores|"
+        r"brazil|brasil|brasileir[ao]|serie\s*a\s*brazil|copa\s*do\s*brasil|paulista|carioca|"
+        r"argentina|primera\s*division\s*argentina|copa\s*de\s*la\s*liga|"
+        r"colombia|chile|peru|uruguay|ecuador|paraguay|venezuela|bolivia|costa\s*rica|"
+        r"saudi|roshn|saudi\s*pro\s*league|king\s*cup\s*champions|"
+        r"qatar|stars\s*league|uae|pro\s*league\s*uae|"
+        r"j-?league|j1\s*league|k-?league|csl|chinese\s*super\s*league|"
+        r"a-?league|australia|indian\s*super\s*league|isl|"
+        r"egypt|morocco|botola|south\s*africa|psl"
+        r")\b",
         re.IGNORECASE,
     )
 
@@ -255,8 +273,11 @@ class GenreClassifier:
         Classifies a match dictionary into (catalog_id, genre).
         """
         cat = (match.get("category") or "").lower().strip()
+        silo = (match.get("_silo") or "").lower().strip()
+        comp = (match.get("competition") or match.get("_competition") or "").lower().strip()
         title = (match.get("title") or "").strip()
         title_lower = title.lower()
+        eval_text = f"{title_lower} {comp}".strip()
 
         teams = match.get("teams") or {}
         home = ""
@@ -283,7 +304,17 @@ class GenreClassifier:
         # ------------------------------------------------------------------
         # 1. TENNIS (Dedicated Catalog: 'tennis')
         # ------------------------------------------------------------------
-        if cat == "tennis" or "tennis" in title_lower or any(k in title_lower for k in ("atp", "wta", "bjk", "davis cup", "wimbledon", "us open", "roland garros", "australian open")):
+        is_football_context = (
+            cat in ("football", "soccer")
+            or silo == "football"
+            or bool(re.search(r"\b(afc\s*wimbledon|wimbledon\s*fc)\b", title_lower))
+        )
+        if not is_football_context and (
+            cat == "tennis"
+            or silo == "tennis"
+            or "tennis" in title_lower
+            or any(k in title_lower for k in ("atp", "wta", "bjk", "davis cup", "wimbledon", "us open", "roland garros", "australian open"))
+        ):
             if re.search(r"\b(wimbledon|us\s*open|roland\s*garros|australian\s*open|slam)\b", title_lower):
                 return "tennis", "Grandi Slam"
             if re.search(r"\b(davis|bjk|billie\s*jean|laver\s*cup)\b", title_lower):
@@ -466,16 +497,19 @@ class GenreClassifier:
         # ------------------------------------------------------------------
         # 10. CALCIO (FOOTBALL / SOCCER)
         # ------------------------------------------------------------------
-        if cat in ("football", "soccer") or "vs" in title_lower or any(k in title_lower for k in ("fc ", "cf ", "sc ", "ac ", "league", "copa", "cup")):
-            is_foreign = bool(self._FOREIGN_LEAGUE_REGEX.search(title_lower))
-            is_extra_eu_confed = bool(self._EXTRA_EU_CONFED_REGEX.search(title_lower))
+        if cat in ("football", "soccer") or silo == "football" or "vs" in title_lower or any(k in title_lower for k in ("fc ", "cf ", "sc ", "ac ", "league", "copa", "cup")):
+            is_extra_eu = bool(self._EXTRA_EU_CONFED_REGEX.search(eval_text) or self._EXTRA_EU_LEAGUES_REGEX.search(eval_text))
+            is_foreign = bool(self._FOREIGN_LEAGUE_REGEX.search(eval_text)) or is_extra_eu or "inter miami" in title_lower
+            is_extra_eu_confed = bool(self._EXTRA_EU_CONFED_REGEX.search(eval_text))
 
-            # Team match checks for Italian leagues (MUST use word boundaries to avoid 'kostroma' matching 'roma')
+            # Team match checks for Italian leagues (MUST use word boundaries to avoid 'kostroma' matching 'roma', and exclude 'inter miami')
+            home_ita_check = re.sub(r"\binter\s*miami\b", "", home).strip()
+            away_ita_check = re.sub(r"\binter\s*miami\b", "", away).strip()
             all_ita_teams = self.SERIE_A_TEAMS | self.SERIE_B_TEAMS | self.SERIE_C_TEAMS
-            is_ita_home = home in all_ita_teams or any(re.search(rf"\b{re.escape(t)}\b", home) for t in all_ita_teams)
-            is_ita_away = away in all_ita_teams or any(re.search(rf"\b{re.escape(t)}\b", away) for t in all_ita_teams)
+            is_ita_home = bool(home_ita_check) and (home_ita_check in all_ita_teams or any(re.search(rf"\b{re.escape(t)}\b", home_ita_check) for t in all_ita_teams))
+            is_ita_away = bool(away_ita_check) and (away_ita_check in all_ita_teams or any(re.search(rf"\b{re.escape(t)}\b", away_ita_check) for t in all_ita_teams))
             has_explicit_ita_keyword = bool(re.search(r"\b(serie\s*a|serie\s*b|serie\s*c|coppa\s*italia|supercoppa\s*italiana|primavera)\b", title_lower)) or "italy -" in title_lower or "italia -" in title_lower
-            is_italian = (is_ita_home or is_ita_away or has_explicit_ita_keyword) and not is_foreign and not is_extra_eu_confed
+            is_italian = (is_ita_home or is_ita_away or has_explicit_ita_keyword) and not is_foreign and not is_extra_eu
 
             top_leagues = [
                 ("Serie A", self.SERIE_A_TEAMS),
@@ -532,28 +566,24 @@ class GenreClassifier:
             if is_national_match:
                 return "calcio_estero", "Nazionali e Amichevoli"
 
-            # 3. North/South American Soccer Leagues (MLS, USL, NWSL, Liga MX, etc.)
-            if re.search(r"\b(usl|nwsl|mls|major\s*league\s*soccer|cpl|canadian\s*premier)\b", title_lower):
+            # 3. North/South American & Extra-EU Soccer Leagues
+            if is_extra_eu_confed or bool(self._EXTRA_EU_LEAGUES_REGEX.search(eval_text)):
                 return "calcio_estero", "Americhe e Leghe Extra-UE"
 
-            # 4. Extra-EU Confederations (CAF, AFC, CONCACAF, COSAFA Champions/Cups)
-            if is_extra_eu_confed:
-                return "calcio_estero", "Americhe e Leghe Extra-UE"
-
-            # 5. European Cups (UEFA Champions, Europa, Conference League)
-            if is_euro_cup or bool(re.search(r"\b(uefa\s*champions|champions\s*league)\b", title_lower)):
+            # 4. European Cups (UEFA Champions, Europa, Conference League)
+            if is_euro_cup or bool(re.search(r"\b(uefa\s*champions|champions\s*league)\b", eval_text)):
                 return "calcio_estero", "Champions League"
-            if re.search(r"\b(europa\s*league|conference\s*league)\b", title_lower):
+            if re.search(r"\b(europa\s*league|conference\s*league)\b", eval_text):
                 return "calcio_estero", "Europa e Conference League"
-            if re.search(r"\b(premier\s*league|epl|england\s*-\s*premier)\b", title_lower) or home in self.PREMIER_LEAGUE_TEAMS or away in self.PREMIER_LEAGUE_TEAMS:
+            if re.search(r"\b(premier\s*league|epl|england\s*-\s*premier)\b", eval_text) or home in self.PREMIER_LEAGUE_TEAMS or away in self.PREMIER_LEAGUE_TEAMS:
                 return "calcio_estero", "Premier League"
-            if re.search(r"\b(laliga|la\s*liga|spain\s*-\s*laliga|primera\s*division)\b", title_lower) or home in self.LALIGA_TEAMS or away in self.LALIGA_TEAMS:
+            if re.search(r"\b(laliga|la\s*liga|spain\s*-\s*laliga|primera\s*division)\b", eval_text) or home in self.LALIGA_TEAMS or away in self.LALIGA_TEAMS:
                 return "calcio_estero", "La Liga"
-            if re.search(r"\b(bundesliga|germany\s*-\s*bundesliga|ligue\s*1|france\s*-\s*ligue\s*1)\b", title_lower) or home in self.BUNDESLIGA_TEAMS or away in self.BUNDESLIGA_TEAMS or home in self.LIGUE1_TEAMS or away in self.LIGUE1_TEAMS:
+            if re.search(r"\b(bundesliga|germany\s*-\s*bundesliga|ligue\s*1|france\s*-\s*ligue\s*1)\b", eval_text) or home in self.BUNDESLIGA_TEAMS or away in self.BUNDESLIGA_TEAMS or home in self.LIGUE1_TEAMS or away in self.LIGUE1_TEAMS:
                 return "calcio_estero", "Bundesliga e Ligue 1"
-            if self._EUROPEAN_LEAGUES_REGEX.search(title_lower):
-                return "calcio_estero", "Altri Campionati Europei"
-            return "calcio_estero", "Americhe e Leghe Extra-UE"
+
+            # 5. All other European and international club football defaults to "Altri Campionati Europei"
+            return "calcio_estero", "Altri Campionati Europei"
 
         # ------------------------------------------------------------------
         # 11. FALLBACK

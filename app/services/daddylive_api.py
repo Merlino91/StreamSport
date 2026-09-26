@@ -355,6 +355,8 @@ class DaddyLiveAPI:
                         "id": match_id,
                         "title": clean_title,
                         "category": category,
+                        "competition": cat_raw,
+                        "_competition": cat_raw,
                         "_silo": silo_id,
                         "date": date_ms,
                         "poster": None,

@@ -10,6 +10,7 @@ from app.main import app, decode_config, get_base_url, extract_extra_params
 from app.config import CATALOG_DEFINITIONS, CATALOG_ID, CATALOG_TYPE, SPORT_GENRES
 from app.services.genre_classifier import genre_classifier
 from app.services.italian_resolver import italian_resolver
+from app.services.catalog_service import catalog_service
 
 client = TestClient(app)
 
@@ -491,6 +492,29 @@ class StreamSportTestCase(unittest.TestCase):
         # When ENABLE_REPLAYS is False, stream service immediately returns Evento Concluso without calling highlights
         self.assertTrue(len(streams) >= 1)
         self.assertIn("Concluso", streams[0].get("name", ""))
+
+    def test_league_two_and_wimbledon_classification(self):
+        # 1. League Two club match without explicit league keyword defaults to Altri Campionati Europei
+        cat1, genre1 = genre_classifier.classify({"title": "Fleetwood Town vs Rochdale", "category": "football", "_silo": "football"})
+        self.assertEqual(cat1, "calcio_estero")
+        self.assertEqual(genre1, "Altri Campionati Europei")
+
+        # 2. AFC Wimbledon football match must NEVER be classified as Tennis Grand Slam
+        cat2, genre2 = genre_classifier.classify({"title": "Cambridge United vs AFC Wimbledon (England - League One)", "category": "football", "_silo": "football"})
+        self.assertEqual(cat2, "calcio_estero")
+        self.assertEqual(genre2, "Altri Campionati Europei")
+
+        # 3. Explicit Extra-EU league goes to Americhe e Leghe Extra-UE
+        cat3, genre3 = genre_classifier.classify({"title": "Inter Miami vs LA Galaxy (Major League Soccer MLS)", "category": "football", "_silo": "football"})
+        self.assertEqual(cat3, "calcio_estero")
+        self.assertEqual(genre3, "Americhe e Leghe Extra-UE")
+
+        # 4. Competition metadata preservation in deduplication
+        m_streamed = {"id": "str-1", "title": "Fleetwood Town vs Rochdale", "_silo": "football", "sources": [{"id": "s1"}]}
+        m_daddylive = {"id": "dlhd-1", "title": "Fleetwood Town vs Rochdale (England - League Two)", "competition": "England - League Two", "_silo": "football", "sources": [{"id": "s2"}]}
+        merged = catalog_service.merge_and_deduplicate([m_streamed], [m_daddylive])
+        self.assertEqual(len(merged), 1)
+        self.assertEqual(merged[0].get("competition"), "England - League Two")
 
 if __name__ == "__main__":
     unittest.main()
