@@ -32,6 +32,7 @@ class DoHClient:
         self._limits = httpx.Limits(max_keepalive_connections=50, max_connections=100, keepalive_expiry=60.0)
         self._transport = httpx.AsyncHTTPTransport(verify=self._ssl_context, limits=self._limits)
         self._client = httpx.AsyncClient(transport=self._transport, timeout=httpx.Timeout(8.0, connect=4.0))
+        self._resolve_lock: Optional[asyncio.Lock] = None
 
     async def close(self):
         """Closes the underlying shared HTTP client."""
@@ -39,32 +40,44 @@ class DoHClient:
             await self._client.aclose()
 
     async def resolve(self, hostname: str) -> Optional[str]:
-        """Resolves hostname to IPv4 using DoH resolvers with TTL caching."""
+        """Resolves hostname to IPv4 using DoH resolvers with TTL caching and concurrency lock."""
         now = time.time()
         if hostname in self._dns_cache:
             ip, expire_at = self._dns_cache[hostname]
             if now < expire_at:
                 return ip
 
-        for endpoint in self._doh_endpoints:
-            try:
-                params = {"name": hostname, "type": "A"}
-                headers = {"accept": "application/dns-json"}
-                res = await self._client.get(endpoint, params=params, headers=headers)
-                if res.status_code == 200:
-                    data = res.json()
-                    answers = data.get("Answer", [])
-                    for ans in answers:
-                        if ans.get("type") == 1 and "data" in ans:
-                            ip = ans["data"]
-                            ttl = ans.get("TTL", 300)
-                            self._dns_cache[hostname] = (ip, now + min(ttl, 600))
-                            logger.debug("DoH resolved %s -> %s (TTL: %ds)", hostname, ip, ttl)
-                            return ip
-            except Exception as e:
-                logger.warning("DoH lookup via %s failed for %s: %s", endpoint, hostname, e)
+        if self._resolve_lock is None:
+            import asyncio
+            self._resolve_lock = asyncio.Lock()
 
-        return None
+        async with self._resolve_lock:
+            # Re-check cache after acquiring lock
+            now = time.time()
+            if hostname in self._dns_cache:
+                ip, expire_at = self._dns_cache[hostname]
+                if now < expire_at:
+                    return ip
+
+            for endpoint in self._doh_endpoints:
+                try:
+                    params = {"name": hostname, "type": "A"}
+                    headers = {"accept": "application/dns-json"}
+                    res = await self._client.get(endpoint, params=params, headers=headers)
+                    if res.status_code == 200:
+                        data = res.json()
+                        answers = data.get("Answer", [])
+                        for ans in answers:
+                            if ans.get("type") == 1 and "data" in ans:
+                                ip = ans["data"]
+                                ttl = ans.get("TTL", 300)
+                                self._dns_cache[hostname] = (ip, now + min(ttl, 600))
+                                logger.debug("DoH resolved %s -> %s (TTL: %ds)", hostname, ip, ttl)
+                                return ip
+                except Exception as e:
+                    logger.warning("DoH lookup via %s failed for %s: %s", endpoint, hostname, e)
+
+            return None
 
     async def get_json(self, url: str, host_header: Optional[str] = None, timeout: float = 8.0) -> Optional[dict]:
         """

@@ -55,14 +55,22 @@ class StreamedAPI:
 
         for host in self._hosts:
             try:
-                # 1. Primary: Fetch all sports concurrently using per-sport endpoints
-                tasks = [
-                    doh_client.get_json(
-                        f"https://{host}/api/matches/{STREAMED_SPORT_SUBPATHS.get(sport, sport)}",
-                        host_header=host
-                    )
-                    for sport in STREAMED_SPORTS_MAP.keys()
-                ]
+                # 0. Pre-warm DoH DNS cache for the host to avoid concurrent DNS flood
+                await doh_client.resolve(host)
+
+                # 1. Primary: Fetch all sports with controlled concurrency (semaphore=5)
+                sem = asyncio.Semaphore(5)
+
+                async def _fetch_sport(sport: str):
+                    async with sem:
+                        subpath = STREAMED_SPORT_SUBPATHS.get(sport, sport)
+                        return await doh_client.get_json(
+                            f"https://{host}/api/matches/{subpath}",
+                            host_header=host,
+                            timeout=12.0
+                        )
+
+                tasks = [_fetch_sport(sport) for sport in STREAMED_SPORTS_MAP.keys()]
                 results = await asyncio.gather(*tasks, return_exceptions=True)
 
                 all_items: List[Dict[str, Any]] = []
