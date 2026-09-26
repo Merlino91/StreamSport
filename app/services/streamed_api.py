@@ -24,6 +24,11 @@ STREAMED_SPORTS_MAP = {
     "other": "altri_sport",
 }
 
+# Subpaths for sports where minor leagues/empty streams should be filtered out
+STREAMED_SPORT_SUBPATHS = {
+    "american-football": "american-football/popular",
+}
+
 class StreamedAPI:
     """Client for the Streamed sports events and streams API."""
 
@@ -52,7 +57,10 @@ class StreamedAPI:
             try:
                 # 1. Primary: Fetch all sports concurrently using per-sport endpoints
                 tasks = [
-                    doh_client.get_json(f"https://{host}/api/matches/{sport}", host_header=host)
+                    doh_client.get_json(
+                        f"https://{host}/api/matches/{STREAMED_SPORT_SUBPATHS.get(sport, sport)}",
+                        host_header=host
+                    )
                     for sport in STREAMED_SPORTS_MAP.keys()
                 ]
                 results = await asyncio.gather(*tasks, return_exceptions=True)
