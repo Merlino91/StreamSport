@@ -134,6 +134,84 @@ class TheSportsDBTestCase(unittest.IsolatedAsyncioTestCase):
             self.assertIsNone(thumb_url)
             self.assertEqual(retry_after, 480)
 
+    def test_parse_calendar_html(self):
+        sample_html = """
+        <table>
+            <tr><th>Time</th><th>Sport</th><th>League</th><th>Event</th></tr>
+            <tr>
+                <td>15:00</td>
+                <td>Soccer</td>
+                <td>Italian Serie A</td>
+                <td>Juventus vs Napoli</td>
+                <td><img src="https://r2.thesportsdb.com/images/media/event/thumb/juve_napoli.jpg/tiny" /></td>
+            </tr>
+            <tr>
+                <td>18:30</td>
+                <td>Basketball</td>
+                <td>Euroleague</td>
+                <td>Real Madrid vs Panathinaikos</td>
+                <td><img src="/images/no_thumb.png" /></td>
+            </tr>
+        </table>
+        """
+        events = thesportsdb_service.parse_calendar_html(sample_html, "2026-09-26")
+        self.assertEqual(len(events), 2)
+
+        # Event 1: Juventus vs Napoli
+        ev1 = events[0]
+        self.assertEqual(ev1["title"], "Juventus vs Napoli")
+        self.assertEqual(ev1["home"], "Juventus")
+        self.assertEqual(ev1["away"], "Napoli")
+        self.assertEqual(ev1["_silo"], "football")
+        self.assertEqual(ev1["competition"], "Italian Serie A")
+        self.assertEqual(ev1["thumb"], "https://r2.thesportsdb.com/images/media/event/thumb/juve_napoli.jpg/medium")
+
+        # Event 2: Real Madrid vs Panathinaikos (no_thumb)
+        ev2 = events[1]
+        self.assertEqual(ev2["title"], "Real Madrid vs Panathinaikos")
+        self.assertEqual(ev2["_silo"], "basketball")
+        self.assertEqual(ev2["competition"], "Euroleague")
+        self.assertIsNone(ev2["thumb"])
+
+    def test_enrich_matches_from_calendar(self):
+        # Setup mock calendar cache
+        thesportsdb_service._calendar_cache = [
+            {
+                "title": "Arsenal vs Leicester City",
+                "home": "Arsenal",
+                "away": "Leicester City",
+                "sport": "Soccer",
+                "_silo": "football",
+                "competition": "English Premier League",
+                "date_str": "2026-09-26",
+                "time_str": "16:00",
+                "date_ms": 1789900000000,
+                "thumb": "https://r2.thesportsdb.com/images/media/event/thumb/arsenal_leicester.jpg/medium",
+            }
+        ]
+        thesportsdb_service._calendar_by_silo = {
+            "football": thesportsdb_service._calendar_cache
+        }
+
+        # Upstream match lacking poster and competition
+        upstream_match = {
+            "id": "match_ars_lei",
+            "title": "Arsenal FC vs Leicester",
+            "_silo": "football",
+            "category": "football",
+            "date": 1789900000000,
+            "poster": None,
+            "competition": None,
+            "teams": {"home": {"name": "Arsenal FC"}, "away": {"name": "Leicester"}},
+        }
+
+        count = thesportsdb_service.enrich_matches([upstream_match])
+        self.assertEqual(count, 1)
+        self.assertEqual(upstream_match["poster"], "https://r2.thesportsdb.com/images/media/event/thumb/arsenal_leicester.jpg/medium")
+        self.assertEqual(upstream_match["competition"], "English Premier League")
+        self.assertTrue(upstream_match.get("_tsdb_matched"))
+
 
 if __name__ == "__main__":
     unittest.main()
+

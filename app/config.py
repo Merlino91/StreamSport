@@ -30,6 +30,10 @@ OCBLACKTOP_API_BASE = os.getenv("OCBLACKTOP_API_BASE", "https://api.ocblacktop.c
 # Concluded Events, Highlights and Replays Toggle
 ENABLE_REPLAYS = os.getenv("ENABLE_REPLAYS", "false").lower() in ("true", "1", "yes")
 
+# TheSportsDB Official Calendar & Credentials
+THESPORTSDB_USER = os.getenv("THESPORTSDB_USER", "")
+THESPORTSDB_PASS = os.getenv("THESPORTSDB_PASS", "")
+THESPORTSDB_CALENDAR_INTERVAL = int(os.getenv("THESPORTSDB_CALENDAR_INTERVAL", "43200"))  # 12 hours
 
 
 # Addon Metadata
