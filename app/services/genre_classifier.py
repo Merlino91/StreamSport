@@ -17,9 +17,9 @@ class GenreClassifier:
         re.IGNORECASE,
     )
 
-    # Foreign leagues & countries that might have homonym leagues (e.g. Brazil - Serie B)
+    # Foreign leagues & countries that might have homonym leagues (e.g. Brazil - Serie B, Russia - FNL)
     _FOREIGN_LEAGUE_REGEX = re.compile(
-        r"\b(brazil|brasil|colombia|ecuador|uruguay|argentina|mexico|chile|peru|paraguay|venezuela|bolivia|costa\s*rica|saudi|egypt|morocco|australia|japan|korea)\b",
+        r"\b(brazil|brasil|colombia|ecuador|uruguay|argentina|mexico|chile|peru|paraguay|venezuela|bolivia|costa\s*rica|saudi|egypt|morocco|australia|japan|korea|russia|russian|slovakia|czech|poland|austria|switzerland|ukraine|turkey|greece|denmark|sweden|norway|croatia|serbia|romania|bulgaria|hungary|ireland|scotland|belgium|netherlands|portugal|france|spain|germany|england)\b",
         re.IGNORECASE,
     )
 
@@ -382,28 +382,21 @@ class GenreClassifier:
             if re.search(r"\b(ufl|elf|european\s*league\s*of\s*football|stallions|renegades|defenders|roughnecks|showboats|brahmas|battlehawks)\b", title_lower):
                 return "football_americano", "CFL e Altre Leghe"
 
-            # 3. NFL (unambiguous indicators, full team names, or exclusive nicknames)
+            # 3. NFL (Strict: full franchise names, unambiguous NFL keywords, or exclusive nicknames without college indicators)
+            is_explicit_college = bool(re.search(r"\b(cfb|ncaa|college|univ|university|d-?iii|d-?ii|d-?1|fbs|fcs)\b", title_lower))
+            nfl_full = any(team in title_lower for team in self.NFL_FULL_TEAMS)
+            nfl_exclusive = any(re.search(rf"\b{nick}\b", title_lower) for nick in self.NFL_EXCLUSIVE_NICKNAMES)
+            has_nfl_keyword = bool(re.search(r"\b(nfl|redzone|super\s*bowl|manningcast|pro\s*bowl)\b", title_lower))
             nfl_nickname_matches = sum(1 for nick in self.NFL_TEAMS if re.search(rf"\b{nick}\b", title_lower))
-            if (
-                re.search(r"\b(nfl|redzone|super\s*bowl|manningcast|pro\s*bowl)\b", title_lower)
-                or any(team in title_lower for team in self.NFL_FULL_TEAMS)
-                or any(re.search(rf"\b{nick}\b", title_lower) for nick in self.NFL_EXCLUSIVE_NICKNAMES)
-                or nfl_nickname_matches >= 2
-            ):
-                return "football_americano", "NFL"
 
-            # 4. NCAA College Football
-            if (
-                re.search(r"\b(cfb|ncaa|college\s*football)\b", title_lower)
-                or any(k in title_lower for k in self.NCAA_KEYWORDS)
-                or any(c in title_lower for c in self.NCAA_COLLEGES)
-            ):
-                return "football_americano", "NCAA College Football"
+            if not is_explicit_college:
+                if has_nfl_keyword or nfl_full:
+                    return "football_americano", "NFL"
+                if (nfl_exclusive or nfl_nickname_matches >= 2) and not any(k in title_lower for k in self.NCAA_KEYWORDS):
+                    return "football_americano", "NFL"
 
-            # 5. Fallback
-            if any(t in home or t in away or t in title_lower for t in self.NFL_TEAMS):
-                return "football_americano", "NFL"
-            return "football_americano", "NFL"
+            # 4. All other American Football (including Division I/II/III and regional colleges) belongs to NCAA!
+            return "football_americano", "NCAA College Football"
 
         # ------------------------------------------------------------------
         # 6. BASEBALL (Dedicated Catalog: 'baseball')
@@ -477,11 +470,12 @@ class GenreClassifier:
             is_foreign = bool(self._FOREIGN_LEAGUE_REGEX.search(title_lower))
             is_extra_eu_confed = bool(self._EXTRA_EU_CONFED_REGEX.search(title_lower))
 
-            # Team match checks for Italian leagues
+            # Team match checks for Italian leagues (MUST use word boundaries to avoid 'kostroma' matching 'roma')
             all_ita_teams = self.SERIE_A_TEAMS | self.SERIE_B_TEAMS | self.SERIE_C_TEAMS
-            is_ita_home = home in all_ita_teams or any(t in home for t in all_ita_teams)
-            is_ita_away = away in all_ita_teams or any(t in away for t in all_ita_teams)
-            is_italian = (is_ita_home or is_ita_away or any(k in title_lower for k in ("italy", "italia", "serie a", "serie b", "serie c", "coppa italia", "primavera"))) and not is_foreign and not is_extra_eu_confed
+            is_ita_home = home in all_ita_teams or any(re.search(rf"\b{re.escape(t)}\b", home) for t in all_ita_teams)
+            is_ita_away = away in all_ita_teams or any(re.search(rf"\b{re.escape(t)}\b", away) for t in all_ita_teams)
+            has_explicit_ita_keyword = bool(re.search(r"\b(serie\s*a|serie\s*b|serie\s*c|coppa\s*italia|supercoppa\s*italiana|primavera)\b", title_lower)) or "italy -" in title_lower or "italia -" in title_lower
+            is_italian = (is_ita_home or is_ita_away or has_explicit_ita_keyword) and not is_foreign and not is_extra_eu_confed
 
             top_leagues = [
                 ("Serie A", self.SERIE_A_TEAMS),
@@ -514,13 +508,14 @@ class GenreClassifier:
                     return "calcio_italiano", "Primavera e Giovanili"
                 if re.search(r"\b(coppa\s*italia|supercoppa\s*italiana)\b", title_lower):
                     return "calcio_italiano", "Coppa Italia e Supercoppa"
-                if re.search(r"\b(serie\s*c|italy\s*-\s*serie\s*c)\b", title_lower) or home in self.SERIE_C_TEAMS or away in self.SERIE_C_TEAMS:
+                if re.search(r"\b(serie\s*c|italy\s*-\s*serie\s*c)\b", title_lower) or home in self.SERIE_C_TEAMS or away in self.SERIE_C_TEAMS or any(re.search(rf"\b{re.escape(t)}\b", home) or re.search(rf"\b{re.escape(t)}\b", away) for t in self.SERIE_C_TEAMS):
                     return "calcio_italiano", "Serie C"
-                if re.search(r"\b(serie\s*b|italy\s*-\s*serie\s*b)\b", title_lower) or home in self.SERIE_B_TEAMS or away in self.SERIE_B_TEAMS:
+                if re.search(r"\b(serie\s*b|italy\s*-\s*serie\s*b)\b", title_lower) or home in self.SERIE_B_TEAMS or away in self.SERIE_B_TEAMS or any(re.search(rf"\b{re.escape(t)}\b", home) or re.search(rf"\b{re.escape(t)}\b", away) for t in self.SERIE_B_TEAMS):
                     return "calcio_italiano", "Serie B"
-                if re.search(r"\b(serie\s*a|italy\s*-\s*serie\s*a)\b", title_lower) or home in self.SERIE_A_TEAMS or away in self.SERIE_A_TEAMS:
+                if re.search(r"\b(serie\s*a|italy\s*-\s*serie\s*a)\b", title_lower) or home in self.SERIE_A_TEAMS or away in self.SERIE_A_TEAMS or any(re.search(rf"\b{re.escape(t)}\b", home) or re.search(rf"\b{re.escape(t)}\b", away) for t in self.SERIE_A_TEAMS):
                     return "calcio_italiano", "Serie A"
-                return "calcio_italiano", "Serie A"
+                # If neither Serie A, B nor C team matches, it is NOT Italian Serie A!
+                return "calcio_estero", "Altri Campionati Europei"
 
             # ---------------------------
             # B) CALCIO INTERNAZIONALE E COPPE

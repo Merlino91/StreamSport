@@ -192,6 +192,32 @@ class StreamSportTestCase(unittest.TestCase):
         self.assertIn("streamsport:u21-ita-fra", u21_ids)
         self.assertNotIn("streamsport:nl-ice-est", u21_ids)
 
+    def test_spartak_kostroma_and_ncaa_classification(self):
+        """Verifies that Kostroma does not collide with Roma, and NCAA small colleges never enter NFL."""
+        from app.services.genre_classifier import genre_classifier
+
+        # 1. Spartak Kostroma must NOT be classified as Italian Serie A
+        cat_sk, genre_sk = genre_classifier.classify({"title": "Spartak Kostroma vs Ural", "category": "football"})
+        self.assertNotEqual(cat_sk, "calcio_italiano")
+        self.assertNotEqual(genre_sk, "Serie A")
+
+        # 2. NCAA small college football matches must NOT be classified as NFL
+        small_colleges = [
+            "Duquesne vs Rio Grande",
+            "Marist vs Presbyterian",
+            "Sacred Heart vs New Hampshire",
+            "Oberlin Yeomen vs Washington Bears",
+        ]
+        for title in small_colleges:
+            cat_af, genre_af = genre_classifier.classify({"title": title, "category": "american-football"})
+            self.assertEqual(cat_af, "football_americano")
+            self.assertEqual(genre_af, "NCAA College Football")
+
+        # 3. Real NFL must be recognized
+        cat_nfl, genre_nfl = genre_classifier.classify({"title": "Kansas City Chiefs vs Baltimore Ravens", "category": "american-football"})
+        self.assertEqual(cat_nfl, "football_americano")
+        self.assertEqual(genre_nfl, "NFL")
+
     def test_deduplication(self):
         from app.services.catalog_service import catalog_service
         list1 = [
