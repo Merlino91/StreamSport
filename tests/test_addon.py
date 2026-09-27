@@ -621,5 +621,144 @@ class StreamSportTestCase(unittest.TestCase):
         self.assertEqual(len(merged), 1)
         self.assertEqual(merged[0].get("competition"), "England - League Two")
 
+    def test_channel_flag_and_stream_formatting(self):
+        import asyncio
+        from app.services.stream_service import stream_service
+
+        # 1. Test channel flag regex accuracy
+        self.assertEqual(stream_service.get_channel_flag("Sky Sport Calcio IT"), "🇮🇹")
+        self.assertEqual(stream_service.get_channel_flag("Rai Sport"), "🇮🇹")
+        self.assertEqual(stream_service.get_channel_flag("SuperTennis"), "🇮🇹")
+        self.assertEqual(stream_service.get_channel_flag("Canale 5 IT"), "🇮🇹")
+        self.assertEqual(stream_service.get_channel_flag("Italia 1"), "🇮🇹")
+
+        # Exclusions: Foreign Sky and DAZN must NEVER get Italian flag
+        self.assertEqual(stream_service.get_channel_flag("Sky Sports Premier League UK"), "🇬🇧")
+        self.assertEqual(stream_service.get_channel_flag("DAZN CA"), "🇨🇦")
+        self.assertEqual(stream_service.get_channel_flag("DAZN Baloncesto Spain"), "🇪🇸")
+        self.assertEqual(stream_service.get_channel_flag("Sky Sport Austria"), "🇩🇪")
+
+        # Other international channels
+        self.assertEqual(stream_service.get_channel_flag("Match Premier Russia"), "🇷🇺")
+        self.assertEqual(stream_service.get_channel_flag("ESPN USA"), "🇺🇸")
+
+        # False positive guard: "Ritaliansko" must NOT trigger Italian flag
+        self.assertEqual(stream_service.get_channel_flag("Ritaliansko Channel"), "")
+
+        # 2. Test stream generation, description and Italian-first sorting
+        now_ms = int(time.time() * 1000)
+        mock_match = {
+            "id": "test-flag-match",
+            "title": "Milan vs Inter",
+            "date": now_ms - (10 * 60 * 1000),  # Live now
+            "sources": [
+                {"source": "dlhd", "id": "100", "name": "Sky Sports Premier League UK"},
+                {"source": "dlhd", "id": "200", "name": "Sky Sport Calcio IT"},
+                {"source": "dlhd", "id": "300", "name": "Match Premier Russia"},
+            ],
+        }
+
+        # Mock in catalog_service._cached_matches
+        orig_cached = list(catalog_service._cached_matches)
+        try:
+            catalog_service._cached_matches = [mock_match]
+
+            streams = asyncio.run(stream_service.get_streams_for_event(
+                "test-flag-match",
+                ep_url="https://ep.example.com",
+                user_tz="Europe/Rome"
+            ))
+
+            self.assertEqual(len(streams), 3)
+
+            # Italian stream MUST be sorted at index 0 (top of the list)
+            self.assertEqual(streams[0]["name"], "🇮🇹 Sky Sport Calcio IT")
+            self.assertEqual(streams[0]["title"], "📡 Fonte: DaddyLive • Qualità: Live TV")
+
+            # Foreign streams follow
+            stream_names = [s["name"] for s in streams]
+            self.assertIn("🇬🇧 Sky Sports Premier League UK", stream_names)
+            self.assertIn("🇷🇺 Match Premier Russia", stream_names)
+
+            # 3. Test empty streams behavior
+            empty_match = {
+                "id": "test-empty-streams",
+                "title": "Unbroadcasted Event",
+                "date": now_ms - (10 * 60 * 1000),
+                "sources": [],
+            }
+            catalog_service._cached_matches = [empty_match]
+            empty_res = asyncio.run(stream_service.get_streams_for_event(
+                "test-empty-streams",
+                ep_url="https://ep.example.com",
+                user_tz="Europe/Rome"
+            ))
+            self.assertEqual(empty_res, [])
+        finally:
+            catalog_service._cached_matches = orig_cached
+
+    def test_catalog_chronological_order(self):
+        import asyncio
+        from app.services.catalog_service import catalog_service
+
+        now_ms = int(time.time() * 1000)
+
+        # 4 matches: two LIVE (12:00 and 12:15) and two UPCOMING (13:00 and 15:00)
+        m_live_1200 = {
+            "id": "m_live_1200",
+            "title": "Match at 12:00",
+            "category": "football",
+            "_catalog": "calcio_italiano",
+            "_genre": "Serie A",
+            "date": now_ms - (30 * 60 * 1000),  # 30m ago (LIVE)
+            "sources": [{"id": "s1"}],
+        }
+        m_live_1215 = {
+            "id": "m_live_1215",
+            "title": "Match at 12:15",
+            "category": "football",
+            "_catalog": "calcio_italiano",
+            "_genre": "Serie A",
+            "date": now_ms - (15 * 60 * 1000),  # 15m ago (LIVE)
+            "sources": [{"id": "s2"}],
+        }
+        m_up_1300 = {
+            "id": "m_up_1300",
+            "title": "Match at 13:00",
+            "category": "football",
+            "_catalog": "calcio_italiano",
+            "_genre": "Serie A",
+            "date": now_ms + (30 * 60 * 1000),  # In 30m
+            "sources": [{"id": "s3"}],
+        }
+        m_up_1500 = {
+            "id": "m_up_1500",
+            "title": "Match at 15:00",
+            "category": "football",
+            "_catalog": "calcio_italiano",
+            "_genre": "Serie A",
+            "date": now_ms + (150 * 60 * 1000), # In 150m
+            "sources": [{"id": "s4"}],
+        }
+
+        orig_cached = list(catalog_service._cached_matches)
+        try:
+            catalog_service._cached_matches = [m_up_1500, m_live_1215, m_up_1300, m_live_1200]
+
+            catalog = asyncio.run(catalog_service.get_catalog(catalog_id="calcio_italiano", genre_filter="Serie A"))
+
+            # Verify strict chronological order:
+            # Index 0: Match at 12:00 (earlier LIVE match MUST come first!)
+            # Index 1: Match at 12:15
+            # Index 2: Match at 13:00
+            # Index 3: Match at 15:00
+            self.assertEqual(len(catalog), 4)
+            self.assertEqual(catalog[0]["id"], "streamsport:m_live_1200")
+            self.assertEqual(catalog[1]["id"], "streamsport:m_live_1215")
+            self.assertEqual(catalog[2]["id"], "streamsport:m_up_1300")
+            self.assertEqual(catalog[3]["id"], "streamsport:m_up_1500")
+        finally:
+            catalog_service._cached_matches = orig_cached
+
 if __name__ == "__main__":
     unittest.main()

@@ -1,8 +1,9 @@
 import asyncio
 import logging
+import re
 import time
 import urllib.parse
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from app.config import ENABLE_REPLAYS
 from app.services.catalog_service import CatalogService
@@ -16,35 +17,149 @@ from app.services.youtube_service import youtube_service
 
 logger = logging.getLogger("streamsport.stream")
 
-# Flag mappings for languages
-LANGUAGE_FLAGS = {
-    "english": "🇬🇧",
-    "en": "🇬🇧",
-    "uk": "🇬🇧",
-    "usa": "🇺🇸",
-    "us": "🇺🇸",
-    "italian": "🇮🇹",
-    "italy": "🇮🇹",
-    "it": "🇮🇹",
-    "spanish": "🇪🇸",
-    "spain": "🇪🇸",
-    "es": "🇪🇸",
-    "french": "🇫🇷",
-    "france": "🇫🇷",
-    "fr": "🇫🇷",
-    "german": "🇩🇪",
-    "germany": "🇩🇪",
-    "de": "🇩🇪",
-    "portuguese": "🇵🇹",
-    "brazil": "🇧🇷",
-    "pt": "🇵🇹",
-    "canada": "🇨🇦",
-    "ca": "🇨🇦",
-    "dutch": "🇳🇱",
-    "nl": "🇳🇱",
-    "arabic": "🇸🇦",
-    "ar": "🇸🇦",
+# Language flags & Italian translations for Streamed sources
+STREAMED_LANG_MAP = {
+    "english": ("🇬🇧", "Inglese"),
+    "en": ("🇬🇧", "Inglese"),
+    "italian": ("🇮🇹", "Italiano"),
+    "it": ("🇮🇹", "Italiano"),
+    "spanish": ("🇪🇸", "Spagnolo"),
+    "es": ("🇪🇸", "Spagnolo"),
+    "french": ("🇫🇷", "Francese"),
+    "fr": ("🇫🇷", "Francese"),
+    "german": ("🇩🇪", "Tedesco"),
+    "de": ("🇩🇪", "Tedesco"),
+    "portuguese": ("🇵🇹", "Portoghese"),
+    "pt": ("🇵🇹", "Portoghese"),
+    "russian": ("🇷🇺", "Russo"),
+    "ru": ("🇷🇺", "Russo"),
+    "dutch": ("🇳🇱", "Olandese"),
+    "nl": ("🇳🇱", "Olandese"),
+    "arabic": ("🇸🇦", "Arabo"),
+    "ar": ("🇸🇦", "Arabo"),
+    "turkish": ("🇹🇷", "Turco"),
+    "tr": ("🇹🇷", "Turco"),
+    "polish": ("🇵🇱", "Polacco"),
+    "pl": ("🇵🇱", "Polacco"),
 }
+
+# Country flag regex patterns for channel names
+CHANNEL_COUNTRY_PATTERNS: List[Tuple[re.Pattern, Optional[re.Pattern], str]] = [
+    # 1. Italian: strict word boundaries on keywords including Rai and calcio, must NOT contain foreign country keywords
+    (
+        re.compile(r"\b(it|italy|italia|rai|calcio|raisport|supertennis|sportitalia|mediaset|canale\s*5|italia\s*1|tv8)\b", re.IGNORECASE),
+        re.compile(r"\b(uk|spain|espana|germany|deutschland|austria|ca|canada|us|usa|turkey|turkiye|croatia|hrvatska|serbia|srbija|france|poland|polska|netherlands|holland|russia)\b", re.IGNORECASE),
+        "🇮🇹"
+    ),
+    # 2. United Kingdom
+    (
+        re.compile(r"\b(uk|gb|england|united\s*kingdom|bbc|itv|tnt\s*sports?)\b", re.IGNORECASE),
+        None,
+        "🇬🇧"
+    ),
+    # 3. USA
+    (
+        re.compile(r"\b(usa?|espn|fox\s*sports?|cbs|nbc|abc|tnt\s*us|tbs|bally|msg|yes\s*network|nesn|altitude|marquee)\b", re.IGNORECASE),
+        None,
+        "🇺🇸"
+    ),
+    # 4. Spain
+    (
+        re.compile(r"\b(es|spain|espana|movistar|laliga\s*tv|gol\s*play)\b", re.IGNORECASE),
+        None,
+        "🇪🇸"
+    ),
+    # 5. France
+    (
+        re.compile(r"\b(fr|france|canal\+|rmc\s*sport|beIN\s*sports?\s*fr)\b", re.IGNORECASE),
+        None,
+        "🇫🇷"
+    ),
+    # 6. Germany / Austria
+    (
+        re.compile(r"\b(de|germany|deutschland|austria|zdf|ard)\b", re.IGNORECASE),
+        None,
+        "🇩🇪"
+    ),
+    # 7. Canada
+    (
+        re.compile(r"\b(ca|canada|tsn|sportsnet)\b", re.IGNORECASE),
+        None,
+        "🇨🇦"
+    ),
+    # 8. Russia
+    (
+        re.compile(r"\b(ru|russia|match!|match\s*tv|match\s*premier|match\s*football|okko)\b", re.IGNORECASE),
+        None,
+        "🇷🇺"
+    ),
+    # 9. Poland
+    (
+        re.compile(r"\b(pl|poland|polska|polsat|canal\+\s*sport\s*pl|tvp\s*sport)\b", re.IGNORECASE),
+        None,
+        "🇵🇱"
+    ),
+    # 10. Netherlands
+    (
+        re.compile(r"\b(nl|netherlands|holland|ziggo)\b", re.IGNORECASE),
+        None,
+        "🇳🇱"
+    ),
+    # 11. Portugal
+    (
+        re.compile(r"\b(pt|portugal|sport\s*tv\s*pt)\b", re.IGNORECASE),
+        None,
+        "🇵🇹"
+    ),
+    # 12. Brazil
+    (
+        re.compile(r"\b(br|brazil|brasil|globo|sportv|premiere)\b", re.IGNORECASE),
+        None,
+        "🇧🇷"
+    ),
+    # 13. Turkey
+    (
+        re.compile(r"\b(tr|turkey|turkiye|tivibu|s\s*sport|a\s*spor)\b", re.IGNORECASE),
+        None,
+        "🇹🇷"
+    ),
+    # 14. Croatia
+    (
+        re.compile(r"\b(hr|croatia|hrvatska)\b", re.IGNORECASE),
+        None,
+        "🇭🇷"
+    ),
+    # 15. Serbia
+    (
+        re.compile(r"\b(rs|serbia|srbija)\b", re.IGNORECASE),
+        None,
+        "🇷🇸"
+    ),
+    # 16. Greece
+    (
+        re.compile(r"\b(gr|greece|cosmote|novasports)\b", re.IGNORECASE),
+        None,
+        "🇬🇷"
+    ),
+    # 17. Romania
+    (
+        re.compile(r"\b(ro|romania|digi\s*sport|prima\s*sport)\b", re.IGNORECASE),
+        None,
+        "🇷🇴"
+    ),
+    # 18. Arabic / Saudi / UAE
+    (
+        re.compile(r"\b(ar|arabic|uae|saudi|ssc|alkass)\b", re.IGNORECASE),
+        None,
+        "🇸🇦"
+    ),
+    # 19. Australia
+    (
+        re.compile(r"\b(au|australia|kayo|stan\s*sport|optus)\b", re.IGNORECASE),
+        None,
+        "🇦🇺"
+    ),
+]
 
 class StreamService:
     """
@@ -86,13 +201,23 @@ class StreamService:
             return "supervideo"
         return "generic"
 
-    def get_flag_for_language(self, lang_text: str) -> str:
-        """Finds flag emoji for a given language/channel string."""
-        lang_lower = lang_text.lower()
-        for key, flag in LANGUAGE_FLAGS.items():
-            if key in lang_lower:
+    def get_channel_flag(self, ch_name: str) -> str:
+        """Determines the country flag emoji for a channel name using strict regex boundaries."""
+        if not ch_name:
+            return ""
+        for include_rx, exclude_rx, flag in CHANNEL_COUNTRY_PATTERNS:
+            if exclude_rx and exclude_rx.search(ch_name):
+                continue
+            if include_rx.search(ch_name):
                 return flag
         return ""
+
+    def get_flag_for_language(self, lang_text: str) -> str:
+        """Finds flag emoji for a given language string."""
+        lang_lower = (lang_text or "").lower().strip()
+        if lang_lower in STREAMED_LANG_MAP:
+            return STREAMED_LANG_MAP[lang_lower][0]
+        return self.get_channel_flag(lang_text)
 
     def build_easyproxy_url(self, ep_url: str, ep_pass: Optional[str], host: str, destination_url: str) -> str:
         """
@@ -238,7 +363,7 @@ class StreamService:
                     break
 
         if not match:
-            return self.generate_status_card(None, user_tz)
+            return []
 
         # Time-window check: 20 min before start, live_window minutes after start
         date_ms = match.get("date", 0)
@@ -294,10 +419,8 @@ class StreamService:
         for idx, s in enumerate(dlhd_sources, 1):
             ch_id = s.get("id")
             ch_name = s.get("name") or f"Canale {idx}"
-            ch_upper = ch_name.upper()
-
-            is_it = any(k in ch_upper for k in (" IT", "SKY SPORT", "DAZN", "RAI", "MEDIASET", "TV8", "SPORTITALIA"))
-            flag_prefix = "[IT 🇮🇹] " if is_it else ""
+            flag = self.get_channel_flag(ch_name)
+            flag_prefix = f"{flag} " if flag else ""
 
             # Exact StreamViX destination URL and EasyProxy parameters: host=DLHD, redirect_stream=true
             d_url = f"https://{dl_domain}/watch.php?id={ch_id}"
@@ -305,7 +428,7 @@ class StreamService:
 
             final_streams.append({
                 "name": f"{flag_prefix}{ch_name}",
-                "title": f"{flag_prefix}{ch_name}\n🚀 EasyProxy Playback",
+                "title": "📡 Fonte: DaddyLive • Qualità: Live TV",
                 "url": stream_url,
                 "behaviorHints": {"notWebReady": False},
             })
@@ -327,16 +450,24 @@ class StreamService:
                         host = self.detect_host(embed_url)
                         stream_url = self.build_easyproxy_url(ep_url, ep_pass, host, embed_url)
 
-                        lang = stream_info.get("language", "en")
-                        flag = self.get_flag_for_language(lang)
-                        flag_display = f"[{flag}] " if flag else ""
+                        raw_lang = (stream_info.get("language") or "en").lower().strip()
+                        flag, lang_label = STREAMED_LANG_MAP.get(raw_lang, ("", raw_lang.capitalize()))
+                        flag_prefix = f"{flag} " if flag else ""
 
                         hd = " [HD]" if stream_info.get("hd") else ""
-                        name_display = f"Stream #{stream_index}{hd}"
-                        title_display = f"{flag_display}{name_display}\n🚀 EasyProxy Playback"
+                        name_display = f"{flag_prefix}Stream #{stream_index}{hd}"
+
+                        desc_parts = []
+                        if lang_label:
+                            desc_parts.append(f"{flag_prefix}Lingua: {lang_label}".strip())
+                        if stream_info.get("hd"):
+                            desc_parts.append("Risoluzione: HD")
+                        desc_header = " • ".join(desc_parts)
+
+                        title_display = f"{desc_header}\n📡 Fonte: Streamed" if desc_header else "📡 Fonte: Streamed"
 
                         final_streams.append({
-                            "name": f"[EasyProxy] {flag_display}Stream #{stream_index}",
+                            "name": name_display,
                             "title": title_display,
                             "url": stream_url,
                             "behaviorHints": {
@@ -345,8 +476,11 @@ class StreamService:
                         })
                         stream_index += 1
 
+        # Sort streams: Italian channels always at the very top!
+        final_streams.sort(key=lambda s: 0 if "🇮🇹" in s.get("name", "") else 1)
+
         if not final_streams:
-            return self.generate_status_card(match, user_tz)
+            return []
 
         return final_streams
 

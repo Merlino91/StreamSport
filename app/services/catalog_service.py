@@ -752,10 +752,10 @@ class CatalogService:
             filtered.append(meta_item)
 
         # 5. Sort matches chronologically:
-        # Priority 0: LIVE matches now (diff <= 0 and diff >= -live_window)
-        # Priority 1: IMMINENT & UPCOMING (diff > 0) -> SORTED CLOSEST FIRST (ASCENDING DATE)
-        # Priority 2: CONCLUDED REPLAYS (diff < -live_window) -> SORTED MOST RECENT FIRST
-        # Priority 3: No date
+        # Priority 0: LIVE matches now (diff <= 0 and diff >= -live_window) -> ASCENDING DATE (12:00 before 12:15)
+        # Priority 1: IMMINENT & UPCOMING (diff > 0) -> ASCENDING DATE (closest to start first)
+        # Priority 2: CONCLUDED REPLAYS (diff < -live_window) -> STAY AT THE BOTTOM (most recently finished first)
+        # Priority 3: No date -> AT THE VERY END
         now_ms = time.time() * 1000
 
         def sort_priority(item: Dict[str, Any]) -> Tuple[int, float]:
@@ -765,11 +765,11 @@ class CatalogService:
             diff = (d - now_ms) / 60000
             live_window = item.get("_live_window", 240)
             if -live_window <= diff <= 0:
-                return (0, -float(d))  # Live now: most recently started first
+                return (0, float(d))   # Live now: chronological order (earliest kickoff first)
             elif diff > 0:
-                return (1, float(d))   # Upcoming: CLOSEST TO START FIRST
+                return (1, float(d))   # Upcoming: chronological order (closest to start first)
             else:
-                return (2, -float(d))  # Concluded: most recently concluded first
+                return (2, -float(d))  # Concluded: stay at the bottom of the list
 
         filtered.sort(key=sort_priority)
 
