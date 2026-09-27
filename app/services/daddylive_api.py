@@ -9,6 +9,8 @@ import httpx
 from typing import Any, Dict, List, Optional, Tuple
 from zoneinfo import ZoneInfo
 
+import hashlib
+
 logger = logging.getLogger("streamsport.daddylive")
 
 REMOTE_SCHEDULE_URLS = [
@@ -36,7 +38,8 @@ class DaddyLiveAPI:
     def __init__(self):
         self._cache: List[Dict[str, Any]] = []
         self._cache_time: float = 0
-        self._cache_ttl = 3600  # 1 hour
+        self._cache_ttl: int = 3600  # 1 hour default
+        self._last_content_hash: str = ""
         self._active_domain: str = "dlive.sx"
         self._last_domain_check: float = 0.0
 
@@ -264,6 +267,7 @@ class DaddyLiveAPI:
             return self._cache
 
         schedule_data = None
+        new_content_hash = ""
         headers = {"User-Agent": "Mozilla/5.0"}
         try:
             async with httpx.AsyncClient(timeout=15.0, headers=headers, follow_redirects=True) as client:
@@ -272,6 +276,12 @@ class DaddyLiveAPI:
                         try:
                             res = await client.get(url)
                             if res.status_code == 200:
+                                new_content_hash = hashlib.md5(res.content).hexdigest()
+                                # Fast return if content hasn't changed since last full parse
+                                if not force and new_content_hash == self._last_content_hash and self._cache:
+                                    self._cache_time = now
+                                    logger.debug("DaddyLive schedule unchanged (hash %s)", new_content_hash[:8])
+                                    return self._cache
                                 schedule_data = res.json()
                                 break
                         except Exception as e:
@@ -377,7 +387,20 @@ class DaddyLiveAPI:
 
         self._cache = matches
         self._cache_time = now
-        logger.info("Parsed %d matches from DaddyLive schedule", len(matches))
+        if new_content_hash:
+            self._last_content_hash = new_content_hash
+
+        # Smart Cache Invalidation: check upcoming events for today
+        now_ms = time.time() * 1000
+        future_count = sum(1 for m in matches if (m.get("date") or 0) > now_ms)
+        if future_count < 5:
+            # Morning lag: schedule likely not yet published by DaddyLive operators; recheck every 15m
+            self._cache_ttl = 900  # 15 minutes
+            logger.info("DaddyLive has only %d upcoming matches; setting aggressive 15m refresh window", future_count)
+        else:
+            self._cache_ttl = 3600  # 1 hour
+
+        logger.info("Parsed %d matches from DaddyLive schedule (TTL: %ds, hash: %s)", len(matches), self._cache_ttl, self._last_content_hash[:8])
         return matches
 
 daddylive_api = DaddyLiveAPI()
