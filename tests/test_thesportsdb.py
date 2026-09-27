@@ -211,6 +211,67 @@ class TheSportsDBTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(upstream_match["competition"], "English Premier League")
         self.assertTrue(upstream_match.get("_tsdb_matched"))
 
+    def test_space_insensitive_and_guardrail_reconciliation(self):
+        # 1. Test space-insensitive matching for Ostiamare vs Forli
+        thesportsdb_service._calendar_cache = [
+            {
+                "title": "Ostiamare vs Forlì",
+                "home": "Ostiamare",
+                "away": "Forlì",
+                "sport": "Soccer",
+                "_silo": "football",
+                "competition": "Serie D",
+                "date_ms": 1789900000000,
+                "thumb": "https://r2.thesportsdb.com/images/media/event/thumb/ostiamare_forli.jpg/medium",
+            }
+        ]
+        thesportsdb_service._calendar_by_silo = {
+            "football": thesportsdb_service._calendar_cache
+        }
+
+        # Virgilio-style title with 'Ostia Mare Lidocalcio'
+        virgilio_match = {
+            "id": "match_ostiamare_forli",
+            "title": "Ostia Mare Lidocalcio vs Forlì",
+            "_silo": "football",
+            "category": "football",
+            "date": 1789900000000,
+            "poster": None,
+            "competition": None,
+        }
+
+        count = thesportsdb_service.enrich_matches([virgilio_match])
+        self.assertEqual(count, 1)
+        self.assertEqual(virgilio_match["poster"], "https://r2.thesportsdb.com/images/media/event/thumb/ostiamare_forli.jpg/medium")
+
+        # 2. Test guardrails: generic prefixes (Real, Virtus, Atletico) MUST NOT false match
+        self.assertFalse(thesportsdb_service._team_matches("real madrid", "real sociedad"))
+        self.assertFalse(thesportsdb_service._team_matches("virtus bologna", "virtus entella"))
+        self.assertFalse(thesportsdb_service._team_matches("atletico madrid", "atletico bilbao"))
+
+    async def test_semantic_html_search_fallback(self):
+        sample_browse_html = """
+        <html>
+        <div id="browse_events">
+        <a href='/event/2556445-ostiamare-vs-forl%c3%ac'>
+            <img src='https://r2.thesportsdb.com/images/media/event/thumb/oadmnp1787395021.jpg/small' height='70PX'>
+            <br>Ostiamare vs Forlì
+        </a>
+        </div>
+        </html>
+        """
+        mock_resp = AsyncMock()
+        mock_resp.status_code = 200
+        mock_resp.text = sample_browse_html
+
+        with patch.object(thesportsdb_service, "_get_client") as mock_get_client:
+            mock_client = AsyncMock()
+            mock_client.get.return_value = mock_resp
+            mock_get_client.return_value = mock_client
+
+            thumb = await thesportsdb_service.search_event_thumb_html("Ostia Mare Lidocalcio", "Forlì")
+            self.assertEqual(thumb, "https://r2.thesportsdb.com/images/media/event/thumb/oadmnp1787395021.jpg/medium")
+
 
 if __name__ == "__main__":
     unittest.main()

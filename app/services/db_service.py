@@ -216,6 +216,9 @@ class DBService:
             cursor = conn.cursor()
             cursor.execute("DELETE FROM matches WHERE date > 0 AND date < ?", (cutoff_oldest,))
             deleted = cursor.rowcount
+            # Purge failed ('not_found') poster lookups older than 24 hours to keep cache lean
+            now_sec = int(time.time())
+            cursor.execute("DELETE FROM thesportsdb_cache WHERE status = 'not_found' AND checked_at < ?", (now_sec - 86400,))
             conn.commit()
             if deleted > 0:
                 logger.info("Purged %d expired matches older than %d hours (ENABLE_REPLAYS=%s)", deleted, max_age_hours, ENABLE_REPLAYS)

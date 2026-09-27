@@ -517,8 +517,17 @@ class GenreClassifier:
             all_ita_teams = self.SERIE_A_TEAMS | self.SERIE_B_TEAMS | self.SERIE_C_TEAMS
             is_ita_home = bool(home_ita_check) and (home_ita_check in all_ita_teams or any(re.search(rf"\b{re.escape(t)}\b", home_ita_check) for t in all_ita_teams))
             is_ita_away = bool(away_ita_check) and (away_ita_check in all_ita_teams or any(re.search(rf"\b{re.escape(t)}\b", away_ita_check) for t in all_ita_teams))
-            has_explicit_ita_keyword = bool(re.search(r"\b(serie\s*a|serie\s*b|serie\s*c|coppa\s*italia|supercoppa\s*italiana|primavera)\b", eval_text)) or "italy -" in eval_text or "italia -" in eval_text
-            is_italian = (is_ita_home or is_ita_away or has_explicit_ita_keyword) and not is_foreign and not is_extra_eu
+            is_ita_by_team = is_ita_home or is_ita_away
+            is_explicit_italy = bool(re.search(r"\b(italy|italia)\b", eval_text))
+            has_explicit_ita_keyword = bool(re.search(r"\b(coppa\s*italia|supercoppa\s*italiana|primavera)\b", eval_text)) or "italy -" in eval_text or "italia -" in eval_text or is_explicit_italy
+
+            # Homonym protection: generic "serie a", "serie b", "serie c" only qualify as Italian if
+            # at least one team is in the Italian league roster OR Italy is explicitly mentioned.
+            is_generic_serie = bool(re.search(r"\b(serie\s*a|serie\s*b|serie\s*c)\b", eval_text))
+            if is_generic_serie and not is_ita_by_team and not is_explicit_italy:
+                is_italian = False
+            else:
+                is_italian = (is_ita_by_team or has_explicit_ita_keyword) and not is_foreign and not is_extra_eu
 
             top_leagues = [
                 ("Serie A", self.SERIE_A_TEAMS),
@@ -551,11 +560,15 @@ class GenreClassifier:
                     return "calcio_italiano", "Primavera e Giovanili"
                 if re.search(r"\b(coppa\s*italia|supercoppa\s*italiana)\b", eval_text):
                     return "calcio_italiano", "Coppa Italia e Supercoppa"
-                if re.search(r"\b(serie\s*c|italy\s*-\s*serie\s*c)\b", eval_text) or home in self.SERIE_C_TEAMS or away in self.SERIE_C_TEAMS or any(re.search(rf"\b{re.escape(t)}\b", home) or re.search(rf"\b{re.escape(t)}\b", away) for t in self.SERIE_C_TEAMS):
+                is_c_team = home in self.SERIE_C_TEAMS or away in self.SERIE_C_TEAMS or any(re.search(rf"\b{re.escape(t)}\b", home) or re.search(rf"\b{re.escape(t)}\b", away) for t in self.SERIE_C_TEAMS)
+                is_b_team = home in self.SERIE_B_TEAMS or away in self.SERIE_B_TEAMS or any(re.search(rf"\b{re.escape(t)}\b", home) or re.search(rf"\b{re.escape(t)}\b", away) for t in self.SERIE_B_TEAMS)
+                is_a_team = home in self.SERIE_A_TEAMS or away in self.SERIE_A_TEAMS or any(re.search(rf"\b{re.escape(t)}\b", home) or re.search(rf"\b{re.escape(t)}\b", away) for t in self.SERIE_A_TEAMS)
+
+                if (re.search(r"\bserie\s*c\b", eval_text) and (is_c_team or is_explicit_italy)) or is_c_team or re.search(r"\bitaly\s*-\s*serie\s*c\b", eval_text):
                     return "calcio_italiano", "Serie C"
-                if re.search(r"\b(serie\s*b|italy\s*-\s*serie\s*b)\b", eval_text) or home in self.SERIE_B_TEAMS or away in self.SERIE_B_TEAMS or any(re.search(rf"\b{re.escape(t)}\b", home) or re.search(rf"\b{re.escape(t)}\b", away) for t in self.SERIE_B_TEAMS):
+                if (re.search(r"\bserie\s*b\b", eval_text) and (is_b_team or is_explicit_italy)) or is_b_team or re.search(r"\bitaly\s*-\s*serie\s*b\b", eval_text):
                     return "calcio_italiano", "Serie B"
-                if re.search(r"\b(serie\s*a|italy\s*-\s*serie\s*a)\b", eval_text) or home in self.SERIE_A_TEAMS or away in self.SERIE_A_TEAMS or any(re.search(rf"\b{re.escape(t)}\b", home) or re.search(rf"\b{re.escape(t)}\b", away) for t in self.SERIE_A_TEAMS):
+                if (re.search(r"\bserie\s*a\b", eval_text) and (is_a_team or is_explicit_italy)) or is_a_team or re.search(r"\bitaly\s*-\s*serie\s*a\b", eval_text):
                     return "calcio_italiano", "Serie A"
                 # If neither Serie A, B nor C team matches, it is NOT Italian Serie A!
                 return "calcio_estero", "Altri Campionati Europei"

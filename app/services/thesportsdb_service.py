@@ -310,16 +310,54 @@ class TheSportsDBService:
         r"\bcisterna volley\b": "cisterna",
     }
 
+    GENERIC_CLUB_WORDS = {
+        "real", "atletico", "sporting", "racing", "deportivo", "dinamo",
+        "inter", "union", "united", "city", "club", "estrella", "olimpia",
+        "virtus", "san", "santa", "saint", "st"
+    }
+
     def _clean_team_name(self, name: str) -> str:
         s = (name or "").lower()
         s = unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode("utf-8")
         s = re.sub(r"[\U0001F1E6-\U0001F1FF]", "", s)
         for pat, rep in self.TSDB_ALIASES.items():
             s = re.sub(pat, rep, s)
-        s = re.sub(r"\b(fc|cf|bc|sc|ac|as|ss|ssd|asd|basket|pallacanestro|calcio|volley|pallavolo|the)\b", "", s)
+        # Strip common sports club qualifiers, prefixes and suffixes (including Italian ones like lidocalcio, citta di)
+        s = re.sub(
+            r"\b(fc|cf|bc|sc|ac|as|ss|ssd|asd|usd|us|lidocalcio|lido\s*calcio|citta\s*di|polisportiva|unione\s*sportiva|basket|pallacanestro|calcio|volley|pallavolo|the)\b",
+            " ",
+            s,
+        )
         s = re.sub(r"[^a-z0-9]+", " ", s)
         s = re.sub(r"\s+", " ", s).strip()
         return s
+
+    def _team_matches(self, m_t: str, cal_t: str) -> bool:
+        if not m_t or not cal_t:
+            return False
+        # 1. Exact match
+        if m_t == cal_t:
+            return True
+        # 2. Space-insensitive compact equality (e.g. "ostiamare" == "ostiamare" from "ostia mare")
+        m_compact = m_t.replace(" ", "")
+        cal_compact = cal_t.replace(" ", "")
+        if m_compact == cal_compact:
+            return True
+        # 3. Substring matching (only if significant length >= 5)
+        if len(m_t) >= 5 and len(cal_t) >= 5:
+            if (m_t in cal_t) or (cal_t in m_t):
+                return True
+        # 4. Space-insensitive compact substring (if length >= 6)
+        if len(m_compact) >= 6 and len(cal_compact) >= 6:
+            if (cal_compact in m_compact) or (m_compact in cal_compact):
+                return True
+        # 5. Significant word set intersection (excluding generic club words)
+        m_words = set(w for w in m_t.split() if len(w) >= 4)
+        c_words = set(w for w in cal_t.split() if len(w) >= 4)
+        distinct_common = (m_words & c_words) - self.GENERIC_CLUB_WORDS
+        if distinct_common:
+            return True
+        return False
 
     def _extract_teams(self, match: Dict[str, Any]) -> Tuple[str, str]:
         teams = match.get("teams")
@@ -348,7 +386,7 @@ class TheSportsDBService:
     def reconcile_matches(self, matches: List[Dict[str, Any]]) -> int:
         """
         LEVEL 1 RECONCILIATION:
-        Matches upstream matches (Streamed, DaddyLive) against the official TheSportsDB Calendar.
+        Matches upstream matches (Streamed, DaddyLive, Virgilio) against the official TheSportsDB Calendar.
         Prioritizes:
         1. Official 16:9 event poster (cal['thumb'])
         2. Official competition name (cal['competition'])
@@ -370,8 +408,6 @@ class TheSportsDBService:
                 continue
 
             m_date = m.get("date", 0)
-            m_h_words = set(w for w in m_home.split() if len(w) > 2)
-            m_a_words = set(w for w in m_away.split() if len(w) > 2)
 
             best_match = None
             for cal in candidates:
@@ -380,17 +416,8 @@ class TheSportsDBService:
                 if not cal_home or not cal_away:
                     continue
 
-                # 1. Substring matching
-                h_match = (m_home in cal_home) or (cal_home in m_home)
-                a_match = (m_away in cal_away) or (cal_away in m_away)
-
-                # 2. Significant word set intersection fallback
-                if not (h_match and a_match):
-                    c_h_words = set(w for w in cal_home.split() if len(w) > 2)
-                    c_a_words = set(w for w in cal_away.split() if len(w) > 2)
-                    if (m_h_words & c_h_words) and (m_a_words & c_a_words):
-                        h_match = True
-                        a_match = True
+                h_match = self._team_matches(m_home, cal_home)
+                a_match = self._team_matches(m_away, cal_away)
 
                 if h_match and a_match:
                     # Check date proximity (+/- 14 hours for timezone flexibility)
@@ -440,6 +467,97 @@ class TheSportsDBService:
         """
         return self.reconcile_matches(matches)
 
+    async def search_event_thumb_html(self, home_raw: str, away_raw: str) -> Optional[str]:
+        """
+        LEVEL 2 SEARCH: Queries TheSportsDB web search (browse?s=...)
+        using clean primary team keywords (e.g. 'Ostia Forli').
+        Parses matching event thumb and returns high-quality poster URL.
+        """
+        h_clean = self._clean_team_name(home_raw)
+        a_clean = self._clean_team_name(away_raw)
+
+        h_words = [w for w in h_clean.split() if w not in self.GENERIC_CLUB_WORDS and len(w) >= 3]
+        a_words = [w for w in a_clean.split() if w not in self.GENERIC_CLUB_WORDS and len(w) >= 3]
+        if not h_words or not a_words:
+            return None
+
+        h_kw = h_words[0]
+        a_kw = a_words[0]
+        query = f"{h_kw} {a_kw}"
+        url = f"https://www.thesportsdb.com/browse?s={urllib.parse.quote(query)}"
+
+        try:
+            client = await self._get_client()
+            res = await client.get(url)
+            if res.status_code == 429:
+                logger.warning("TheSportsDB rate limited (429) during HTML search for %s.", query)
+                return None
+            if res.status_code != 200:
+                return None
+
+            pattern = re.compile(
+                r"<a\s+href=['\"]/event/(\d+)-([^'\"]+)['\"][^>]*>(.*?)</a>",
+                re.DOTALL | re.IGNORECASE,
+            )
+            for ev_id, slug, inner in pattern.findall(res.text):
+                slug_norm = unicodedata.normalize("NFKD", urllib.parse.unquote(slug)).encode("ascii", "ignore").decode("utf-8").lower()
+                if h_kw in slug_norm and a_kw in slug_norm:
+                    m_thumb = re.search(r"src=['\"](https?://[^'\" >]+/thumb/[^'\" >]+)['\"]", inner)
+                    if m_thumb and "no_thumb" not in m_thumb.group(1):
+                        return self.format_thumb_url(m_thumb.group(1))
+        except Exception as e:
+            logger.debug("TheSportsDB HTML search error for %s: %s", query, e)
+
+        return None
+
+    async def fallback_semantic_search_orphans(self, matches: List[Dict[str, Any]]):
+        """
+        LEVEL 2 FALLBACK:
+        For matches that still lack an official poster after Level 1 in-RAM matching,
+        performs a polite, one-off web search on TheSportsDB.
+        Caches both 'found' and 'not_found' in SQLite so each match is only queried once.
+        """
+        orphans = [
+            m for m in matches
+            if (not m.get("poster") or "nostream" in m.get("poster", "") or not str(m.get("poster")).startswith("http"))
+        ]
+        if not orphans:
+            return
+
+        found_count = 0
+        for m in orphans:
+            m_home, m_away = self._extract_teams(m)
+            if not m_home or not m_away:
+                continue
+
+            q_key = f"{m_home} vs {m_away}"
+            cached = db_service.get_poster_from_cache(q_key)
+            if cached:
+                status, thumb_url, _ = cached
+                if status == "found" and thumb_url:
+                    m["poster"] = thumb_url
+                    m["background"] = thumb_url
+                    db_service.update_match_poster(m["id"], thumb_url)
+                    found_count += 1
+                continue
+
+            thumb = await self.search_event_thumb_html(m_home, m_away)
+            if thumb:
+                m["poster"] = thumb
+                m["background"] = thumb
+                db_service.update_match_poster(m["id"], thumb)
+                db_service.save_poster_to_cache(q_key, thumb, "found")
+                found_count += 1
+                logger.info("TheSportsDB Level 2 Fallback: trovata locandina per '%s vs %s' -> %s", m_home, m_away, thumb)
+            else:
+                db_service.save_poster_to_cache(q_key, None, "not_found")
+
+            # Polite throttle (1.2s) between external requests
+            await asyncio.sleep(1.2)
+
+        if found_count > 0:
+            logger.info("TheSportsDB Level 2: arricchiti %d match orfani tramite fallback semantico.", found_count)
+
     def start_background_enrichment(self, matches: List[Dict[str, Any]]):
         """
         Starts the non-blocking background enrichment task.
@@ -457,12 +575,30 @@ class TheSportsDBService:
                 n = self.enrich_matches(matches)
                 if n > 0:
                     logger.info("TheSportsDB Calendario: arricchite con successo %d locandine.", n)
+                # 3. Fallback semantic search for remaining orphan matches
+                await self.fallback_semantic_search_orphans(matches)
             except Exception as e:
                 logger.warning("TheSportsDB errore durante arricchimento calendario: %s", e)
             finally:
                 self._is_enriching = False
 
         self._enrichment_task = asyncio.create_task(_enrich_task())
+
+    def start_background_fallback_search(self, matches: List[Dict[str, Any]]):
+        """Triggers the non-blocking Level 2 fallback semantic search for orphan matches."""
+        if self._is_enriching:
+            return
+
+        async def _search_task():
+            self._is_enriching = True
+            try:
+                await self.fallback_semantic_search_orphans(matches)
+            except Exception as e:
+                logger.debug("TheSportsDB background fallback search error: %s", e)
+            finally:
+                self._is_enriching = False
+
+        asyncio.create_task(_search_task())
 
     # =========================================================================
     # DORMANT METHODS: Legacy Single-Event Search (Kept for fallback evaluation)

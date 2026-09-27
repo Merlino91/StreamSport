@@ -647,6 +647,9 @@ class CatalogService:
 
                 # 7. Dynamic 16:9 poster generation for Tennis events lacking artwork
                 tennis_poster_service.start_background_enrichment(all_matches)
+
+                # 8. Level 2 TheSportsDB semantic search fallback for orphan sports events
+                thesportsdb_service.start_background_fallback_search(all_matches)
             except Exception as e:
                 logger.error("Error during background sports schedule sync: %s", e, exc_info=True)
 
