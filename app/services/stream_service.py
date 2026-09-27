@@ -413,7 +413,30 @@ class StreamService:
         final_streams: List[Dict[str, Any]] = []
         sources = match.get("sources", [])
 
-        # Process DaddyLive (dlhd) streams with StreamViX / MediaFlow Proxy format
+        # 1. Process TvVoo (Vavoo) streams with top priority
+        tvvoo_streams: List[Dict[str, Any]] = []
+        tvvoo_sources = [s for s in sources if s.get("source") == "tvvoo"]
+        seen_tvvoo_channels: Dict[str, int] = {}
+        for s in tvvoo_sources:
+            raw_name = s.get("name") or "Canale TV"
+            vavoo_url = s.get("url")
+            if not vavoo_url:
+                continue
+
+            seen_tvvoo_channels[raw_name] = seen_tvvoo_channels.get(raw_name, 0) + 1
+            count = seen_tvvoo_channels[raw_name]
+            name_label = f"🇮🇹 {raw_name}" if count == 1 else f"🇮🇹 {raw_name} (Server {count})"
+
+            stream_url = self.build_easyproxy_url(ep_url, ep_pass, "Vavoo", vavoo_url)
+            tvvoo_streams.append({
+                "name": name_label,
+                "title": "⚡ Fonte: TvVoo • Qualità FHD 1080p",
+                "url": stream_url,
+                "behaviorHints": {"notWebReady": False},
+            })
+
+        # 2. Process DaddyLive (dlhd) streams with StreamViX / MediaFlow Proxy format
+        dlhd_streams: List[Dict[str, Any]] = []
         dlhd_sources = [s for s in sources if s.get("source") == "dlhd"]
         dl_domain = await daddylive_api.get_active_domain() if dlhd_sources else "dlive.sx"
         for idx, s in enumerate(dlhd_sources, 1):
@@ -426,15 +449,16 @@ class StreamService:
             d_url = f"https://{dl_domain}/watch.php?id={ch_id}"
             stream_url = self.build_easyproxy_url(ep_url, ep_pass, "DLHD", d_url)
 
-            final_streams.append({
+            dlhd_streams.append({
                 "name": f"{flag_prefix}{ch_name}",
                 "title": "📡 Fonte: DaddyLive • Qualità: Live TV",
                 "url": stream_url,
                 "behaviorHints": {"notWebReady": False},
             })
 
-        # Process Streamed upstream sources (hotel, delta, etc.)
-        other_sources = [(s.get("source"), s.get("id")) for s in sources if s.get("source") != "dlhd" and s.get("source") and s.get("id")]
+        # 3. Process Streamed upstream sources (hotel, delta, etc.)
+        streamed_streams: List[Dict[str, Any]] = []
+        other_sources = [(s.get("source"), s.get("id")) for s in sources if s.get("source") not in ("dlhd", "tvvoo") and s.get("source") and s.get("id")]
         if other_sources:
             tasks = [streamed_api.get_streams_for_source(src_name, src_id) for src_name, src_id in other_sources]
             results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -466,7 +490,7 @@ class StreamService:
 
                         title_display = f"{desc_header}\n📡 Fonte: Streamed" if desc_header else "📡 Fonte: Streamed"
 
-                        final_streams.append({
+                        streamed_streams.append({
                             "name": name_display,
                             "title": title_display,
                             "url": stream_url,
@@ -476,12 +500,17 @@ class StreamService:
                         })
                         stream_index += 1
 
-        # Sort streams: Italian channels always at the very top!
-        final_streams.sort(key=lambda s: 0 if "🇮🇹" in s.get("name", "") else 1)
+        # Sort non-TvVoo streams: Italian DaddyLive channels immediately below TvVoo
+        secondary_streams = dlhd_streams + streamed_streams
+        secondary_streams.sort(key=lambda s: 0 if "🇮🇹" in s.get("name", "") else 1)
+
+        # Assemble final stream list: TvVoo strictly first!
+        final_streams = tvvoo_streams + secondary_streams
 
         if not final_streams:
             return []
 
         return final_streams
+
 
 stream_service = StreamService()

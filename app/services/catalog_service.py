@@ -25,6 +25,8 @@ from app.services.ocblacktop_service import ocblacktop_service
 from app.services.streamed_api import streamed_api
 from app.services.tennis_poster_service import tennis_poster_service
 from app.services.thesportsdb_service import thesportsdb_service
+from app.services.virgilio_service import virgilio_service
+
 
 
 logger = logging.getLogger("streamsport.catalog")
@@ -374,9 +376,14 @@ class CatalogService:
 
                 for s in m2.get("sources", []):
                     if isinstance(s, dict) and str(s.get("id")) not in existing_ids:
-                        existing_sources.append(s)
+                        if s.get("source") == "tvvoo":
+                            existing_sources.insert(0, s)
+                        else:
+                            existing_sources.append(s)
                         existing_ids.add(str(s.get("id")))
 
+                if not existing.get("teams") and m2.get("teams"):
+                    existing["teams"] = m2["teams"]
                 if not existing.get("poster") and m2.get("poster"):
                     existing["poster"] = m2["poster"]
                 if not existing.get("date") and m2.get("date"):
@@ -389,6 +396,7 @@ class CatalogService:
                     existing["_silo"] = m2["_silo"]
             else:
                 merged_list.append(dict(m2))
+
 
         return merged_list
 
@@ -539,29 +547,37 @@ class CatalogService:
 
             logger.info("Starting background sports schedule sync...")
             try:
-                # 1. Fetch live matches from StreamedAPI, DaddyLiveAPI, and official registries (ESPN, OCB, TheSportsDB) concurrently
+                # 1. Fetch live matches from StreamedAPI, DaddyLiveAPI, Virgilio Sport (TvVoo), and official registries concurrently
                 tasks = [
                     streamed_api.get_all_matches(force_refresh=True),
                     daddylive_api.get_matches(force=True),
                     espn_service.get_official_events(),
                     ocblacktop_service.get_official_sessions(),
                     thesportsdb_service.fetch_multi_day_calendar(days_ahead=2),
+                    virgilio_service.get_matches(),
                 ]
                 results = await asyncio.gather(*tasks, return_exceptions=True)
                 streamed_raw = results[0] if isinstance(results[0], list) else []
                 daddylive_raw = results[1] if isinstance(results[1], list) else []
                 espn_events = results[2] if isinstance(results[2], list) else []
                 ocb_sessions = results[3] if isinstance(results[3], list) else []
+                virgilio_raw = results[5] if isinstance(results[5], list) else []
 
                 streamed_matches = [m for m in streamed_raw if self.is_real_match(m)]
                 daddylive_matches = [m for m in daddylive_raw if self.is_real_match(m)]
+                virgilio_matches = [m for m in virgilio_raw if self.is_real_match(m)]
 
                 # Merge streamed and daddylive matches silo-by-silo into combined fresh
                 combined_fresh = self.merge_and_deduplicate_by_silos(streamed_matches, daddylive_matches)
 
+                # Merge Virgilio Italian schedule with TvVoo streams (attaches TvVoo to existing matches or adds Italian matches)
+                if virgilio_matches:
+                    combined_fresh = self.merge_and_deduplicate_by_silos(combined_fresh, virgilio_matches)
+
                 # 2. Pull all active matches from DB to retain existing enriched posters
                 all_db_matches = [m for m in db_service.get_active_matches() if self.is_real_match(m)]
                 all_matches = self.merge_and_deduplicate_by_silos(combined_fresh, all_db_matches) if all_db_matches else combined_fresh
+
 
                 # 3. Persist merged matches in DB
                 if all_matches:

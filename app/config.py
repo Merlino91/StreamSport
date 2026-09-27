@@ -35,6 +35,13 @@ THESPORTSDB_USER = os.getenv("THESPORTSDB_USER", "")
 THESPORTSDB_PASS = os.getenv("THESPORTSDB_PASS", "")
 THESPORTSDB_CALENDAR_INTERVAL = int(os.getenv("THESPORTSDB_CALENDAR_INTERVAL", "43200"))  # 12 hours
 
+# TvVoo (Vavoo) Provider and Virgilio Sport TV Guide Settings
+ENABLE_TVVOO = os.getenv("ENABLE_TVVOO", "true").lower() in ("true", "1", "yes")
+ENABLE_VIRGILIO = os.getenv("ENABLE_VIRGILIO", "true").lower() in ("true", "1", "yes")
+TVVOO_CACHE_INTERVAL = int(os.getenv("TVVOO_CACHE_INTERVAL", "21600"))  # 6 hours (in seconds)
+VIRGILIO_CACHE_INTERVAL = int(os.getenv("VIRGILIO_CACHE_INTERVAL", "21600"))  # 6 hours (in seconds)
+
+
 
 # Addon Metadata
 ADDON_ID = "com.streamsport.addon"
