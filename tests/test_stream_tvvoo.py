@@ -72,6 +72,26 @@ class TestStreamServiceTvVoo(unittest.IsolatedAsyncioTestCase):
         self.assertIn("🇬🇧", streams[3]["name"])
         self.assertIn("Fonte: DaddyLive", streams[3]["title"])
 
+    def test_resolve_streamed_language(self):
+        cases = [
+            ("English", ("🇬🇧", "Inglese")),
+            ("English - DAZN", ("🇬🇧", "Inglese - DAZN")),
+            ("English - Fubo Sports", ("🇬🇧", "Inglese - Fubo Sports")),
+            ("English - Sky Sports+", ("🇬🇧", "Inglese - Sky Sports+")),
+            ("Main", ("🇬🇧", "Inglese")),
+            ("Willow", ("🇬🇧", "Inglese - Willow")),
+            ("Channel 1", ("🇬🇧", "Inglese - Channel 1")),
+            ("Spanish", ("🇪🇸", "Spagnolo")),
+            ("Spanish - Movistar", ("🇪🇸", "Spagnolo - Movistar")),
+            ("Italian", ("🇮🇹", "Italiano")),
+            ("French - Canal+", ("🇫🇷", "Francese - Canal+")),
+            (None, ("🇬🇧", "Inglese")),
+        ]
+        for raw, expected in cases:
+            flag, label = self.service.resolve_streamed_language(raw)
+            self.assertEqual(flag, expected[0], f"Failed flag for {raw}")
+            self.assertEqual(label, expected[1], f"Failed label for {raw}")
+
 
 if __name__ == "__main__":
     unittest.main()

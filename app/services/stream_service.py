@@ -212,11 +212,85 @@ class StreamService:
                 return flag
         return ""
 
+    def resolve_streamed_language(self, raw_lang_str: Optional[str]) -> Tuple[str, str]:
+        """
+        Extracts flag emoji and Italian language label from Streamed language strings
+        (e.g., 'English', 'English - DAZN', 'English - Fubo Sports', 'Spanish', etc.).
+        """
+        if not raw_lang_str:
+            return ("🇬🇧", "Inglese")
+        raw = raw_lang_str.strip()
+        raw_lower = raw.lower()
+
+        # Split potential network / channel suffixes (e.g. 'English - DAZN', 'English - CBS')
+        if " - " in raw:
+            parts = raw.split(" - ", 1)
+            base = parts[0].strip().lower()
+            suffix = parts[1].strip()
+        elif " (" in raw and raw.endswith(")"):
+            parts = raw.split(" (", 1)
+            base = parts[0].strip().lower()
+            suffix = parts[1].rstrip(")")
+        else:
+            base = raw_lower
+            suffix = ""
+
+        # 1. Exact match in STREAMED_LANG_MAP
+        if base in STREAMED_LANG_MAP:
+            flag, italian = STREAMED_LANG_MAP[base]
+            label = f"{italian} - {suffix}" if suffix else italian
+            return (flag, label)
+
+        # 2. English variants / channel keywords
+        if raw_lower == "main":
+            return ("🇬🇧", "Inglese")
+
+        if any(k in raw_lower for k in ("english", "inglese", "willow")) or raw_lower.startswith("en"):
+            flag, italian = ("🇬🇧", "Inglese")
+            clean_suffix = re.sub(r"^(english|en|inglese)\s*[-:]?\s*", "", raw, flags=re.IGNORECASE).strip()
+            label = f"Inglese - {clean_suffix}" if clean_suffix else "Inglese"
+            return (flag, label)
+
+        # 3. Spanish variants
+        if any(k in raw_lower for k in ("spanish", "spagnolo", "español", "espanol")):
+            flag, italian = ("🇪🇸", "Spagnolo")
+            clean_suffix = re.sub(r"^(spanish|es|spagnolo|español|espanol)\s*[-:]?\s*", "", raw, flags=re.IGNORECASE).strip()
+            label = f"Spagnolo - {clean_suffix}" if clean_suffix else "Spagnolo"
+            return (flag, label)
+
+        # 4. Italian variants
+        if any(k in raw_lower for k in ("italian", "italiano")):
+            flag, italian = ("🇮🇹", "Italiano")
+            clean_suffix = re.sub(r"^(italian|it|italiano)\s*[-:]?\s*", "", raw, flags=re.IGNORECASE).strip()
+            label = f"Italiano - {clean_suffix}" if clean_suffix else "Italiano"
+            return (flag, label)
+
+        # 5. French variants
+        if any(k in raw_lower for k in ("french", "francese", "français")):
+            flag, italian = ("🇫🇷", "Francese")
+            clean_suffix = re.sub(r"^(french|fr|francese)\s*[-:]?\s*", "", raw, flags=re.IGNORECASE).strip()
+            label = f"Francese - {clean_suffix}" if clean_suffix else "Francese"
+            return (flag, label)
+
+        # 6. German variants
+        if any(k in raw_lower for k in ("german", "tedesco", "deutsch")):
+            flag, italian = ("🇩🇪", "Tedesco")
+            clean_suffix = re.sub(r"^(german|de|tedesco)\s*[-:]?\s*", "", raw, flags=re.IGNORECASE).strip()
+            label = f"Tedesco - {clean_suffix}" if clean_suffix else "Tedesco"
+            return (flag, label)
+
+        # 7. Generic Streamed channels (Channel 1, Channel 2, etc.) -> default English
+        if raw_lower.startswith("channel "):
+            return ("🇬🇧", f"Inglese - {raw}")
+
+        flag, label = STREAMED_LANG_MAP.get(raw_lower, ("", raw))
+        return (flag, label)
+
     def get_flag_for_language(self, lang_text: str) -> str:
         """Finds flag emoji for a given language string."""
-        lang_lower = (lang_text or "").lower().strip()
-        if lang_lower in STREAMED_LANG_MAP:
-            return STREAMED_LANG_MAP[lang_lower][0]
+        flag, _ = self.resolve_streamed_language(lang_text)
+        if flag:
+            return flag
         return self.get_channel_flag(lang_text)
 
     def build_easyproxy_url(self, ep_url: str, ep_pass: Optional[str], host: str, destination_url: str) -> str:
@@ -472,8 +546,7 @@ class StreamService:
                         host = self.detect_host(embed_url)
                         stream_url = self.build_easyproxy_url(ep_url, ep_pass, host, embed_url)
 
-                        raw_lang = (stream_info.get("language") or "en").lower().strip()
-                        flag, lang_label = STREAMED_LANG_MAP.get(raw_lang, ("", raw_lang.capitalize()))
+                        flag, lang_label = self.resolve_streamed_language(stream_info.get("language"))
                         flag_prefix = f"{flag} " if flag else ""
 
                         hd = " [HD]" if stream_info.get("hd") else ""
