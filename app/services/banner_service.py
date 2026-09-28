@@ -25,7 +25,7 @@ logger = logging.getLogger("streamsport.banner")
 
 CANVAS_WIDTH = 1280
 CANVAS_HEIGHT = 720
-BANNER_VERSION = 2
+BANNER_VERSION = 3
 
 
 class BannerService:
@@ -191,7 +191,7 @@ class BannerService:
 
     def _create_dark_canvas(self, match: Dict[str, Any]) -> Image.Image:
         """Creates an elegant dark canvas with centered match title and competition subtitle."""
-        im = Image.new("RGB", (CANVAS_WIDTH, CANVAS_HEIGHT), (12, 14, 18))
+        im = Image.new("RGB", (CANVAS_WIDTH, CANVAS_HEIGHT), (12, 15, 20))
         draw = ImageDraw.Draw(im)
 
         title = (match.get("title") or "Live Sports").strip()
@@ -202,23 +202,23 @@ class BannerService:
         clean_title = re.sub(r"^[A-Za-z0-9\s-]+:\s*", "", clean_title)
 
         # Dynamic font sizing for long titles
-        font_size = 52 if len(clean_title) < 40 else 42
-        if len(clean_title) > 60:
-            font_size = 36
+        font_size = 56 if len(clean_title) < 35 else 46
+        if len(clean_title) >= 50:
+            font_size = 38
 
         f_title = self._get_font(font_size, bold=True)
-        f_comp = self._get_font(28, bold=False)
+        f_comp = self._get_font(32, bold=False)
 
         # Center Title
         bbox = draw.textbbox((0, 0), clean_title, font=f_title)
         tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
-        draw.text(((CANVAS_WIDTH - tw) // 2, (CANVAS_HEIGHT - th) // 2 - 20), clean_title, font=f_title, fill=(245, 247, 250))
+        draw.text(((CANVAS_WIDTH - tw) // 2, (CANVAS_HEIGHT - th) // 2 - 10), clean_title, font=f_title, fill=(245, 248, 252))
 
         # Center Competition
         if comp:
             bbox_c = draw.textbbox((0, 0), comp, font=f_comp)
             cw = bbox_c[2] - bbox_c[0]
-            draw.text(((CANVAS_WIDTH - cw) // 2, (CANVAS_HEIGHT - th) // 2 + th + 18), comp, font=f_comp, fill=(138, 148, 162))
+            draw.text(((CANVAS_WIDTH - cw) // 2, (CANVAS_HEIGHT - th) // 2 + th + 24), comp, font=f_comp, fill=(138, 150, 168))
 
         return im
 
@@ -238,7 +238,7 @@ class BannerService:
     @staticmethod
     def _apply_top_gradient(img: Image.Image):
         """Applies a smooth top vignette gradient to guarantee badge legibility."""
-        grad_height = 190
+        grad_height = 240
         grad = Image.new("RGBA", (CANVAS_WIDTH, grad_height), (0, 0, 0, 0))
         g_draw = ImageDraw.Draw(grad)
         for y in range(grad_height):
@@ -247,33 +247,34 @@ class BannerService:
         img.paste(grad, (0, 0), grad)
 
     def _draw_status_badge(self, draw: ImageDraw.ImageDraw, status: str, time_str: str):
-        """Draws the top-left pill badge (LIVE, Upcoming Time, or Replay) with enlarged legibility."""
-        bx, by = 36, 26
-        bh = 54
-        f_badge = self._get_font(32, bold=True)
+        """Draws the top-left pill badge (LIVE, Upcoming Time, or Replay) with extra-large legibility for thumbnails."""
+        bx, by = 40, 28
+        bh = 104
+        f_badge = self._get_font(60, bold=True)
 
         if status == "live":
             txt = "LIVE"
             t_bbox = draw.textbbox((0, 0), txt, font=f_badge)
             tw = t_bbox[2] - t_bbox[0]
             th = t_bbox[3] - t_bbox[1]
-            bw = tw + 72
+            bw = tw + 115
             # Vibrant crimson red pill
-            draw.rounded_rectangle((bx, by, bx + bw, by + bh), radius=12, fill=(229, 9, 20))
-            # Center white dot
-            cx, cy = bx + 22, by + bh // 2
-            draw.ellipse((cx - 6, cy - 6, cx + 6, cy + 6), fill=(255, 255, 255))
-            draw.text((bx + 38, by + (bh - th) // 2 - 2), txt, font=f_badge, fill=(255, 255, 255))
+            draw.rounded_rectangle((bx, by, bx + bw, by + bh), radius=22, fill=(225, 15, 25))
+            # Center pulsing white dot
+            cx, cy = bx + 36, by + bh // 2
+            cr = 14
+            draw.ellipse((cx - cr, cy - cr, cx + cr, cy + cr), fill=(255, 255, 255))
+            draw.text((bx + 72, by + (bh - th) // 2 - 4), txt, font=f_badge, fill=(255, 255, 255))
 
         elif status == "replay":
             txt = "REPLAY"
             t_bbox = draw.textbbox((0, 0), txt, font=f_badge)
             tw = t_bbox[2] - t_bbox[0]
             th = t_bbox[3] - t_bbox[1]
-            bw = tw + 44
+            bw = tw + 64
             # Slate pill
-            draw.rounded_rectangle((bx, by, bx + bw, by + bh), radius=12, fill=(35, 42, 54), outline=(80, 92, 110), width=2)
-            draw.text((bx + 22, by + (bh - th) // 2 - 2), txt, font=f_badge, fill=(240, 244, 248))
+            draw.rounded_rectangle((bx, by, bx + bw, by + bh), radius=22, fill=(32, 40, 52), outline=(105, 125, 150), width=3)
+            draw.text((bx + 32, by + (bh - th) // 2 - 4), txt, font=f_badge, fill=(240, 245, 250))
 
         else:
             # Upcoming
@@ -282,45 +283,46 @@ class BannerService:
             t_bbox = draw.textbbox((0, 0), display_txt, font=f_badge)
             tw = t_bbox[2] - t_bbox[0]
             th = t_bbox[3] - t_bbox[1]
-            bw = tw + 72
-            # Dark glass translucent pill
-            draw.rounded_rectangle((bx, by, bx + bw, by + bh), radius=12, fill=(18, 22, 30), outline=(90, 102, 120), width=2)
+            bw = tw + 130
+            # Dark glass translucent pill with crisp silver-blue border
+            draw.rounded_rectangle((bx, by, bx + bw, by + bh), radius=22, fill=(16, 22, 32), outline=(130, 155, 190), width=3)
             # Clock circle icon
-            cx, cy = bx + 24, by + bh // 2
-            clock_r = 10
-            draw.ellipse((cx - clock_r, cy - clock_r, cx + clock_r, cy + clock_r), outline=(220, 230, 242), width=3)
-            draw.line((cx, cy, cx, cy - 6), fill=(220, 230, 242), width=3)
-            draw.line((cx, cy, cx + 5, cy), fill=(220, 230, 242), width=3)
-            draw.text((bx + 44, by + (bh - th) // 2 - 2), display_txt, font=f_badge, fill=(245, 247, 250))
+            cx, cy = bx + 44, by + bh // 2
+            clock_r = 20
+            draw.ellipse((cx - clock_r, cy - clock_r, cx + clock_r, cy + clock_r), outline=(245, 248, 252), width=4)
+            draw.line((cx, cy, cx, cy - 11), fill=(245, 248, 252), width=4)
+            draw.line((cx, cy, cx + 9, cy), fill=(245, 248, 252), width=4)
+            draw.text((bx + 84, by + (bh - th) // 2 - 4), display_txt, font=f_badge, fill=(255, 255, 255))
 
     @staticmethod
     def _draw_tvvoo_bookmark(draw: ImageDraw.ImageDraw):
-        """Draws the bold golden bolt bookmark ribbon pinned to the top-right corner."""
-        rw, rh = 78, 106
-        rx = CANVAS_WIDTH - 36 - rw
+        """Draws the bold golden bookmark ribbon pinned to the top-right corner with obsidian lightning bolt."""
+        rw, rh = 126, 175
+        rx = CANVAS_WIDTH - 40 - rw
         ry = 0
 
-        # Ribbon polygon with classic swallowtail V-notch
+        # Golden satin ribbon polygon with swallowtail V-notch
         ribbon_pts = [
             (rx, ry),
             (rx + rw, ry),
             (rx + rw, ry + rh),
-            (rx + rw // 2, ry + rh - 20),
+            (rx + rw // 2, ry + rh - 34),
             (rx, ry + rh),
         ]
-        draw.polygon(ribbon_pts, fill=(15, 18, 24), outline=(255, 204, 0), width=3)
+        draw.polygon(ribbon_pts, fill=(255, 204, 0), outline=(210, 160, 0), width=3)
 
-        # Bold golden lightning bolt polygon
+        # Bold obsidian lightning bolt centered in ribbon
+        cx = rx + rw // 2
         bolt_pts = [
-            (rx + 39, ry + 16),
-            (rx + 56, ry + 16),
-            (rx + 34, ry + 48),
-            (rx + 48, ry + 48),
-            (rx + 22, ry + 82),
-            (rx + 36, ry + 52),
-            (rx + 22, ry + 52),
+            (cx + 10, ry + 18),
+            (cx + 48, ry + 18),
+            (cx - 2, ry + 78),
+            (cx + 30, ry + 78),
+            (cx - 42, ry + 142),
+            (cx - 8, ry + 88),
+            (cx - 38, ry + 88),
         ]
-        draw.polygon(bolt_pts, fill=(255, 204, 0))
+        draw.polygon(bolt_pts, fill=(15, 18, 24))
 
     def purge_stale_banners(self, max_age_hours: int = 24) -> int:
         """Deletes generated banner files older than max_age_hours to preserve disk space."""
