@@ -238,7 +238,12 @@ class CatalogService:
                     from zoneinfo import ZoneInfo
                     tz = ZoneInfo("Europe/Rome")
                 dt = datetime.datetime.fromtimestamp(date_ms / 1000.0, tz=tz)
-                banner_time = dt.strftime("%H:%M")
+                months_it = {
+                    1: "GEN", 2: "FEB", 3: "MAR", 4: "APR", 5: "MAG", 6: "GIU",
+                    7: "LUG", 8: "AGO", 9: "SET", 10: "OTT", 11: "NOV", 12: "DIC"
+                }
+                m_str = months_it.get(dt.month, dt.strftime("%b").upper())
+                banner_time = f"{dt.strftime('%d')} {m_str} • {dt.strftime('%H:%M')}"
 
         # Description structure: Status first -> Competition without emoji -> Competitors
         desc_parts.append(status_text)
@@ -261,7 +266,7 @@ class CatalogService:
         clean_match_id = match_id or "unknown"
         poster_endpoint = f"/poster/{clean_match_id}.jpg?s={banner_status}"
         if banner_time:
-            poster_endpoint += f"&t={banner_time}"
+            poster_endpoint += f"&t={urllib.parse.quote(banner_time)}"
         if has_tvvoo:
             poster_endpoint += "&tv=1"
         poster_endpoint += f"&v={BANNER_VERSION}"

@@ -23,8 +23,8 @@ from app.services.doh_client import doh_client
 
 logger = logging.getLogger("streamsport.banner")
 
-CANVAS_WIDTH = 1280
-CANVAS_HEIGHT = 720
+CANVAS_WIDTH = 889
+CANVAS_HEIGHT = 500
 BANNER_VERSION = 3
 
 
@@ -163,17 +163,15 @@ class BannerService:
             base_im = await self._fetch_base_image(base_url)
 
             if base_im:
-                # Resize and center-crop to 1280x720
+                # Fit and center-crop to native 889x500
                 im = self._fit_cover(base_im, CANVAS_WIDTH, CANVAS_HEIGHT)
-                # Apply top shadow gradient so badges stand out with 100% contrast
-                self._apply_top_gradient(im)
             else:
                 # Sleek dark background canvas
                 im = self._create_dark_canvas(m)
 
             draw = ImageDraw.Draw(im)
 
-            # 1. Top-Left: Status Badge (LIVE / Upcoming Time / Replay)
+            # 1. Top-Left: Status Badge (LIVE / Upcoming Time / Replay) with 12px font
             self._draw_status_badge(draw, status, time_str)
 
             # 2. Top-Right: TvVoo Bookmark Ribbon (Lightning bolt only)
@@ -190,7 +188,7 @@ class BannerService:
             return None
 
     def _create_dark_canvas(self, match: Dict[str, Any]) -> Image.Image:
-        """Creates an elegant dark canvas with centered match title and competition subtitle."""
+        """Creates an elegant dark canvas with centered match title and competition subtitle, free of emojis."""
         im = Image.new("RGB", (CANVAS_WIDTH, CANVAS_HEIGHT), (12, 15, 20))
         draw = ImageDraw.Draw(im)
 
@@ -201,24 +199,33 @@ class BannerService:
         clean_title = re.sub(r"^[0-9:\s-]+(?:\s*:\s*)?", "", title)
         clean_title = re.sub(r"^[A-Za-z0-9\s-]+:\s*", "", clean_title)
 
-        # Dynamic font sizing for long titles
-        font_size = 56 if len(clean_title) < 35 else 46
+        # Strip all emojis, flags and 4-byte Unicode pictographs to avoid tofu boxes
+        clean_title = re.sub(r"[\U00010000-\U0010ffff]", "", clean_title)
+        clean_title = re.sub(r"[\u2600-\u27bf]", "", clean_title)
+        clean_title = re.sub(r"\s+", " ", clean_title).strip()
+
+        comp = re.sub(r"[\U00010000-\U0010ffff]", "", comp)
+        comp = re.sub(r"[\u2600-\u27bf]", "", comp)
+        comp = re.sub(r"\s+", " ", comp).strip()
+
+        # Dynamic font sizing for long titles on 889x500 canvas
+        font_size = 38 if len(clean_title) < 35 else 30
         if len(clean_title) >= 50:
-            font_size = 38
+            font_size = 24
 
         f_title = self._get_font(font_size, bold=True)
-        f_comp = self._get_font(32, bold=False)
+        f_comp = self._get_font(20, bold=False)
 
         # Center Title
         bbox = draw.textbbox((0, 0), clean_title, font=f_title)
         tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
-        draw.text(((CANVAS_WIDTH - tw) // 2, (CANVAS_HEIGHT - th) // 2 - 10), clean_title, font=f_title, fill=(245, 248, 252))
+        draw.text(((CANVAS_WIDTH - tw) // 2, (CANVAS_HEIGHT - th) // 2 - 8), clean_title, font=f_title, fill=(245, 248, 252))
 
         # Center Competition
         if comp:
             bbox_c = draw.textbbox((0, 0), comp, font=f_comp)
             cw = bbox_c[2] - bbox_c[0]
-            draw.text(((CANVAS_WIDTH - cw) // 2, (CANVAS_HEIGHT - th) // 2 + th + 24), comp, font=f_comp, fill=(138, 150, 168))
+            draw.text(((CANVAS_WIDTH - cw) // 2, (CANVAS_HEIGHT - th) // 2 + th + 16), comp, font=f_comp, fill=(138, 150, 168))
 
         return im
 
@@ -235,46 +242,35 @@ class BannerService:
         top = (new_h - target_h) // 2
         return resized.crop((left, top, left + target_w, top + target_h))
 
-    @staticmethod
-    def _apply_top_gradient(img: Image.Image):
-        """Applies a smooth top vignette gradient to guarantee badge legibility."""
-        grad_height = 240
-        grad = Image.new("RGBA", (CANVAS_WIDTH, grad_height), (0, 0, 0, 0))
-        g_draw = ImageDraw.Draw(grad)
-        for y in range(grad_height):
-            alpha = int(220 * (1.0 - (y / grad_height) ** 1.3))
-            g_draw.line([(0, y), (CANVAS_WIDTH, y)], fill=(0, 0, 0, alpha))
-        img.paste(grad, (0, 0), grad)
-
     def _draw_status_badge(self, draw: ImageDraw.ImageDraw, status: str, time_str: str):
-        """Draws the top-left pill badge (LIVE, Upcoming Time, or Replay) with extra-large legibility for thumbnails."""
-        bx, by = 40, 28
-        bh = 104
-        f_badge = self._get_font(60, bold=True)
+        """Draws the top-left pill badge (LIVE, Upcoming Time, or Replay) with 12px font."""
+        bx, by = 18, 14
+        bh = 26
+        f_badge = self._get_font(12, bold=True)
 
         if status == "live":
             txt = "LIVE"
             t_bbox = draw.textbbox((0, 0), txt, font=f_badge)
             tw = t_bbox[2] - t_bbox[0]
             th = t_bbox[3] - t_bbox[1]
-            bw = tw + 115
+            bw = tw + 40
             # Vibrant crimson red pill
-            draw.rounded_rectangle((bx, by, bx + bw, by + bh), radius=22, fill=(225, 15, 25))
+            draw.rounded_rectangle((bx, by, bx + bw, by + bh), radius=6, fill=(225, 15, 25))
             # Center pulsing white dot
-            cx, cy = bx + 36, by + bh // 2
-            cr = 14
+            cx, cy = bx + 12, by + bh // 2
+            cr = 4
             draw.ellipse((cx - cr, cy - cr, cx + cr, cy + cr), fill=(255, 255, 255))
-            draw.text((bx + 72, by + (bh - th) // 2 - 4), txt, font=f_badge, fill=(255, 255, 255))
+            draw.text((bx + 22, by + (bh - th) // 2 - 1), txt, font=f_badge, fill=(255, 255, 255))
 
         elif status == "replay":
             txt = "REPLAY"
             t_bbox = draw.textbbox((0, 0), txt, font=f_badge)
             tw = t_bbox[2] - t_bbox[0]
             th = t_bbox[3] - t_bbox[1]
-            bw = tw + 64
+            bw = tw + 24
             # Slate pill
-            draw.rounded_rectangle((bx, by, bx + bw, by + bh), radius=22, fill=(32, 40, 52), outline=(105, 125, 150), width=3)
-            draw.text((bx + 32, by + (bh - th) // 2 - 4), txt, font=f_badge, fill=(240, 245, 250))
+            draw.rounded_rectangle((bx, by, bx + bw, by + bh), radius=6, fill=(32, 40, 52), outline=(105, 125, 150), width=1)
+            draw.text((bx + 12, by + (bh - th) // 2 - 1), txt, font=f_badge, fill=(240, 245, 250))
 
         else:
             # Upcoming
@@ -283,22 +279,22 @@ class BannerService:
             t_bbox = draw.textbbox((0, 0), display_txt, font=f_badge)
             tw = t_bbox[2] - t_bbox[0]
             th = t_bbox[3] - t_bbox[1]
-            bw = tw + 130
-            # Dark glass translucent pill with crisp silver-blue border
-            draw.rounded_rectangle((bx, by, bx + bw, by + bh), radius=22, fill=(16, 22, 32), outline=(130, 155, 190), width=3)
+            bw = tw + 38
+            # Dark glass translucent pill with silver-blue border
+            draw.rounded_rectangle((bx, by, bx + bw, by + bh), radius=6, fill=(16, 22, 32), outline=(130, 155, 190), width=1)
             # Clock circle icon
-            cx, cy = bx + 44, by + bh // 2
-            clock_r = 20
-            draw.ellipse((cx - clock_r, cy - clock_r, cx + clock_r, cy + clock_r), outline=(245, 248, 252), width=4)
-            draw.line((cx, cy, cx, cy - 11), fill=(245, 248, 252), width=4)
-            draw.line((cx, cy, cx + 9, cy), fill=(245, 248, 252), width=4)
-            draw.text((bx + 84, by + (bh - th) // 2 - 4), display_txt, font=f_badge, fill=(255, 255, 255))
+            cx, cy = bx + 13, by + bh // 2
+            clock_r = 5
+            draw.ellipse((cx - clock_r, cy - clock_r, cx + clock_r, cy + clock_r), outline=(245, 248, 252), width=1)
+            draw.line((cx, cy, cx, cy - 3), fill=(245, 248, 252), width=1)
+            draw.line((cx, cy, cx + 2, cy), fill=(245, 248, 252), width=1)
+            draw.text((bx + 24, by + (bh - th) // 2 - 1), display_txt, font=f_badge, fill=(255, 255, 255))
 
     @staticmethod
     def _draw_tvvoo_bookmark(draw: ImageDraw.ImageDraw):
-        """Draws the bold golden bookmark ribbon pinned to the top-right corner with obsidian lightning bolt."""
-        rw, rh = 126, 175
-        rx = CANVAS_WIDTH - 40 - rw
+        """Draws the golden bookmark ribbon pinned to the top-right corner with obsidian lightning bolt."""
+        rw, rh = 54, 76
+        rx = CANVAS_WIDTH - 18 - rw
         ry = 0
 
         # Golden satin ribbon polygon with swallowtail V-notch
@@ -306,21 +302,21 @@ class BannerService:
             (rx, ry),
             (rx + rw, ry),
             (rx + rw, ry + rh),
-            (rx + rw // 2, ry + rh - 34),
+            (rx + rw // 2, ry + rh - 15),
             (rx, ry + rh),
         ]
-        draw.polygon(ribbon_pts, fill=(255, 204, 0), outline=(210, 160, 0), width=3)
+        draw.polygon(ribbon_pts, fill=(255, 204, 0), outline=(210, 160, 0), width=1)
 
         # Bold obsidian lightning bolt centered in ribbon
         cx = rx + rw // 2
         bolt_pts = [
-            (cx + 10, ry + 18),
-            (cx + 48, ry + 18),
-            (cx - 2, ry + 78),
-            (cx + 30, ry + 78),
-            (cx - 42, ry + 142),
-            (cx - 8, ry + 88),
-            (cx - 38, ry + 88),
+            (cx + 4, ry + 8),
+            (cx + 20, ry + 8),
+            (cx - 1, ry + 34),
+            (cx + 12, ry + 34),
+            (cx - 18, ry + 62),
+            (cx - 4, ry + 38),
+            (cx - 16, ry + 38),
         ]
         draw.polygon(bolt_pts, fill=(15, 18, 24))
 
