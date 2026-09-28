@@ -198,9 +198,14 @@ class VirgilioService:
                     html_content = resp.text
             except Exception as e:
                 logger.error("Failed to fetch Virgilio Sport Guida TV: %s", e)
-                return self._cached_matches
-
-            rows = re.findall(r"<tr[^>]*>(.*?)</tr>", html_content, re.DOTALL)
+            # Limit parsing strictly to the "Oggi" section of the TV guide
+            oggi_match = re.search(
+                r"<h2[^>]*>.*?oggi.*?</h2>(.*?)(?:<h2[^>]*>|$)",
+                html_content,
+                re.IGNORECASE | re.DOTALL,
+            )
+            section_html = oggi_match.group(1) if oggi_match else html_content
+            rows = re.findall(r"<tr[^>]*>(.*?)</tr>", section_html, re.DOTALL)
             fetched_matches: List[Dict[str, Any]] = []
 
             for row in rows:

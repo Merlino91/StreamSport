@@ -201,12 +201,12 @@ class BannerService:
         clean_title = re.sub(r"^[A-Za-z0-9\s-]+:\s*", "", clean_title)
 
         # Dynamic font sizing for long titles
-        font_size = 46 if len(clean_title) < 40 else 38
+        font_size = 52 if len(clean_title) < 40 else 42
         if len(clean_title) > 60:
-            font_size = 32
+            font_size = 36
 
         f_title = self._get_font(font_size, bold=True)
-        f_comp = self._get_font(24, bold=False)
+        f_comp = self._get_font(28, bold=False)
 
         # Center Title
         bbox = draw.textbbox((0, 0), clean_title, font=f_title)
@@ -237,62 +237,66 @@ class BannerService:
     @staticmethod
     def _apply_top_gradient(img: Image.Image):
         """Applies a smooth top vignette gradient to guarantee badge legibility."""
-        grad_height = 140
+        grad_height = 190
         grad = Image.new("RGBA", (CANVAS_WIDTH, grad_height), (0, 0, 0, 0))
         g_draw = ImageDraw.Draw(grad)
         for y in range(grad_height):
-            alpha = int(190 * (1.0 - (y / grad_height) ** 1.3))
+            alpha = int(220 * (1.0 - (y / grad_height) ** 1.3))
             g_draw.line([(0, y), (CANVAS_WIDTH, y)], fill=(0, 0, 0, alpha))
         img.paste(grad, (0, 0), grad)
 
     def _draw_status_badge(self, draw: ImageDraw.ImageDraw, status: str, time_str: str):
-        """Draws the top-left pill badge (LIVE, Upcoming Time, or Replay)."""
-        bx, by = 40, 30
-        f_badge = self._get_font(22, bold=True)
+        """Draws the top-left pill badge (LIVE, Upcoming Time, or Replay) with enlarged legibility."""
+        bx, by = 36, 26
+        bh = 54
+        f_badge = self._get_font(32, bold=True)
 
         if status == "live":
             txt = "LIVE"
             t_bbox = draw.textbbox((0, 0), txt, font=f_badge)
-            bw = (t_bbox[2] - t_bbox[0]) + 48
-            bh = 38
+            tw = t_bbox[2] - t_bbox[0]
+            th = t_bbox[3] - t_bbox[1]
+            bw = tw + 72
             # Vibrant crimson red pill
-            draw.rounded_rectangle((bx, by, bx + bw, by + bh), radius=8, fill=(229, 9, 20))
+            draw.rounded_rectangle((bx, by, bx + bw, by + bh), radius=12, fill=(229, 9, 20))
             # Center white dot
-            cx, cy = bx + 16, by + bh // 2
-            draw.ellipse((cx - 4, cy - 4, cx + 4, cy + 4), fill=(255, 255, 255))
-            draw.text((bx + 28, by + 7), txt, font=f_badge, fill=(255, 255, 255))
+            cx, cy = bx + 22, by + bh // 2
+            draw.ellipse((cx - 6, cy - 6, cx + 6, cy + 6), fill=(255, 255, 255))
+            draw.text((bx + 38, by + (bh - th) // 2 - 2), txt, font=f_badge, fill=(255, 255, 255))
 
         elif status == "replay":
             txt = "REPLAY"
             t_bbox = draw.textbbox((0, 0), txt, font=f_badge)
-            bw = (t_bbox[2] - t_bbox[0]) + 30
-            bh = 38
+            tw = t_bbox[2] - t_bbox[0]
+            th = t_bbox[3] - t_bbox[1]
+            bw = tw + 44
             # Slate pill
-            draw.rounded_rectangle((bx, by, bx + bw, by + bh), radius=8, fill=(35, 42, 54), outline=(80, 92, 110), width=1)
-            draw.text((bx + 15, by + 7), txt, font=f_badge, fill=(240, 244, 248))
+            draw.rounded_rectangle((bx, by, bx + bw, by + bh), radius=12, fill=(35, 42, 54), outline=(80, 92, 110), width=2)
+            draw.text((bx + 22, by + (bh - th) // 2 - 2), txt, font=f_badge, fill=(240, 244, 248))
 
         else:
             # Upcoming
             raw_time = time_str.strip() if time_str else "OGGI"
             display_txt = raw_time
             t_bbox = draw.textbbox((0, 0), display_txt, font=f_badge)
-            bw = (t_bbox[2] - t_bbox[0]) + 52
-            bh = 38
+            tw = t_bbox[2] - t_bbox[0]
+            th = t_bbox[3] - t_bbox[1]
+            bw = tw + 72
             # Dark glass translucent pill
-            draw.rounded_rectangle((bx, by, bx + bw, by + bh), radius=8, fill=(18, 22, 30), outline=(75, 85, 100), width=1)
+            draw.rounded_rectangle((bx, by, bx + bw, by + bh), radius=12, fill=(18, 22, 30), outline=(90, 102, 120), width=2)
             # Clock circle icon
-            cx, cy = bx + 19, by + bh // 2
-            clock_r = 7
-            draw.ellipse((cx - clock_r, cy - clock_r, cx + clock_r, cy + clock_r), outline=(220, 230, 242), width=2)
-            draw.line((cx, cy, cx, cy - 4), fill=(220, 230, 242), width=2)
-            draw.line((cx, cy, cx + 3, cy), fill=(220, 230, 242), width=2)
-            draw.text((bx + 34, by + 7), display_txt, font=f_badge, fill=(245, 247, 250))
+            cx, cy = bx + 24, by + bh // 2
+            clock_r = 10
+            draw.ellipse((cx - clock_r, cy - clock_r, cx + clock_r, cy + clock_r), outline=(220, 230, 242), width=3)
+            draw.line((cx, cy, cx, cy - 6), fill=(220, 230, 242), width=3)
+            draw.line((cx, cy, cx + 5, cy), fill=(220, 230, 242), width=3)
+            draw.text((bx + 44, by + (bh - th) // 2 - 2), display_txt, font=f_badge, fill=(245, 247, 250))
 
     @staticmethod
     def _draw_tvvoo_bookmark(draw: ImageDraw.ImageDraw):
-        """Draws the discreet golden bolt bookmark ribbon pinned to the top-right corner."""
-        rw, rh = 50, 68
-        rx = CANVAS_WIDTH - 44 - rw
+        """Draws the bold golden bolt bookmark ribbon pinned to the top-right corner."""
+        rw, rh = 78, 106
+        rx = CANVAS_WIDTH - 36 - rw
         ry = 0
 
         # Ribbon polygon with classic swallowtail V-notch
@@ -300,20 +304,20 @@ class BannerService:
             (rx, ry),
             (rx + rw, ry),
             (rx + rw, ry + rh),
-            (rx + rw // 2, ry + rh - 14),
+            (rx + rw // 2, ry + rh - 20),
             (rx, ry + rh),
         ]
-        draw.polygon(ribbon_pts, fill=(15, 18, 24), outline=(255, 204, 0), width=2)
+        draw.polygon(ribbon_pts, fill=(15, 18, 24), outline=(255, 204, 0), width=3)
 
-        # Golden lightning bolt polygon
+        # Bold golden lightning bolt polygon
         bolt_pts = [
-            (rx + 25, ry + 12),
-            (rx + 35, ry + 12),
-            (rx + 22, ry + 33),
-            (rx + 30, ry + 33),
-            (rx + 16, ry + 54),
-            (rx + 23, ry + 37),
-            (rx + 15, ry + 37),
+            (rx + 39, ry + 16),
+            (rx + 56, ry + 16),
+            (rx + 34, ry + 48),
+            (rx + 48, ry + 48),
+            (rx + 22, ry + 82),
+            (rx + 36, ry + 52),
+            (rx + 22, ry + 52),
         ]
         draw.polygon(bolt_pts, fill=(255, 204, 0))
 

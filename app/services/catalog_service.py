@@ -1,5 +1,6 @@
 import asyncio
 import datetime
+from difflib import SequenceMatcher
 import logging
 import re
 import time
@@ -340,6 +341,76 @@ class CatalogService:
         c2 = cls.get_canonical_silo({"_silo": s2, "category": s2})
         return c1 == c2
 
+    @staticmethod
+    def _is_token_match(tokens1: str, tokens2: str) -> bool:
+        """
+        Determines if two token strings represent the exact same match.
+        Robust against:
+        1. Inverted team order (Home vs Away vs Away vs Home)
+        2. Spelling / transliteration differences (Turkey vs Türkiye, Munich vs München)
+        3. Minor competition name additions
+        Guarantees that rival clubs (e.g. Real Madrid vs Atletico Madrid) NEVER merge.
+        """
+        w1 = [w for w in tokens1.split() if len(w) > 1]
+        w2 = [w for w in tokens2.split() if len(w) > 1]
+        if not w1 or not w2:
+            return False
+        if w1 == w2:
+            return True
+
+        b1 = [max(SequenceMatcher(None, x, y).ratio() for y in w2) for x in w1]
+        b2 = [max(SequenceMatcher(None, y, x).ratio() for x in w1) for y in w2]
+        avg1 = sum(b1) / len(b1)
+        avg2 = sum(b2) / len(b2)
+        min1 = min(b1)
+        min2 = min(b2)
+
+        # Equal word count: each word must have a strong counterpart (ratio >= 0.70)
+        # and high overall similarity (average >= 0.80)
+        if len(w1) == len(w2):
+            return (avg1 + avg2) / 2.0 >= 0.80 and min1 >= 0.70 and min2 >= 0.70
+
+        # Unequal word count: the smaller title (at least 2 words) must be fully and cleanly covered in the larger title
+        if len(w1) < len(w2):
+            return len(w1) >= 2 and avg1 >= 0.85 and min1 >= 0.70
+        else:
+            return len(w2) >= 2 and avg2 >= 0.85 and min2 >= 0.70
+
+    @staticmethod
+    def _clean_team_str(s: str) -> str:
+        s = (s or "").lower().strip()
+        s = unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode("utf-8")
+        return re.sub(r"[^a-z0-9]+", " ", s).strip()
+
+    @classmethod
+    def _teams_match_fuzzy(cls, t1: Optional[Dict[str, Any]], t2: Optional[Dict[str, Any]]) -> bool:
+        """
+        Symmetrically checks if two structured teams objects match (direct order or inverted).
+        Returns True if (Home1 ≈ Home2 and Away1 ≈ Away2) OR (Home1 ≈ Away2 and Away1 ≈ Home2).
+        """
+        if not isinstance(t1, dict) or not isinstance(t2, dict):
+            return False
+        h1 = cls._clean_team_str(t1.get("home", {}).get("name") or "")
+        a1 = cls._clean_team_str(t1.get("away", {}).get("name") or "")
+        h2 = cls._clean_team_str(t2.get("home", {}).get("name") or "")
+        a2 = cls._clean_team_str(t2.get("away", {}).get("name") or "")
+        if not h1 or not a1 or not h2 or not a2:
+            return False
+
+        # Direct comparison (Home1 vs Home2, Away1 vs Away2)
+        d1 = SequenceMatcher(None, h1, h2).ratio()
+        d2 = SequenceMatcher(None, a1, a2).ratio()
+        if d1 >= 0.75 and d2 >= 0.75:
+            return True
+
+        # Inverted comparison (Away @ Home / provider reversed: Home1 vs Away2, Away1 vs Home2)
+        i1 = SequenceMatcher(None, h1, a2).ratio()
+        i2 = SequenceMatcher(None, a1, h2).ratio()
+        if i1 >= 0.75 and i2 >= 0.75:
+            return True
+
+        return False
+
     def merge_and_deduplicate(
         self,
         primary_matches: List[Dict[str, Any]],
@@ -377,25 +448,20 @@ class CatalogService:
                     ex_date = existing.get("date") or 0
                     ex_words = set(ex_tokens.split()) if ex_tokens else set()
 
-                    # Date Compatibility: Must coincide 100% (same time, or within 45m for broadcast pre-game offsets)
+                    # Date Compatibility: Must coincide (same time, or within 45m for broadcast pre-game offsets)
                     if ex_date and m2_date:
                         if ex_date != m2_date and abs(ex_date - m2_date) > 45 * 60 * 1000:
                             continue
 
-                    # Title & Team Similarity (>= 70% similarity or subset with at least 2 common words)
+                    # Title & Team Similarity (Fuzzy Symmetric Matching)
                     is_same = False
-                    if m2_teams and ex_teams and m2_teams == ex_teams:
-                        is_same = True
-                    elif m2_tokens and ex_tokens:
-                        if m2_tokens == ex_tokens:
+                    if m2_teams and ex_teams:
+                        if m2_teams == ex_teams or self._teams_match_fuzzy(m2.get("teams"), existing.get("teams")):
                             is_same = True
-                        else:
-                            common = m2_words & ex_words
-                            union = m2_words | ex_words
-                            sim = len(common) / len(union) if union else 0.0
-                            is_subset = len(common) >= 2 and (m2_words.issubset(ex_words) or ex_words.issubset(m2_words))
-                            if sim >= 0.70 or is_subset:
-                                is_same = True
+
+                    if not is_same and m2_tokens and ex_tokens:
+                        if self._is_token_match(m2_tokens, ex_tokens):
+                            is_same = True
 
                     if is_same:
                         matched_idx = idx

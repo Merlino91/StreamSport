@@ -357,6 +357,11 @@ class TheSportsDBService:
         distinct_common = (m_words & c_words) - self.GENERIC_CLUB_WORDS
         if distinct_common:
             return True
+        # 6. Metric fuzzy similarity (ratio >= 0.75 for names of length >= 4, e.g. turkiye vs turkey)
+        from difflib import SequenceMatcher
+        if len(m_t) >= 4 and len(cal_t) >= 4:
+            if SequenceMatcher(None, m_t, cal_t).ratio() >= 0.75:
+                return True
         return False
 
     def _extract_teams(self, match: Dict[str, Any]) -> Tuple[str, str]:
@@ -416,10 +421,12 @@ class TheSportsDBService:
                 if not cal_home or not cal_away:
                     continue
 
-                h_match = self._team_matches(m_home, cal_home)
-                a_match = self._team_matches(m_away, cal_away)
+                h_direct = self._team_matches(m_home, cal_home)
+                a_direct = self._team_matches(m_away, cal_away)
+                h_inverted = self._team_matches(m_home, cal_away)
+                a_inverted = self._team_matches(m_away, cal_home)
 
-                if h_match and a_match:
+                if (h_direct and a_direct) or (h_inverted and a_inverted):
                     # Check date proximity (+/- 14 hours for timezone flexibility)
                     cal_date = cal.get("date_ms", 0)
                     if m_date and cal_date:

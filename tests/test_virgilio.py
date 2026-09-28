@@ -107,6 +107,40 @@ class TestVirgilioService(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(norway["teams"]["home"]["name"], "Norway")
         self.assertEqual(norway["teams"]["away"]["name"], "Portugal")
 
+    @patch("app.services.virgilio_service.tvvoo_service")
+    @patch("httpx.AsyncClient")
+    async def test_parse_oggi_section_only(self, mock_client_cls, mock_tvvoo):
+        """Verifies that future days (Domani, 01 ottobre, etc.) are strictly excluded from parsing."""
+        multi_day_html = """
+        <h2><span>Oggi </span>– 28 settembre</h2>
+        <table>
+            <tr><td>20:45</td><td>Calcio , UEFA Nations League: Turchia-Italia</td><td>TV8</td></tr>
+        </table>
+        <h2><span>Domani </span>– 29 settembre</h2>
+        <table>
+            <tr><td>20:45</td><td>Calcio , UEFA Nations League: Francia-Italia</td><td>TV8</td></tr>
+        </table>
+        <h2>– 01 ottobre</h2>
+        <table>
+            <tr><td>20:45</td><td>Calcio , UEFA Nations League: Germania-Serbia</td><td>TV8</td></tr>
+        </table>
+        """
+        mock_client = AsyncMock()
+        mock_client_cls.return_value.__aenter__.return_value = mock_client
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.text = multi_day_html
+        mock_client.get.return_value = mock_resp
+        mock_tvvoo.get_channel_streams.return_value = [{"canonical": "tv8", "display_name": "TV8", "url": "https://vavoo.to/play/tv8", "tag": "c"}]
+        mock_tvvoo.ensure_synced = AsyncMock()
+
+        matches = await self.service.get_matches(force=True)
+        self.assertEqual(len(matches), 1)
+        self.assertIn("Turkey vs Italy", matches[0]["title"])
+        # Ensure future matches are NOT present
+        self.assertFalse(any("Francia" in m["title"] or "France" in m["title"] for m in matches))
+        self.assertFalse(any("Germania" in m["title"] or "Germany" in m["title"] for m in matches))
+
 
 if __name__ == "__main__":
     unittest.main()
