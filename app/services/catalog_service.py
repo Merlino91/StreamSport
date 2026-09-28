@@ -23,6 +23,7 @@ from app.services.espn_service import espn_service
 from app.services.genre_classifier import genre_classifier
 from app.services.ocblacktop_service import ocblacktop_service
 from app.services.streamed_api import streamed_api
+from app.services.banner_service import banner_service
 from app.services.tennis_poster_service import tennis_poster_service
 from app.services.thesportsdb_service import thesportsdb_service
 from app.services.virgilio_service import virgilio_service
@@ -200,25 +201,43 @@ class CatalogService:
         now_ms = time.time() * 1000
         desc_parts = []
 
+        # Determine match status and timing for dynamic banner
+        banner_status = "upcoming"
+        banner_time = ""
+        live_window = self.get_live_window_minutes(match)
+
         if not date_ms:
             formatted_date = "Live"
             status_text = "🔴 LIVE ORA"
+            banner_status = "live"
         else:
             formatted_date = self.format_event_date(date_ms, user_tz)
             diff_mins = int((date_ms - now_ms) / 60000)
-            live_window = self.get_live_window_minutes(match)
 
             if diff_mins < -live_window:
                 status_text = "🏁 Conclusa • Replay e Sintesi"
+                banner_status = "replay"
             elif diff_mins <= 0:
                 status_text = "🔴 LIVE ORA"
-            elif diff_mins <= 20:
-                status_text = f"⏳ Inizio tra {diff_mins} min"
-            elif diff_mins < 1440:
-                status_text = f"📅 Inizio tra {diff_mins // 60}h {diff_mins % 60}m"
+                banner_status = "live"
             else:
-                days_left = diff_mins // 1440
-                status_text = f"📅 Tra {days_left} giorni"
+                if diff_mins <= 20:
+                    status_text = f"⏳ Inizio tra {diff_mins} min"
+                elif diff_mins < 1440:
+                    status_text = f"📅 Inizio tra {diff_mins // 60}h {diff_mins % 60}m"
+                else:
+                    days_left = diff_mins // 1440
+                    status_text = f"📅 Tra {days_left} giorni"
+
+                banner_status = "upcoming"
+                try:
+                    from zoneinfo import ZoneInfo
+                    tz = ZoneInfo(user_tz or "Europe/Rome")
+                except Exception:
+                    from zoneinfo import ZoneInfo
+                    tz = ZoneInfo("Europe/Rome")
+                dt = datetime.datetime.fromtimestamp(date_ms / 1000.0, tz=tz)
+                banner_time = dt.strftime("%H:%M")
 
         # Description structure: Status first -> Competition without emoji -> Competitors
         desc_parts.append(status_text)
@@ -233,6 +252,20 @@ class CatalogService:
         description = " • ".join(desc_parts)
         stremio_id = f"streamsport:{match_id}"
 
+        has_tvvoo = any(
+            isinstance(s, dict) and s.get("source") == "tvvoo"
+            for s in match.get("sources", [])
+        )
+
+        clean_match_id = match_id or "unknown"
+        poster_endpoint = f"/poster/{clean_match_id}.jpg?s={banner_status}"
+        if banner_time:
+            poster_endpoint += f"&t={banner_time}"
+        if has_tvvoo:
+            poster_endpoint += "&tv=1"
+
+        dynamic_poster_url = f"{base_url}{poster_endpoint}" if base_url else poster_endpoint
+
         item = {
             "id": stremio_id,
             "type": CATALOG_TYPE,
@@ -241,12 +274,11 @@ class CatalogService:
             "posterShape": "landscape",
             "description": description,
             "releaseInfo": formatted_date,
+            "poster": dynamic_poster_url,
+            "background": dynamic_poster_url,
             "_date_ms": date_ms,
             "_live_window": live_window,
         }
-        if poster_url:
-            item["poster"] = poster_url
-            item["background"] = poster_url
         return item
 
     def _clean_tokens(self, title: str) -> str:
@@ -585,6 +617,7 @@ class CatalogService:
 
                 # Purge matches older than retention window from DB (6h if ENABLE_REPLAYS=False, 72h if True)
                 db_service.purge_expired_matches()
+                banner_service.purge_stale_banners(max_age_hours=24)
 
                 # 4a. LEVEL 1: Reconcile against official TheSportsDB Calendar registry
                 # (Awards official 16:9 poster, competition name, and canonical teams)
@@ -855,5 +888,14 @@ class CatalogService:
         meta = self.build_meta_item(match, genre, user_tz=user_tz, base_url=base_url)
         meta["background"] = meta.get("poster")
         return meta
+
+    def get_cached_match(self, match_id: str) -> Optional[Dict[str, Any]]:
+        """Retrieves a match from the in-memory cache by ID."""
+        clean_id = match_id.replace("streamsport:", "")
+        for m in self._cached_matches:
+            if m.get("id") == clean_id or m.get("id") == match_id:
+                return m
+        return None
+
 
 catalog_service = CatalogService()

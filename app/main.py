@@ -25,8 +25,10 @@ from app.config import (
     SPORT_GENRES,
     STREAMED_API_HOST,
 )
+from app.services.banner_service import banner_service
 from app.services.catalog_service import catalog_service
 from app.services.dailymotion_service import dailymotion_service
+from app.services.db_service import db_service
 from app.services.doh_client import doh_client
 from app.services.stream_service import stream_service
 from app.services.youtube_service import youtube_service
@@ -410,6 +412,40 @@ async def image_proxy(url: str):
         raise HTTPException(status_code=502, detail="Failed to proxy image")
 
     return Response(content=content, media_type=content_type, headers={"Cache-Control": "public, max-age=86400"})
+
+
+@app.get("/poster/{match_id}.jpg")
+async def get_dynamic_poster(
+    match_id: str,
+    s: Optional[str] = "upcoming",
+    t: Optional[str] = "",
+    tv: Optional[int] = 0,
+):
+    """
+    Renders dynamic 16:9 poster with status badge (upcoming time / live)
+    and TvVoo bookmark ribbon.
+    Uses cached JPEG on disk (zero CPU after first generation).
+    """
+    clean_id = match_id.replace("streamsport:", "")
+    match = catalog_service.get_cached_match(clean_id)
+    if not match:
+        match = db_service.get_match_by_id(clean_id)
+
+    content = await banner_service.get_or_create_poster(
+        match=match,
+        match_id=clean_id,
+        status=s or "upcoming",
+        time_str=t or "",
+        has_tvvoo=bool(tv),
+    )
+    if not content:
+        raise HTTPException(status_code=404, detail="Poster not found")
+
+    return Response(
+        content=content,
+        media_type="image/jpeg",
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
 
 
 @app.get("/health")
