@@ -104,7 +104,7 @@ class BannerServiceTestCase(unittest.IsolatedAsyncioTestCase):
             resp = client.get(f"/poster/{match_id}.jpg?s=upcoming&t=20:45&tv=1")
             self.assertEqual(resp.status_code, 200)
             self.assertEqual(resp.headers.get("content-type"), "image/jpeg")
-            self.assertIn("max-age=86400", resp.headers.get("cache-control", ""))
+            self.assertIn("max-age=1800", resp.headers.get("cache-control", ""))
             self.assertGreater(len(resp.content), 5000)
         finally:
             catalog_service._cached_matches.remove(mock_match)

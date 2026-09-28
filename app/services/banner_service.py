@@ -25,6 +25,7 @@ logger = logging.getLogger("streamsport.banner")
 
 CANVAS_WIDTH = 1280
 CANVAS_HEIGHT = 720
+BANNER_VERSION = 2
 
 
 class BannerService:
@@ -88,7 +89,7 @@ class BannerService:
         sanitized_id = self._sanitize_id(match_id)
         clean_time = re.sub(r"[^a-zA-Z0-9]+", "", time_str or "")
         tv_flag = "1" if has_tvvoo else "0"
-        filename = f"{sanitized_id}_{status}_{clean_time}_{tv_flag}.jpg"
+        filename = f"{sanitized_id}_{status}_{clean_time}_{tv_flag}_v{BANNER_VERSION}.jpg"
         return self.banners_dir / filename
 
     async def get_or_create_poster(

@@ -21,6 +21,7 @@ data/*.db
 data/*.sqlite
 data/posters/*.jpg
 data/posters/athletes/
+data/posters/banners/
 
 # Ensure static assets and backgrounds are tracked by Git
 !data/posters/backgrounds/

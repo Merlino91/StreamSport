@@ -24,7 +24,7 @@ from app.services.espn_service import espn_service
 from app.services.genre_classifier import genre_classifier
 from app.services.ocblacktop_service import ocblacktop_service
 from app.services.streamed_api import streamed_api
-from app.services.banner_service import banner_service
+from app.services.banner_service import banner_service, BANNER_VERSION
 from app.services.tennis_poster_service import tennis_poster_service
 from app.services.thesportsdb_service import thesportsdb_service
 from app.services.virgilio_service import virgilio_service
@@ -264,6 +264,7 @@ class CatalogService:
             poster_endpoint += f"&t={banner_time}"
         if has_tvvoo:
             poster_endpoint += "&tv=1"
+        poster_endpoint += f"&v={BANNER_VERSION}"
 
         dynamic_poster_url = f"{base_url}{poster_endpoint}" if base_url else poster_endpoint
 
@@ -902,7 +903,28 @@ class CatalogService:
             unique_filtered.append(meta_item)
         filtered = unique_filtered
 
-        # 7. Pagination & Schema Cleanup
+        # 7. Empty catalog safety: prevent infinite loading spinner in Nuvio/Stremio
+        if not filtered and not search_query and skip == 0:
+            from app.config import CATALOG_DEFINITIONS
+            cat_info = next((c for c in CATALOG_DEFINITIONS if c["id"] == catalog_id), None)
+            cat_name = cat_info["name"] if cat_info else (catalog_id or "Sport").replace("_", " ").title()
+            chosen_genre = target_genre if (not is_all_genre and target_genre) else (cat_info["genres"][0] if cat_info and cat_info.get("genres") else "Sport")
+            clean_id = f"empty_{catalog_id or 'sport'}"
+            poster_url = f"{base_url}/poster/{clean_id}.jpg?s=upcoming&t=OGGI&v={BANNER_VERSION}" if base_url else f"/poster/{clean_id}.jpg?s=upcoming&t=OGGI&v={BANNER_VERSION}"
+            placeholder = {
+                "id": f"streamsport:{clean_id}",
+                "type": CATALOG_TYPE,
+                "name": f"{cat_name}: Nessun evento oggi",
+                "genres": [chosen_genre],
+                "posterShape": "landscape",
+                "description": f"ℹ️ Nessun evento in programma oggi per {cat_name}.\nI flussi e il calendario si aggiornano automaticamente per i prossimi match.",
+                "releaseInfo": "Oggi",
+                "poster": poster_url,
+                "background": poster_url,
+            }
+            return [placeholder]
+
+        # 8. Pagination & Schema Cleanup
         page = filtered[skip : skip + limit]
         for item in page:
             item.pop("_date_ms", None)
@@ -920,6 +942,21 @@ class CatalogService:
         Retrieves full meta details for a single match by slug or ID.
         """
         clean_id = slug_id.split(":", 1)[1] if ":" in slug_id else slug_id
+
+        if clean_id.startswith("empty_"):
+            cat_name = clean_id.replace("empty_", "").replace("_", " ").title()
+            poster_url = f"{base_url}/poster/{clean_id}.jpg?s=upcoming&t=OGGI&v={BANNER_VERSION}" if base_url else f"/poster/{clean_id}.jpg?s=upcoming&t=OGGI&v={BANNER_VERSION}"
+            return {
+                "id": f"streamsport:{clean_id}",
+                "type": CATALOG_TYPE,
+                "name": f"{cat_name}: Nessun evento oggi",
+                "genres": ["Sport"],
+                "posterShape": "landscape",
+                "description": f"ℹ️ Nessun evento in programma oggi per {cat_name}.\nI flussi e il calendario si aggiornano automaticamente per i prossimi match.",
+                "releaseInfo": "Oggi",
+                "poster": poster_url,
+                "background": poster_url,
+            }
 
         # 0. Check in-memory cached matches first (instant!)
         match = None

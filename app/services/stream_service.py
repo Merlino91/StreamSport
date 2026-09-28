@@ -316,9 +316,16 @@ class StreamService:
     ) -> List[Dict[str, Any]]:
         """
         Resolves streams for an event ID and formats them for Stremio.
-        Enforces time-window rules: hides streams until 20 min before start,
-        and provides live streams or post-match highlights/replays.
         """
+        clean_id = item_id.split(":", 1)[1] if ":" in item_id else item_id
+        if clean_id.startswith("empty_"):
+            return [{
+                "name": "ℹ️ Nessun evento in corso",
+                "title": "Non ci sono trasmissioni live oggi per questa disciplina.\nI palinsesti si aggiornano automaticamente per le prossime partite.",
+                "url": "",
+                "behaviorHints": {"notWebReady": True},
+            }]
+
         if not ep_url:
             return [
                 {
