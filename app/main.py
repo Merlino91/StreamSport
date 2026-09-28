@@ -430,14 +430,6 @@ async def get_dynamic_poster(
     match = catalog_service.get_cached_match(clean_id)
     if not match:
         match = db_service.get_match_by_id(clean_id)
-    if not match and clean_id.startswith("empty_"):
-        cat_key = clean_id.replace("empty_", "").replace("_", " ").title()
-        match = {
-            "id": clean_id,
-            "title": "Nessun Evento Oggi",
-            "competition": f"{cat_key.upper()}",
-            "poster": None,
-        }
 
     content = await banner_service.get_or_create_poster(
         match=match,
