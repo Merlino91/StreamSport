@@ -25,7 +25,7 @@ logger = logging.getLogger("streamsport.banner")
 
 CANVAS_WIDTH = 889
 CANVAS_HEIGHT = 500
-BANNER_VERSION = 3
+BANNER_VERSION = 4
 
 
 class BannerService:
@@ -243,34 +243,34 @@ class BannerService:
         return resized.crop((left, top, left + target_w, top + target_h))
 
     def _draw_status_badge(self, draw: ImageDraw.ImageDraw, status: str, time_str: str):
-        """Draws the top-left pill badge (LIVE, Upcoming Time, or Replay) with 12px font."""
-        bx, by = 18, 14
-        bh = 26
-        f_badge = self._get_font(12, bold=True)
+        """Draws the top-left pill badge (LIVE, Upcoming Time, or Replay) with 30px font."""
+        bx, by = 20, 16
+        bh = 50
+        f_badge = self._get_font(30, bold=True)
 
         if status == "live":
             txt = "LIVE"
             t_bbox = draw.textbbox((0, 0), txt, font=f_badge)
             tw = t_bbox[2] - t_bbox[0]
             th = t_bbox[3] - t_bbox[1]
-            bw = tw + 40
+            bw = tw + 60
             # Vibrant crimson red pill
-            draw.rounded_rectangle((bx, by, bx + bw, by + bh), radius=6, fill=(225, 15, 25))
+            draw.rounded_rectangle((bx, by, bx + bw, by + bh), radius=12, fill=(225, 15, 25))
             # Center pulsing white dot
-            cx, cy = bx + 12, by + bh // 2
-            cr = 4
+            cx, cy = bx + 20, by + bh // 2
+            cr = 7
             draw.ellipse((cx - cr, cy - cr, cx + cr, cy + cr), fill=(255, 255, 255))
-            draw.text((bx + 22, by + (bh - th) // 2 - 1), txt, font=f_badge, fill=(255, 255, 255))
+            draw.text((bx + 38, by + (bh - th) // 2 - 2), txt, font=f_badge, fill=(255, 255, 255))
 
         elif status == "replay":
             txt = "REPLAY"
             t_bbox = draw.textbbox((0, 0), txt, font=f_badge)
             tw = t_bbox[2] - t_bbox[0]
             th = t_bbox[3] - t_bbox[1]
-            bw = tw + 24
+            bw = tw + 36
             # Slate pill
-            draw.rounded_rectangle((bx, by, bx + bw, by + bh), radius=6, fill=(32, 40, 52), outline=(105, 125, 150), width=1)
-            draw.text((bx + 12, by + (bh - th) // 2 - 1), txt, font=f_badge, fill=(240, 245, 250))
+            draw.rounded_rectangle((bx, by, bx + bw, by + bh), radius=12, fill=(32, 40, 52), outline=(105, 125, 150), width=2)
+            draw.text((bx + 18, by + (bh - th) // 2 - 2), txt, font=f_badge, fill=(240, 245, 250))
 
         else:
             # Upcoming
@@ -279,22 +279,22 @@ class BannerService:
             t_bbox = draw.textbbox((0, 0), display_txt, font=f_badge)
             tw = t_bbox[2] - t_bbox[0]
             th = t_bbox[3] - t_bbox[1]
-            bw = tw + 38
+            bw = tw + 64
             # Dark glass translucent pill with silver-blue border
-            draw.rounded_rectangle((bx, by, bx + bw, by + bh), radius=6, fill=(16, 22, 32), outline=(130, 155, 190), width=1)
+            draw.rounded_rectangle((bx, by, bx + bw, by + bh), radius=12, fill=(16, 22, 32), outline=(130, 155, 190), width=2)
             # Clock circle icon
-            cx, cy = bx + 13, by + bh // 2
-            clock_r = 5
-            draw.ellipse((cx - clock_r, cy - clock_r, cx + clock_r, cy + clock_r), outline=(245, 248, 252), width=1)
-            draw.line((cx, cy, cx, cy - 3), fill=(245, 248, 252), width=1)
-            draw.line((cx, cy, cx + 2, cy), fill=(245, 248, 252), width=1)
-            draw.text((bx + 24, by + (bh - th) // 2 - 1), display_txt, font=f_badge, fill=(255, 255, 255))
+            cx, cy = bx + 22, by + bh // 2
+            clock_r = 10
+            draw.ellipse((cx - clock_r, cy - clock_r, cx + clock_r, cy + clock_r), outline=(245, 248, 252), width=2)
+            draw.line((cx, cy, cx, cy - 6), fill=(245, 248, 252), width=2)
+            draw.line((cx, cy, cx + 5, cy), fill=(245, 248, 252), width=2)
+            draw.text((bx + 42, by + (bh - th) // 2 - 2), display_txt, font=f_badge, fill=(255, 255, 255))
 
     @staticmethod
     def _draw_tvvoo_bookmark(draw: ImageDraw.ImageDraw):
-        """Draws the golden bookmark ribbon pinned to the top-right corner with obsidian lightning bolt."""
+        """Draws the golden bookmark ribbon pinned to the top-right corner with obsidian lightning bolt, shifted left for card border radius."""
         rw, rh = 54, 76
-        rx = CANVAS_WIDTH - 18 - rw
+        rx = CANVAS_WIDTH - 42 - rw
         ry = 0
 
         # Golden satin ribbon polygon with swallowtail V-notch
