@@ -74,7 +74,7 @@ class TestVirgilioService(unittest.IsolatedAsyncioTestCase):
         mock_client.get.return_value = mock_resp
 
         # Mock tvvoo_service streams
-        def mock_get_streams(channel_name):
+        def mock_get_streams(channel_name, country=None):
             ch_lower = channel_name.lower()
             if "calcio" in ch_lower:
                 return [{"canonical": "sky sport calcio", "display_name": "Sky Sport Calcio", "url": "https://vavoo.to/play/calcio", "tag": "c"}]

@@ -1185,8 +1185,13 @@ class TheSportsDBService:
                         continue
 
                     ch_clean = ch_name.strip()
+                    ch_lower = ch_clean.lower()
                     # Silence generic unnumbered "Magenta Sport" from TheSportsDB
-                    if "magenta sport" in ch_clean.lower() and not re.search(r"\b\d+\b", ch_clean):
+                    if "magenta sport" in ch_lower and not re.search(r"\b\d+\b", ch_clean):
+                        continue
+
+                    # Silence generic unnumbered OTT platform entries from TheSportsDB (not linear TV channels)
+                    if re.match(r"^dazn\s+(spain|germany|italy|uk|national league|france|us|canada|es|de|it|fr)$", ch_lower):
                         continue
 
                     # Map flag_norm to country silo

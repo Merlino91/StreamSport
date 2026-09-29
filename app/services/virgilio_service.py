@@ -234,7 +234,7 @@ class VirgilioService:
                 seen_keys = set()
 
                 for ch in channel_names:
-                    tvvoo_streams = tvvoo_service.get_channel_streams(ch)
+                    tvvoo_streams = tvvoo_service.get_channel_streams(ch, country="Italy")
                     for st in tvvoo_streams:
                         st_url = st.get("url")
                         key = (st.get("canonical"), st.get("tag"))

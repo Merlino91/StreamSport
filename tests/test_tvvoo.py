@@ -79,8 +79,10 @@ class TestTvVooService(unittest.IsolatedAsyncioTestCase):
 
         # Automatic country suffix detection
         self.assertIsNone(self.service.get_canonical_key("DAZN CA"))
-        self.assertEqual(self.service.get_canonical_key("DAZN DE"), "dazn 1 de")
-        self.assertEqual(self.service.get_canonical_key("DAZN ES"), "dazn 1 es")
+        self.assertEqual(self.service.get_canonical_key("DAZN 1 DE"), "dazn 1 de")
+        self.assertEqual(self.service.get_canonical_key("DAZN 1 ES"), "dazn 1 es")
+        self.assertIsNone(self.service.get_canonical_key("DAZN DE"))
+        self.assertIsNone(self.service.get_canonical_key("DAZN ES"))
         self.assertIsNone(self.service.get_canonical_key("DAZN FAST+"))
         self.assertIsNone(self.service.get_canonical_key("DAZN RISE"))
         self.assertIsNone(self.service.get_canonical_key("DAZN EVENT INFO"))
