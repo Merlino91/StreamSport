@@ -66,16 +66,24 @@ class TestTvVooService(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.service.get_canonical_key("Magenta Sport 303"), "magenta sport 3")
         self.assertEqual(self.service.get_canonical_key("303"), "magenta sport 3")
 
-        # Generic Magenta Sport should NOT match a numbered channel
-        self.assertEqual(self.service.get_canonical_key("Magenta Sport"), "magenta sport")
+        # Generic unnumbered Magenta Sport is disabled (ghost feed)
+        self.assertIsNone(self.service.get_canonical_key("Magenta Sport"))
 
     def test_country_silos_isolation(self):
-        """Tests that when country is specified, country-specific silos resolve correctly."""
+        """Tests that when country is specified or suffixed, country-specific silos resolve correctly."""
         # DAZN in Italy vs Spain vs Germany vs France
         self.assertEqual(self.service.get_canonical_key("DAZN 1", country="Italy"), "dazn 1")
         self.assertEqual(self.service.get_canonical_key("DAZN 1", country="Spain"), "dazn 1 es")
         self.assertEqual(self.service.get_canonical_key("DAZN 1", country="Germany"), "dazn 1 de")
         self.assertEqual(self.service.get_canonical_key("DAZN 1", country="France"), "dazn 1 fr")
+
+        # Automatic country suffix detection
+        self.assertIsNone(self.service.get_canonical_key("DAZN CA"))
+        self.assertEqual(self.service.get_canonical_key("DAZN DE"), "dazn 1 de")
+        self.assertEqual(self.service.get_canonical_key("DAZN ES"), "dazn 1 es")
+        self.assertIsNone(self.service.get_canonical_key("DAZN FAST+"))
+        self.assertIsNone(self.service.get_canonical_key("DAZN RISE"))
+        self.assertIsNone(self.service.get_canonical_key("DAZN EVENT INFO"))
 
         # Sky Sport 1 in Germany vs Sky Sport 1 in Italy
         self.assertEqual(self.service.get_canonical_key("Sky Sport 1", country="Germany"), "sky sport 1 de")

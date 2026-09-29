@@ -1184,7 +1184,20 @@ class TheSportsDBService:
                     if not is_target:
                         continue
 
-                    streams = tvvoo_service.get_channel_streams(ch_name.strip())
+                    ch_clean = ch_name.strip()
+                    # Silence generic unnumbered "Magenta Sport" from TheSportsDB
+                    if "magenta sport" in ch_clean.lower() and not re.search(r"\b\d+\b", ch_clean):
+                        continue
+
+                    # Map flag_norm to country silo
+                    flag_country = None
+                    if "ital" in flag_norm: flag_country = "Italy"
+                    elif "germ" in flag_norm or "deut" in flag_norm: flag_country = "Germany"
+                    elif "spain" in flag_norm or "esp" in flag_norm: flag_country = "Spain"
+                    elif "fran" in flag_norm: flag_country = "France"
+                    elif "uk" in flag_norm or "unit" in flag_norm or "eng" in flag_norm: flag_country = "United Kingdom"
+
+                    streams = tvvoo_service.get_channel_streams(ch_clean, country=flag_country)
                     for st in streams:
                         key = (st.get("canonical"), st.get("tag"))
                         if key not in seen_streams and st.get("url"):

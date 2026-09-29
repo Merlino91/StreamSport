@@ -26,6 +26,56 @@ class TvVooService:
     # Supported Vavoo country groups for sports broadcasting
     TVVOO_COUNTRY_GROUPS: List[str] = ["Italy", "Spain", "Germany", "France", "United Kingdom"]
 
+    # Country suffix mapping for recognizing geographic broadcasts
+    COUNTRY_SUFFIX_MAP: Dict[str, str] = {
+        "it": "Italy",
+        "italy": "Italy",
+        "italia": "Italy",
+        "de": "Germany",
+        "germany": "Germany",
+        "deutschland": "Germany",
+        "es": "Spain",
+        "spain": "Spain",
+        "espana": "Spain",
+        "fr": "France",
+        "france": "France",
+        "uk": "United Kingdom",
+        "gb": "United Kingdom",
+    }
+
+    # Unsupported countries that must NOT fall back to European/Italian channels
+    UNSUPPORTED_COUNTRY_SUFFIXES: Set[str] = {
+        "ca", "canada",
+        "us", "usa",
+        "br", "brazil", "brasil",
+        "nl", "netherlands",
+        "pl", "poland", "polska",
+        "ro", "romania",
+        "hr", "croatia",
+        "rs", "serbia",
+        "gr", "greece",
+        "cy", "cyprus",
+        "il", "israel",
+        "bg", "bulgaria",
+        "al", "albania",
+        "az", "azerbaijan",
+        "pt", "portugal",
+        "dk", "denmark",
+        "se", "sweden",
+        "no", "norway",
+        "cz", "czech",
+        "sk", "slovakia",
+        "hu", "hungary",
+        "tr", "turkey",
+        "ru", "russia",
+        "ua", "ukraine",
+        "ar", "argentina",
+        "mx", "mexico",
+        "au", "australia",
+        "nz", "new zealand",
+        "za", "south africa",
+    }
+
     # Country-specific alias mapping (Silos) including official LCN numbering
     COUNTRY_ALIASES: Dict[str, Dict[str, str]] = {
         "Italy": {
@@ -151,6 +201,9 @@ class TvVooService:
             "dazn": "dazn 1",
             "dazn 1": "dazn 1",
             "dazn 1 it": "dazn 1",
+            "dazn 1 italia": "dazn 1",
+            "dazn it": "dazn 1",
+            "dazn italia": "dazn 1",
             "dazn 1 hd": "dazn 1",
             "zona dazn": "dazn 1",
             "zona dazn 214": "dazn 1",
@@ -160,6 +213,7 @@ class TvVooService:
             "214": "dazn 1",
             "dazn 2": "dazn 2",
             "dazn 2 it": "dazn 2",
+            "dazn 2 italia": "dazn 2",
             "zona dazn 2": "dazn 2",
             "zona dazn 215": "dazn 2",
             "dazn 215": "dazn 2",
@@ -194,9 +248,7 @@ class TvVooService:
 
         "Germany": {
             # Magenta Sport (1..10 and receiver channels 301..310)
-            "magenta sport": "magenta sport",
-            "magentatv de": "magenta sport",
-            "magentatv": "magenta sport",
+            # Unnumbered 'magenta sport' ghost feed disabled by directive
             "magenta sport 1": "magenta sport 1",
             "magenta sport 301": "magenta sport 1",
             "301": "magenta sport 1",
@@ -287,9 +339,12 @@ class TvVooService:
             "dazn 2": "dazn 2 de",
             "dazn 2 de": "dazn 2 de",
             "dazn 2 germany": "dazn 2 de",
+            "dazn de": "dazn 1 de",
             "dazn germany": "dazn 1 de",
             "sport1": "sport1 de",
+            "sport 1": "sport1 de",
             "sport1 de": "sport1 de",
+            "sport 1 de": "sport1 de",
             "sport1 germany": "sport1 de",
         },
 
@@ -344,6 +399,9 @@ class TvVooService:
             "dazn 4": "dazn 4 es",
             "dazn 4 es": "dazn 4 es",
             "dazn 4 spain": "dazn 4 es",
+            "dazn es": "dazn 1 es",
+            "dazn esp": "dazn 1 es",
+            "dazn espana": "dazn 1 es",
             "dazn spain": "dazn 1 es",
             "dazn laliga": "dazn laliga",
             "dazn laliga 1": "dazn laliga 1",
@@ -410,6 +468,8 @@ class TvVooService:
             "dazn 2 fr": "dazn 2 fr",
             "dazn 3": "dazn 3 fr",
             "dazn 3 fr": "dazn 3 fr",
+            "dazn fr": "dazn 1 fr",
+            "dazn france": "dazn 1 fr",
             "rmc sport 1": "rmc sport 1",
             "rmc sport 2": "rmc sport 2",
         },
@@ -499,7 +559,6 @@ class TvVooService:
         "rai 3": "Rai 3",
 
         # Germany
-        "magenta sport": "🇩🇪 Magenta Sport",
         "magenta sport 1": "🇩🇪 Magenta Sport 1",
         "magenta sport 2": "🇩🇪 Magenta Sport 2",
         "magenta sport 3": "🇩🇪 Magenta Sport 3",
@@ -647,12 +706,25 @@ class TvVooService:
         if not cleaned:
             return None
 
-        # Build candidate dictionaries: prioritize country silo if specified
+        # Check trailing country word/code (e.g. 'dazn ca', 'dazn de', 'bein sports 1 france')
+        trailing_word_match = re.search(r"\b([a-z]{2,12})$", cleaned)
+        if trailing_word_match and country is None:
+            trailing_code = trailing_word_match.group(1)
+            if trailing_code in self.UNSUPPORTED_COUNTRY_SUFFIXES:
+                # Explicit non-supported foreign broadcast (e.g. Canada, USA, Brazil) -> Do NOT fallback to Italy
+                return None
+            if trailing_code in self.COUNTRY_SUFFIX_MAP:
+                country = self.COUNTRY_SUFFIX_MAP[trailing_code]
+
+        # Build candidate dictionaries: prioritize country silo if specified or detected
         candidate_dicts: List[Dict[str, str]] = []
         if country and country in self.COUNTRY_ALIASES:
+            # When country is specified or detected, ONLY search that country's silo (never contaminate with Italy)
             candidate_dicts.append(self.COUNTRY_ALIASES[country])
-        # Add all aliases as general fallback
-        candidate_dicts.append(self.CHANNEL_ALIASES)
+        else:
+            # Fallback for country-agnostic queries: Italy first, then global aliases
+            candidate_dicts.append(self.COUNTRY_ALIASES.get("Italy", {}))
+            candidate_dicts.append(self.CHANNEL_ALIASES)
 
         for aliases_map in candidate_dicts:
             # 1. Exact match
@@ -665,15 +737,25 @@ class TvVooService:
             if cleaned_no_sym in aliases_map:
                 return aliases_map[cleaned_no_sym]
 
-            # 3. Strict Number Partial Match
-            # If the channel name contains numbers, only allow matching aliases with the exact same numbers.
+            # 3. Match with common noise words stripped (e.g., 'hd', 'uhd', 'fhd', 'tv', 'channel', 'canale', 'live')
+            cleaned_no_noise = re.sub(r"\b(hd|uhd|fhd|sd|tv|channel|canale|live)\b", " ", cleaned)
+            cleaned_no_noise = re.sub(r"\s+", " ", cleaned_no_noise).strip()
+            if cleaned_no_noise and cleaned_no_noise in aliases_map:
+                return aliases_map[cleaned_no_noise]
+
+            # 4. Strict Number Match
+            # Only match aliases that share the EXACT same set of numbers as cleaned.
             nums_in_cleaned = set(re.findall(r"\b\d+\b", cleaned))
-            for alias, canonical in aliases_map.items():
-                nums_in_alias = set(re.findall(r"\b\d+\b", alias))
-                if nums_in_cleaned != nums_in_alias:
-                    continue
-                if len(alias) >= 4 and (alias in cleaned or cleaned in alias):
-                    return canonical
+            if nums_in_cleaned:
+                for alias, canonical in aliases_map.items():
+                    nums_in_alias = set(re.findall(r"\b\d+\b", alias))
+                    if nums_in_cleaned != nums_in_alias:
+                        continue
+                    # Must be a word-bounded substring (e.g. 'sky sport 1' in 'sky sport 1 bar')
+                    # Never allow reverse matching (cleaned in alias) to prevent false matches
+                    pattern = r"\b" + re.escape(alias) + r"\b"
+                    if re.search(pattern, cleaned):
+                        return canonical
 
         return None
 
