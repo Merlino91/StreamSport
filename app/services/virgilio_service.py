@@ -246,6 +246,7 @@ class VirgilioService:
                                 "name": st.get("display_name", ch),
                                 "url": st_url,
                                 "tag": st.get("tag", "c"),
+                                "country": "Italy",
                             })
 
 

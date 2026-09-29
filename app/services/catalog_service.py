@@ -27,6 +27,7 @@ from app.services.streamed_api import streamed_api
 from app.services.banner_service import banner_service, BANNER_VERSION
 from app.services.tennis_poster_service import tennis_poster_service
 from app.services.thesportsdb_service import thesportsdb_service
+from app.services.tvvoo_service import tvvoo_service
 from app.services.virgilio_service import virgilio_service
 
 
@@ -657,8 +658,9 @@ class CatalogService:
                     daddylive_api.get_matches(force=True),
                     espn_service.get_official_events(),
                     ocblacktop_service.get_official_sessions(),
-                    thesportsdb_service.fetch_multi_day_calendar(days_ahead=2),
+                    thesportsdb_service.fetch_multi_day_calendar(days_ahead=3, days_behind=1),
                     virgilio_service.get_matches(),
+                    thesportsdb_service.fetch_browse_tv_matches(),
                 ]
                 results = await asyncio.gather(*tasks, return_exceptions=True)
                 streamed_raw = results[0] if isinstance(results[0], list) else []
@@ -666,10 +668,12 @@ class CatalogService:
                 espn_events = results[2] if isinstance(results[2], list) else []
                 ocb_sessions = results[3] if isinstance(results[3], list) else []
                 virgilio_raw = results[5] if isinstance(results[5], list) else []
+                tsdb_tv_raw = results[6] if isinstance(results[6], list) else []
 
                 streamed_matches = [m for m in streamed_raw if self.is_real_match(m)]
                 daddylive_matches = [m for m in daddylive_raw if self.is_real_match(m)]
                 virgilio_matches = [m for m in virgilio_raw if self.is_real_match(m)]
+                tsdb_tv_matches = [m for m in tsdb_tv_raw if self.is_real_match(m)]
 
                 # Merge streamed and daddylive matches silo-by-silo into combined fresh
                 combined_fresh = self.merge_and_deduplicate_by_silos(streamed_matches, daddylive_matches)
@@ -678,9 +682,16 @@ class CatalogService:
                 if virgilio_matches:
                     combined_fresh = self.merge_and_deduplicate_by_silos(combined_fresh, virgilio_matches)
 
+                # Merge TheSportsDB multi-nation TV schedule with TvVoo streams
+                if tsdb_tv_matches:
+                    combined_fresh = self.merge_and_deduplicate_by_silos(combined_fresh, tsdb_tv_matches)
+
                 # 2. Pull all active matches from DB to retain existing enriched posters
                 all_db_matches = [m for m in db_service.get_active_matches() if self.is_real_match(m)]
                 all_matches = self.merge_and_deduplicate_by_silos(combined_fresh, all_db_matches) if all_db_matches else combined_fresh
+
+                # Enrich any match (from DaddyLive, Streamed, etc.) with TvVoo FHD streams if matching recognized broadcasters
+                tvvoo_service.enrich_matches_with_tvvoo(all_matches)
 
 
                 # 3. Persist merged matches in DB
@@ -702,6 +713,9 @@ class CatalogService:
                 # 4c. Reconcile motorsport events against official Orange Cat Blacktop session registry
                 if ocb_sessions:
                     ocblacktop_service.reconcile_matches(all_matches, ocb_sessions)
+
+                # 4d. Reconcile motorsport events against TheSportsDB in-RAM calendar (with canonized OCB session data)
+                thesportsdb_service.reconcile_motorsport_matches(all_matches)
 
                 # 5. LEVEL 3: Pre-classify every match into catalog and genre
                 # Matches with _tsdb_matched have competition set, enabling exact genre matching;

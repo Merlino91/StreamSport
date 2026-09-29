@@ -3,7 +3,7 @@ import os
 import sys
 import unittest
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, patch, MagicMock
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -345,7 +345,196 @@ class TheSportsDBTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(h3, "jannik sinner")
         self.assertEqual(a3, "carlos alcaraz")
 
+    def test_motorsport_in_ram_reconciliation_and_cascade_fallback(self):
+        # Mock cached motorsport calendar in memory
+        base_time = 1790905500000  # Friday ~01:45 UTC
+        mock_ms_calendar = [
+            {
+                "title": "Japan Free Practice 1",
+                "competition": "MotoGP",
+                "sport": "Motorsport",
+                "_silo": "motor-sports",
+                "date_ms": base_time,
+                "thumb": None,
+            },
+            {
+                "title": "Japan Qualifying 2",
+                "competition": "MotoGP",
+                "sport": "Motorsport",
+                "_silo": "motor-sports",
+                "date_ms": base_time + (24 * 3600 * 1000),  # Saturday
+                "thumb": None,
+            },
+            {
+                "title": "Japan Sprint Race",
+                "competition": "MotoGP",
+                "sport": "Motorsport",
+                "_silo": "motor-sports",
+                "date_ms": base_time + (28 * 3600 * 1000),  # Saturday Sprint
+                "thumb": "https://r2.thesportsdb.com/images/media/event/thumb/japan_sprint.jpg/medium",
+            },
+            {
+                "title": "Japan GP",
+                "competition": "MotoGP",
+                "sport": "Motorsport",
+                "_silo": "motor-sports",
+                "date_ms": base_time + (51 * 3600 * 1000),  # Sunday GP Main Race
+                "thumb": "https://r2.thesportsdb.com/images/media/event/thumb/japan_gp_main.jpg/medium",
+            },
+            {
+                "title": "Bahrain in Malaysia Grand Prix",
+                "competition": "Formula 1",
+                "sport": "Motorsport",
+                "_silo": "motor-sports",
+                "date_ms": base_time + (53 * 3600 * 1000),
+                "thumb": "https://r2.thesportsdb.com/images/media/event/thumb/f1_malaysia_gp.jpg/medium",
+            },
+        ]
+
+        old_cache = thesportsdb_service._calendar_cache
+        old_silo = thesportsdb_service._calendar_by_silo
+        try:
+            thesportsdb_service._calendar_cache = mock_ms_calendar
+            thesportsdb_service._calendar_by_silo = {"motor-sports": mock_ms_calendar}
+
+            test_matches = [
+                # Case 1: Minor session with no thumb (FP1) -> Falls back to Sunday Japan GP main poster!
+                {
+                    "id": "match_motogp_fp1",
+                    "title": "MotoGP: GP Giappone - Prove Libere 1",
+                    "_silo": "motor-sports",
+                    "date": base_time,
+                    "poster": None,
+                },
+                # Case 2: Qualifying 2 with no thumb -> Falls back to Sunday Japan GP main poster!
+                {
+                    "id": "match_motogp_q2",
+                    "title": "MotoGP: Grand Prix of Japan - Qualifying 2",
+                    "_silo": "motor-sports",
+                    "date": base_time + (24 * 3600 * 1000),
+                    "poster": None,
+                },
+                # Case 3: Session that has its own official thumb (Sprint Race) -> Takes session thumb!
+                {
+                    "id": "match_motogp_sprint",
+                    "title": "MotoGP: Grand Prix of Japan - Sprint Race",
+                    "_silo": "motor-sports",
+                    "date": base_time + (28 * 3600 * 1000),
+                    "poster": None,
+                },
+                # Case 4: Formula 1 event -> Matches F1 GP poster, not MotoGP!
+                {
+                    "id": "match_f1_fp1",
+                    "title": "Formula 1: Malaysia Grand Prix - FP1",
+                    "_silo": "motor-sports",
+                    "date": base_time + (3 * 3600 * 1000),
+                    "poster": None,
+                },
+            ]
+
+            reconciled = thesportsdb_service.reconcile_motorsport_matches(test_matches)
+            self.assertEqual(reconciled, 4)
+
+            # Verification of artwork assignments
+            self.assertEqual(
+                test_matches[0]["poster"],
+                "https://r2.thesportsdb.com/images/media/event/thumb/japan_gp_main.jpg/medium"
+            )
+            self.assertEqual(
+                test_matches[1]["poster"],
+                "https://r2.thesportsdb.com/images/media/event/thumb/japan_gp_main.jpg/medium"
+            )
+            self.assertEqual(
+                test_matches[2]["poster"],
+                "https://r2.thesportsdb.com/images/media/event/thumb/japan_sprint.jpg/medium"
+            )
+            self.assertEqual(
+                test_matches[3]["poster"],
+                "https://r2.thesportsdb.com/images/media/event/thumb/f1_malaysia_gp.jpg/medium"
+            )
+            for m in test_matches:
+                self.assertTrue(m.get("_tsdb_matched"))
+        finally:
+            thesportsdb_service._calendar_cache = old_cache
+            thesportsdb_service._calendar_by_silo = old_silo
+
+    @patch("app.services.thesportsdb_service.thesportsdb_service._get_client")
+    @patch("app.services.tvvoo_service.tvvoo_service.ensure_synced")
+    async def test_fetch_browse_tv_matches(self, mock_ensure_synced, mock_get_client):
+        sample_html = """
+        <table>
+            <tr>
+                <td class="tv-event-card">
+                    <a href='/event/1001-spain-vs-croatia'>
+                        <img src='https://r2.thesportsdb.com/images/media/event/thumb/spain_croatia.jpg/small' alt='thumb'/>
+                        <br><img src='/images/icons/calendar.png'/> Spain vs Croatia<br>
+                    </a>
+                    <img src='/images/icons/time.png'/>18:00 UTC<br>
+                    <img src='/images/icons/svg/flags/italy.svg'/> <a href='/channel/10-sky-sport-arena'>Sky Sport Arena</a><br>
+                    <img src='/images/icons/svg/flags/spain.svg'/> <a href='/channel/20-movistar-laliga'>Movistar LaLiga</a><br>
+                </td>
+                <td class="tv-event-card">
+                    <a href='/event/1002-canada-local-match'>
+                        <img src='https://r2.thesportsdb.com/images/media/event/thumb/canada.jpg/small' alt='thumb'/>
+                        <br><img src='/images/icons/calendar.png'/> Canada Event<br>
+                    </a>
+                    <img src='/images/icons/time.png'/>20:00 UTC<br>
+                    <img src='/images/icons/svg/flags/canada.svg'/> <a href='/channel/30-onesoccer'>OneSoccer CA</a><br>
+                </td>
+            </tr>
+        </table>
+        """
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.text = sample_html
+
+        mock_client = AsyncMock()
+        mock_client.get.return_value = mock_resp
+        mock_get_client.return_value = mock_client
+
+        from app.services.tvvoo_service import tvvoo_service
+        old_channels = tvvoo_service._channels_by_canonical
+        try:
+            tvvoo_service._channels_by_canonical = {
+                "sky sport arena": [{
+                    "canonical": "sky sport arena",
+                    "display_name": "Sky Sport Arena",
+                    "url": "https://vavoo.to/play/sky_arena_c",
+                    "tag": "c",
+                    "country": "Italy",
+                }],
+                "movistar laliga": [{
+                    "canonical": "movistar laliga",
+                    "display_name": "🇪🇸 Movistar LaLiga",
+                    "url": "https://vavoo.to/play/movistar_c",
+                    "tag": "c",
+                    "country": "Spain",
+                }],
+            }
+
+            matches = await thesportsdb_service.fetch_browse_tv_matches(force=True)
+
+            # Canada event filtered out; Spain vs Croatia retained
+            self.assertEqual(len(matches), 1)
+            m = matches[0]
+            self.assertEqual(m["title"], "Spain vs Croatia")
+            self.assertEqual(m["category"], "football")
+            self.assertEqual(m["poster"], "https://r2.thesportsdb.com/images/media/event/thumb/spain_croatia.jpg/medium")
+            self.assertEqual(m["teams"]["home"]["name"], "Spain")
+            self.assertEqual(m["teams"]["away"]["name"], "Croatia")
+
+            # TvVoo streams attached and Italian stream prioritized at index 0
+            sources = m["sources"]
+            self.assertEqual(len(sources), 2)
+            self.assertEqual(sources[0]["name"], "Sky Sport Arena")
+            self.assertEqual(sources[0]["country"], "Italy")
+            self.assertEqual(sources[1]["name"], "🇪🇸 Movistar LaLiga")
+            self.assertEqual(sources[1]["country"], "Spain")
+        finally:
+            tvvoo_service._channels_by_canonical = old_channels
+
 
 if __name__ == "__main__":
     unittest.main()
+
 

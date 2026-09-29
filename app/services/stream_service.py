@@ -495,17 +495,51 @@ class StreamService:
             if not vavoo_url:
                 continue
 
+            country = (s.get("country") or "").strip()
+            country_norm = country.lower()
+            if any(k in country_norm for k in ("spain", "spagna", "es")):
+                flag, c_name = "🇪🇸", "Spagna"
+            elif any(k in country_norm for k in ("germany", "germania", "de")):
+                flag, c_name = "🇩🇪", "Germania"
+            elif any(k in country_norm for k in ("france", "francia", "fr")):
+                flag, c_name = "🇫🇷", "Francia"
+            elif any(k in country_norm for k in ("united kingdom", "uk", "regno unito", "gb")):
+                flag, c_name = "🇬🇧", "Regno Unito"
+            elif any(k in country_norm for k in ("world", "internaz")):
+                flag, c_name = "🌍", "Internazionale"
+            elif any(k in country_norm for k in ("italy", "italia", "it")):
+                flag, c_name = "🇮🇹", "Italia"
+            else:
+                # Detect from flag already in raw_name
+                if "🇪🇸" in raw_name:
+                    flag, c_name = "🇪🇸", "Spagna"
+                elif "🇩🇪" in raw_name:
+                    flag, c_name = "🇩🇪", "Germania"
+                elif "🇫🇷" in raw_name:
+                    flag, c_name = "🇫🇷", "Francia"
+                elif "🇬🇧" in raw_name:
+                    flag, c_name = "🇬🇧", "Regno Unito"
+                elif "🌍" in raw_name:
+                    flag, c_name = "🌍", "Internazionale"
+                else:
+                    flag, c_name = "🇮🇹", "Italia"
+
             seen_tvvoo_channels[raw_name] = seen_tvvoo_channels.get(raw_name, 0) + 1
             count = seen_tvvoo_channels[raw_name]
-            name_label = f"🇮🇹 {raw_name}" if count == 1 else f"🇮🇹 {raw_name} (Server {count})"
+            has_flag = any(raw_name.startswith(f) for f in ("🇮🇹", "🇪🇸", "🇩🇪", "🇫🇷", "🇬🇧", "🌍"))
+            flag_prefix = "" if has_flag else f"{flag} "
+            name_label = f"{flag_prefix}{raw_name}" if count == 1 else f"{flag_prefix}{raw_name} (Server {count})"
 
             stream_url = self.build_easyproxy_url(ep_url, ep_pass, "Vavoo", vavoo_url)
             tvvoo_streams.append({
                 "name": name_label,
-                "title": "⚡ Fonte: TvVoo • Qualità FHD 1080p",
+                "title": f"{flag} {c_name} • ⚡ Fonte: TvVoo • Qualità FHD 1080p",
                 "url": stream_url,
                 "behaviorHints": {"notWebReady": False},
             })
+
+        # Keep Italian TvVoo streams at index 0, followed by international TvVoo streams
+        tvvoo_streams.sort(key=lambda s: 0 if "🇮🇹" in s.get("name", "") else 1)
 
         # 2. Process DaddyLive (dlhd) streams with StreamViX / MediaFlow Proxy format
         dlhd_streams: List[Dict[str, Any]] = []

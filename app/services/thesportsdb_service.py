@@ -13,6 +13,7 @@ from app.config import (
     THESPORTSDB_USER,
     THESPORTSDB_PASS,
     THESPORTSDB_CALENDAR_INTERVAL,
+    THESPORTSDB_BROWSE_TV_INTERVAL,
 )
 from app.services.db_service import db_service
 
@@ -115,6 +116,11 @@ class TheSportsDBService:
         self._calendar_by_silo: Dict[str, List[Dict[str, Any]]] = {}
         self._last_calendar_fetch: float = 0.0
         self._calendar_lock = asyncio.Lock()
+
+        # Browse TV Schedule State
+        self._browse_tv_cache: List[Dict[str, Any]] = []
+        self._last_browse_tv_fetch: float = 0.0
+        self._browse_tv_lock = asyncio.Lock()
 
     async def _get_client(self) -> httpx.AsyncClient:
         if self._client is None or self._client.is_closed:
@@ -239,10 +245,10 @@ class TheSportsDBService:
 
         return events
 
-    async def fetch_multi_day_calendar(self, days_ahead: int = 2) -> List[Dict[str, Any]]:
+    async def fetch_multi_day_calendar(self, days_ahead: int = 3, days_behind: int = 1) -> List[Dict[str, Any]]:
         """
-        Fetches the official TheSportsDB calendar for today and upcoming days (default 2 days ahead).
-        Indexes events by Silo for instant zero-latency match enrichment.
+        Fetches the official TheSportsDB calendar for recent and upcoming days (default: yesterday to +3 days ahead).
+        Indexes events by Silo for instant zero-latency match enrichment across full race weekends.
         Throttled to run at most once every THESPORTSDB_CALENDAR_INTERVAL (12 hours).
         """
         async with self._calendar_lock:
@@ -259,7 +265,7 @@ class TheSportsDBService:
             today_utc = datetime.datetime.now(datetime.timezone.utc).date()
             all_events: List[Dict[str, Any]] = []
 
-            for day_offset in range(days_ahead + 1):
+            for day_offset in range(-days_behind, days_ahead + 1):
                 d = today_utc + datetime.timedelta(days=day_offset)
                 d_str = d.strftime("%Y-%m-%d")
                 url = f"https://www.thesportsdb.com/browse_calendar.php?d={d_str}"
@@ -574,8 +580,187 @@ class TheSportsDBService:
                 m["_tsdb_matched"] = True
                 reconciled_count += 1
 
+        # Level 1 Motorsport Reconciliation & Weekend GP Cascade
+        reconciled_motors = self.reconcile_motorsport_matches(matches)
+        total_reconciled = reconciled_count + reconciled_motors
+
+        if total_reconciled > 0:
+            logger.info("TheSportsDB Level 1: %d match allacciati con successo al calendario ufficiale (di cui %d motori).", total_reconciled, reconciled_motors)
+        return total_reconciled
+
+    @staticmethod
+    def get_motorsport_series_key(text: str) -> str:
+        """Extracts canonical motorsport series identifier."""
+        s = (text or "").lower()
+        if "formula 1" in s or "formula one" in s or re.search(r"\bf1\b", s):
+            return "f1"
+        if "formula 2" in s or re.search(r"\bf2\b", s):
+            return "f2"
+        if "formula 3" in s or re.search(r"\bf3\b", s):
+            return "f3"
+        if "formula e" in s or re.search(r"\bfe\b", s):
+            return "fe"
+        if "moto2" in s or "moto 2" in s:
+            return "moto2"
+        if "moto3" in s or "moto 3" in s:
+            return "moto3"
+        if "motogp" in s or "moto gp" in s:
+            return "motogp"
+        if "superbike" in s or "wsbk" in s or "bsb" in s:
+            return "superbike"
+        if "nascar" in s:
+            return "nascar"
+        if "indycar" in s or "indy car" in s or re.search(r"\bindy\b", s):
+            return "indycar"
+        if "wec" in s or "le mans" in s:
+            return "wec"
+        if "wrc" in s or "rally" in s:
+            return "wrc"
+        if "imsa" in s:
+            return "imsa"
+        if "dtm" in s:
+            return "dtm"
+        if "gt world" in s or "gt3" in s:
+            return "gt"
+        return ""
+
+    @staticmethod
+    def is_motorsport_match(m: Dict[str, Any]) -> bool:
+        """Determines if a match belongs to motorsport category."""
+        silo = (m.get("_silo") or "").lower()
+        cat = (m.get("category") or "").lower()
+        catalog = (m.get("_catalog") or "").lower()
+        genre = (m.get("_genre") or "").lower()
+        title = (m.get("title") or "").lower()
+
+        if any(k in silo for k in ("motor", "racing", "motori")):
+            return True
+        if any(k in cat for k in ("motor", "racing", "motori")):
+            return True
+        if any(k in catalog for k in ("motor", "racing", "motori")):
+            return True
+        if any(k in genre for k in ("formula", "motogp", "superbike", "nascar", "indycar")):
+            return True
+        if any(k in title for k in ("formula 1", "formula 2", "f1", "motogp", "moto2", "moto3", "nascar", "indycar", "superbike", "grand prix", "rally")):
+            return True
+        return False
+
+    def reconcile_motorsport_matches(self, matches: List[Dict[str, Any]]) -> int:
+        """
+        LEVEL 1 MOTORSPORT RECONCILIATION & WEEKEND GP CASCADE FALLBACK:
+        Matches motorsport events strictly in-RAM against _calendar_by_silo['motor-sports'].
+        Zero network latency, zero false positives from past years.
+
+        Algorithm:
+        1. Identifies motorsport events and extracts the series key (F1, MotoGP, etc.).
+        2. Filters the in-RAM calendar for events of the same series within a +/- 84h window (race weekend).
+        3. Priority 1 (Session Thumb): Checks if the candidate session has an official thumb.
+        4. Priority 2 (Weekend GP Cascade Fallback): Inherits the official 16:9 poster from the Main
+           Grand Prix / Race event of the weekend.
+        """
+        if not self._calendar_cache or not matches:
+            return 0
+
+        ms_candidates = self._calendar_by_silo.get("motor-sports", [])
+        if not ms_candidates:
+            ms_candidates = [
+                ev for ev in self._calendar_cache
+                if any(k in (ev.get("_silo") or "").lower() for k in ("motor", "racing"))
+                or any(k in (ev.get("sport") or "").lower() for k in ("motor", "racing"))
+            ]
+        if not ms_candidates:
+            return 0
+
+        reconciled_count = 0
+        for m in matches:
+            if not self.is_motorsport_match(m):
+                continue
+
+            # Skip if match already has an enriched/valid poster (not placeholder)
+            poster = m.get("poster")
+            if poster and "nostream" not in str(poster) and str(poster).startswith("http"):
+                continue
+
+            # Identify series key from title, competition, official_event or genre
+            m_text = f"{m.get('title', '')} {m.get('competition', '')} {m.get('_official_event', '')} {m.get('_genre', '')}"
+            m_series = self.get_motorsport_series_key(m_text)
+            if not m_series:
+                continue
+
+            m_date = m.get("date") or 0
+
+            # Filter candidates of the same series within race weekend window (+/- 84 hours)
+            weekend_cals = []
+            for cal in ms_candidates:
+                cal_text = f"{cal.get('competition', '')} {cal.get('title', '')}"
+                cal_series = self.get_motorsport_series_key(cal_text)
+                if cal_series != m_series:
+                    continue
+
+                if m_date and cal.get("date_ms"):
+                    diff_hours = abs(m_date - cal["date_ms"]) / 3600000.0
+                    if diff_hours > 84.0:
+                        continue
+                weekend_cals.append(cal)
+
+            if not weekend_cals:
+                continue
+
+            chosen_thumb: Optional[str] = None
+            best_cal: Optional[Dict[str, Any]] = None
+            m_title_lower = (m.get("title") or "").lower()
+
+            # Priority 1: Exact / Close session match with valid thumb
+            for cal in weekend_cals:
+                c_thumb = cal.get("thumb")
+                if c_thumb:
+                    c_title_lower = (cal.get("title") or "").lower()
+                    if any(
+                        sess in m_title_lower and sess in c_title_lower
+                        for sess in ("qualif", "sprint", "practice", "fp1", "fp2", "fp3", "warm up", "warmup")
+                    ):
+                        chosen_thumb = c_thumb
+                        best_cal = cal
+                        break
+
+            # Priority 2: Cascade Fallback to Main GP of the weekend
+            if not chosen_thumb:
+                scored = []
+                for cal in weekend_cals:
+                    thumb = cal.get("thumb")
+                    if not thumb:
+                        continue
+                    score = 0
+                    c_title = (cal.get("title") or "").lower()
+                    if "gp" in c_title or "grand prix" in c_title:
+                        score += 20
+                    if "race" in c_title or "gara" in c_title:
+                        score += 10
+                    if "sprint" in c_title:
+                        score -= 5
+                    if any(w in c_title for w in ("practice", "fp", "qualif", "warm")):
+                        score -= 10
+                    scored.append((score, cal))
+
+                if scored:
+                    scored.sort(key=lambda x: x[0], reverse=True)
+                    best_cal = scored[0][1]
+                    chosen_thumb = best_cal["thumb"]
+
+            if chosen_thumb:
+                m["poster"] = chosen_thumb
+                m["background"] = chosen_thumb
+                m["_tsdb_matched"] = True
+                db_service.update_match_poster(m["id"], chosen_thumb)
+
+                if not m.get("competition") and best_cal and best_cal.get("competition"):
+                    m["competition"] = best_cal["competition"]
+                    m["_competition"] = best_cal["competition"]
+
+                reconciled_count += 1
+
         if reconciled_count > 0:
-            logger.info("TheSportsDB Level 1: %d match allacciati con successo al calendario ufficiale.", reconciled_count)
+            logger.info("TheSportsDB Motori: allacciate %d locandine ufficiali (in-RAM & Fallback GP).", reconciled_count)
         return reconciled_count
 
     def enrich_matches(self, matches: List[Dict[str, Any]]) -> int:
@@ -898,6 +1083,181 @@ class TheSportsDBService:
         except Exception as e:
             logger.debug("search_event_thumb exception: %s", e)
         return None, None
+
+    async def fetch_browse_tv_matches(self, force: bool = False) -> List[Dict[str, Any]]:
+        """
+        Scrapes https://www.thesportsdb.com/browse_tv to discover live TV sports broadcasts for
+        Italy, Spain, Germany, France, United Kingdom, and World.
+        Maps recognized broadcasters directly to TvVoo FHD streams.
+        Returns match objects ready for merging into the central catalog.
+        Caches results for THESPORTSDB_BROWSE_TV_INTERVAL seconds (default: 6 hours).
+        """
+        now = time.time()
+        if not force and self._browse_tv_cache and (now - self._last_browse_tv_fetch < THESPORTSDB_BROWSE_TV_INTERVAL):
+            return self._browse_tv_cache
+
+        async with self._browse_tv_lock:
+            if not force and self._browse_tv_cache and (now - self._last_browse_tv_fetch < THESPORTSDB_BROWSE_TV_INTERVAL):
+                return self._browse_tv_cache
+
+            from app.services.tvvoo_service import tvvoo_service
+            await tvvoo_service.ensure_synced()
+
+            url = "https://www.thesportsdb.com/browse_tv"
+            try:
+                client = await self._get_client()
+                res = await client.get(url)
+                if res.status_code != 200:
+                    logger.warning("TheSportsDB browse_tv returned status %d", res.status_code)
+                    return self._browse_tv_cache
+                html_content = res.text
+            except Exception as e:
+                logger.warning("Failed to fetch TheSportsDB browse_tv: %s", e)
+                return self._browse_tv_cache
+
+            cards = re.findall(
+                r'<td\s+class=[\x27\x22]tv-event-card[\x27\x22][^>]*>(.*?)</td>',
+                html_content,
+                re.DOTALL | re.IGNORECASE,
+            )
+            if not cards:
+                return self._browse_tv_cache
+
+            target_countries = {
+                "italy", "italia", "spain", "germany", "france",
+                "united-kingdom", "united_kingdom", "world"
+            }
+            today_utc = datetime.datetime.now(datetime.timezone.utc).date()
+            matches: List[Dict[str, Any]] = []
+
+            for card in cards:
+                ev_m = re.search(r'/event/(\d+)-([^\x27\x22]+)', card)
+                ev_id = ev_m.group(1) if ev_m else ""
+                ev_slug = ev_m.group(2) if ev_m else ""
+
+                t_m = re.search(r'calendar\.png[^\>]*\>\s*([^<]+)<', card)
+                title = t_m.group(1).strip() if t_m else ev_slug.replace('-', ' ').title()
+                if not title:
+                    continue
+
+                time_m = re.search(r'(\d{2}:\d{2})\s*UTC', card)
+                time_str = time_m.group(1) if time_m else "00:00"
+
+                try:
+                    dt = datetime.datetime.strptime(f"{today_utc} {time_str}", "%Y-%m-%d %H:%M").replace(
+                        tzinfo=datetime.timezone.utc
+                    )
+                    date_ms = int(dt.timestamp() * 1000)
+                except Exception:
+                    date_ms = int(time.time() * 1000)
+
+                # Poster thumbnail
+                th_m = re.search(r'src=[\x27\x22]([^\x27\x22]*thumb[^\x27\x22]*)[\x27\x22]', card)
+                thumb = th_m.group(1) if th_m else None
+                if thumb and "no_thumb" not in thumb:
+                    thumb = re.sub(r'/(?:small|tiny|preview)$', '', thumb)
+                    if not thumb.endswith('/medium'):
+                        thumb = f"{thumb}/medium"
+                else:
+                    thumb = None
+
+                # Channel matching for target countries
+                ch_matches = re.findall(
+                    r'<img[^>]*flags/([^.\x27\x22/]+)\.(?:svg|png)[^>]*>\s*<a\s+href=[\x27\x22]/channel/(\d+)-([^\x27\x22]+)[\x27\x22][^>]*/*>([^<]+)</a>',
+                    card,
+                    re.DOTALL,
+                )
+
+                sources: List[Dict[str, Any]] = []
+                seen_streams = set()
+
+                for flag, ch_id, ch_slug, ch_name in ch_matches:
+                    flag_norm = flag.lower().replace('_', '-')
+                    is_target = any(tc in flag_norm or flag_norm in tc for tc in target_countries)
+                    if not is_target:
+                        continue
+
+                    streams = tvvoo_service.get_channel_streams(ch_name.strip())
+                    for st in streams:
+                        key = (st.get("canonical"), st.get("tag"))
+                        if key not in seen_streams and st.get("url"):
+                            seen_streams.add(key)
+                            sources.append({
+                                "source": "tvvoo",
+                                "id": st.get("canonical", "tvvoo"),
+                                "name": st.get("display_name", ch_name.strip()),
+                                "url": st["url"],
+                                "tag": st.get("tag", "c"),
+                                "country": st.get("country", ""),
+                            })
+
+                # GHOST EVENT FILTER: Must have at least one playable TvVoo source
+                if not sources:
+                    continue
+
+                # Prioritize Italian TvVoo sources at index 0..k
+                sources.sort(key=lambda s: 0 if s.get("country") == "Italy" or "🇮🇹" in s.get("name", "") else 1)
+
+                # Structured teams
+                teams_dict = None
+                if " vs " in title:
+                    parts = title.split(" vs ", 1)
+                    teams_dict = {"home": {"name": parts[0].strip()}, "away": {"name": parts[1].strip()}}
+                elif " - " in title:
+                    parts = title.split(" - ", 1)
+                    teams_dict = {"home": {"name": parts[0].strip()}, "away": {"name": parts[1].strip()}}
+
+                # Category / Silo resolution from calendar cache if available
+                silo = "altri_sport"
+                comp = ""
+                if self._calendar_cache:
+                    for cev in self._calendar_cache:
+                        if cev.get("title", "").strip().lower() == title.lower():
+                            silo = cev.get("_silo", "altri_sport")
+                            comp = cev.get("competition", "")
+                            if not thumb and cev.get("thumb"):
+                                thumb = cev.get("thumb")
+                            break
+
+                # Keyword fallback for silo if not in calendar
+                if silo == "altri_sport":
+                    t_low = title.lower()
+                    if any(w in t_low for w in ("basket", "baloncesto", "olimpia", "virtus", "partizan", "barcelona basket", "real madrid basket", "euroleague")):
+                        silo = "basketball"
+                    elif any(w in t_low for w in ("fc ", "united", "inter", "milan", "juventus", "calcio", "madrid", "harrogate", "aldershot", "gateshead", "spain vs croatia", "england", "scotland", "national league")):
+                        silo = "football"
+                    elif any(w in t_low for w in ("nfl", "bears", "eagles", "patriots", "chiefs")):
+                        silo = "american-football"
+                    elif any(w in t_low for w in ("braves", "phillies", "astros", "white sox", "yankees", "red sox", "mlb")):
+                        silo = "baseball"
+                    elif any(w in t_low for w in ("hurricanes", "panthers", "nhl", "rangers", "bruins")):
+                        silo = "hockey"
+
+                slug_title = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")
+                match_id = f"tsdb_tv_{ev_id or slug_title}_{int(date_ms / 1000)}"
+
+                match_obj: Dict[str, Any] = {
+                    "id": match_id,
+                    "title": title,
+                    "category": silo,
+                    "_silo": silo,
+                    "competition": comp,
+                    "_competition": comp,
+                    "date": date_ms,
+                    "sources": sources,
+                    "popular": False,
+                    "poster": thumb,
+                    "_source_type": "thesportsdb_tv",
+                }
+                if teams_dict:
+                    match_obj["teams"] = teams_dict
+
+                matches.append(match_obj)
+
+            self._browse_tv_cache = matches
+            self._last_browse_tv_fetch = now
+            logger.info("TheSportsDB browse_tv: estratti %d eventi con stream TvVoo pronti.", len(matches))
+            return matches
 
 
 thesportsdb_service = TheSportsDBService()
