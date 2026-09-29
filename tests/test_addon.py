@@ -222,6 +222,17 @@ class StreamSportTestCase(unittest.TestCase):
         self.assertEqual(cat_nfl, "football_americano")
         self.assertEqual(genre_nfl, "NFL")
 
+    def test_daddylive_college_football_exclusion(self):
+        """Verifies that DaddyLive excludes College Football while retaining NFL and other pro leagues."""
+        from app.services.daddylive_api import DaddyLiveAPI
+        # Excluded
+        self.assertIsNone(DaddyLiveAPI.map_daddylive_category_to_silo("College Football", "Texas vs Alabama"))
+        self.assertIsNone(DaddyLiveAPI.map_daddylive_category_to_silo("college football", "Michigan vs Ohio State"))
+        # Allowed
+        nfl_res = DaddyLiveAPI.map_daddylive_category_to_silo("Am. Football", "Kansas City Chiefs vs Baltimore Ravens")
+        self.assertIsNotNone(nfl_res)
+        self.assertEqual(nfl_res, ("american-football", "american-football"))
+
     def test_deduplication(self):
         from app.services.catalog_service import catalog_service
         list1 = [

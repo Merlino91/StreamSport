@@ -184,6 +184,7 @@ class DaddyLiveAPI:
 
     DADDYLIVE_EXCLUDED_CATEGORIES = (
         "big brother", "tv show", "reality", "movies", "horse racing", "upcoming events",
+        "college football",
         "college soccer", "women's college soccer",
         "women's college volleyball", "women's college ice hockey",
         "minor league baseball"
@@ -204,7 +205,7 @@ class DaddyLiveAPI:
         # 1. Football (Soccer)
         if any(k in cat_lower for k in ("soccer", "league one", "league two", "national league", "mls", "usl")):
             return "football", "football"
-        if "football" in cat_lower and "american" not in cat_lower and "cfl" not in cat_lower and "college" not in cat_lower:
+        if "football" in cat_lower and "american" not in cat_lower and "am." not in cat_lower and "cfl" not in cat_lower and "college" not in cat_lower:
             return "football", "football"
 
         # 2. Tennis
@@ -227,8 +228,8 @@ class DaddyLiveAPI:
         if "baseball" in cat_lower or "mlb" in cat_lower:
             return "baseball", "baseball"
 
-        # 7. American Football (NFL, CFL, UFL & College Football)
-        if any(k in cat_lower for k in ("am. football", "american football", "cfl", "nfl", "ufl", "college football")):
+        # 7. American Football (NFL, CFL, UFL & Pro Football)
+        if any(k in cat_lower for k in ("am. football", "american football", "cfl", "nfl", "ufl")):
             return "american-football", "american-football"
 
         # 8. Hockey
