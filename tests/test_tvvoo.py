@@ -24,6 +24,63 @@ class TestTvVooService(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.service.get_canonical_key("SuperTennis HD"), "supertennis")
         self.assertIsNone(self.service.get_canonical_key("CanaleInesistenteXYZ"))
 
+    def test_italian_lcn_mapping(self):
+        """Tests that official Sky Italia / Tivùsat LCN channel numbers map directly."""
+        self.assertEqual(self.service.get_canonical_key("200"), "sky sport 24")
+        self.assertEqual(self.service.get_canonical_key("Sky 200"), "sky sport 24")
+        self.assertEqual(self.service.get_canonical_key("201"), "sky sport uno")
+        self.assertEqual(self.service.get_canonical_key("Sky 201"), "sky sport uno")
+        self.assertEqual(self.service.get_canonical_key("202"), "sky sport calcio")
+        self.assertEqual(self.service.get_canonical_key("203"), "sky sport tennis")
+        self.assertEqual(self.service.get_canonical_key("204"), "sky sport arena")
+        self.assertEqual(self.service.get_canonical_key("Sky Sport 204"), "sky sport arena")
+        self.assertEqual(self.service.get_canonical_key("Sky Arena"), "sky sport arena")
+        self.assertEqual(self.service.get_canonical_key("205"), "sky sport golf")
+        self.assertEqual(self.service.get_canonical_key("206"), "sky sport max")
+        self.assertEqual(self.service.get_canonical_key("207"), "sky sport f1")
+        self.assertEqual(self.service.get_canonical_key("208"), "sky sport motogp")
+        self.assertEqual(self.service.get_canonical_key("209"), "sky sport nba")
+        self.assertEqual(self.service.get_canonical_key("214"), "dazn 1")
+        self.assertEqual(self.service.get_canonical_key("Sky 214"), "dazn 1")
+        self.assertEqual(self.service.get_canonical_key("Zona DAZN"), "dazn 1")
+        self.assertEqual(self.service.get_canonical_key("215"), "dazn 2")
+
+    def test_sky_sport_feed_distinction(self):
+        """Ensures generic Sky Sport event feed is NOT merged into Sky Sport Uno."""
+        self.assertEqual(self.service.get_canonical_key("Sky Sport"), "sky sport")
+        self.assertEqual(self.service.get_canonical_key("Sky Sport IT"), "sky sport")
+        self.assertEqual(self.service.get_canonical_key("Sky Sport Eventi"), "sky sport")
+        self.assertNotEqual(self.service.get_canonical_key("Sky Sport"), "sky sport uno")
+
+    def test_magenta_sport_strict_numbers(self):
+        """Tests that Magenta Sport channels 1..4 and receiver 301..304 match strictly."""
+        self.assertEqual(self.service.get_canonical_key("Magenta Sport 1"), "magenta sport 1")
+        self.assertEqual(self.service.get_canonical_key("Magenta Sport 301"), "magenta sport 1")
+        self.assertEqual(self.service.get_canonical_key("301"), "magenta sport 1")
+
+        self.assertEqual(self.service.get_canonical_key("Magenta Sport 2"), "magenta sport 2")
+        self.assertEqual(self.service.get_canonical_key("Magenta Sport 302"), "magenta sport 2")
+        self.assertEqual(self.service.get_canonical_key("302"), "magenta sport 2")
+
+        self.assertEqual(self.service.get_canonical_key("Magenta Sport 3"), "magenta sport 3")
+        self.assertEqual(self.service.get_canonical_key("Magenta Sport 303"), "magenta sport 3")
+        self.assertEqual(self.service.get_canonical_key("303"), "magenta sport 3")
+
+        # Generic Magenta Sport should NOT match a numbered channel
+        self.assertEqual(self.service.get_canonical_key("Magenta Sport"), "magenta sport")
+
+    def test_country_silos_isolation(self):
+        """Tests that when country is specified, country-specific silos resolve correctly."""
+        # DAZN in Italy vs Spain vs Germany vs France
+        self.assertEqual(self.service.get_canonical_key("DAZN 1", country="Italy"), "dazn 1")
+        self.assertEqual(self.service.get_canonical_key("DAZN 1", country="Spain"), "dazn 1 es")
+        self.assertEqual(self.service.get_canonical_key("DAZN 1", country="Germany"), "dazn 1 de")
+        self.assertEqual(self.service.get_canonical_key("DAZN 1", country="France"), "dazn 1 fr")
+
+        # Sky Sport 1 in Germany vs Sky Sport 1 in Italy
+        self.assertEqual(self.service.get_canonical_key("Sky Sport 1", country="Germany"), "sky sport 1 de")
+        self.assertEqual(self.service.get_canonical_key("Sky Sport 1", country="Italy"), "sky sport uno")
+
     @patch("app.services.tvvoo_service.httpx.AsyncClient")
     async def test_sync_channels_mock(self, mock_client_cls):
         mock_client = AsyncMock()
