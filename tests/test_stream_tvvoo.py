@@ -57,11 +57,11 @@ class TestStreamServiceTvVoo(unittest.IsolatedAsyncioTestCase):
 
         # 1st and 2nd streams must be TvVoo!
         self.assertEqual(streams[0]["name"], "🇮🇹 Sky Sport Calcio")
-        self.assertEqual(streams[0]["title"], "⚡ Fonte: TvVoo • Qualità FHD 1080p")
+        self.assertEqual(streams[0]["title"], "🇮🇹 Italia • ⚡ Fonte: TvVoo • Qualità FHD 1080p")
         self.assertIn("host=Vavoo", streams[0]["url"])
 
         self.assertEqual(streams[1]["name"], "🇮🇹 DAZN 1")
-        self.assertEqual(streams[1]["title"], "⚡ Fonte: TvVoo • Qualità FHD 1080p")
+        self.assertEqual(streams[1]["title"], "🇮🇹 Italia • ⚡ Fonte: TvVoo • Qualità FHD 1080p")
         self.assertIn("host=Vavoo", streams[1]["url"])
 
         # 3rd stream must be Italian DaddyLive!

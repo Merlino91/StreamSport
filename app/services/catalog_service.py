@@ -297,7 +297,11 @@ class CatalogService:
         t = re.sub(r"\([^)]*\)", "", t)
         t = re.sub(r"^(?:italy|england|spain|germany|france|uefa|fifa|brazil|usa|[a-z]+)\s*-\s*", "", t)
         t = re.sub(r"[^a-z0-9]+", " ", t).strip()
-        words = sorted([w for w in t.split() if w not in ("vs", "the", "fc", "ac", "cf", "sc", "as", "at", "live", "stream") and len(w) > 1])
+        EXCLUDED_NOISE_WORDS = (
+            "vs", "the", "fc", "ac", "cf", "sc", "as", "at", "live", "stream", "bc",
+            "pallacanestro", "pallacan", "baloncesto", "basquet", "basket", "calcio", "volley", "pallavolo", "club"
+        )
+        words = sorted([w for w in t.split() if w not in EXCLUDED_NOISE_WORDS and len(w) > 1])
         return " ".join(words)
 
     def _get_teams_key(self, match: Dict[str, Any]) -> Optional[Any]:
@@ -305,8 +309,12 @@ class CatalogService:
         if isinstance(teams, dict) and teams.get("home") and teams.get("away"):
             h = re.sub(r"[^a-z0-9]+", " ", (teams.get("home", {}).get("name") or "").lower()).strip()
             a = re.sub(r"[^a-z0-9]+", " ", (teams.get("away", {}).get("name") or "").lower()).strip()
-            h_words = frozenset([w for w in h.split() if w not in ("fc", "ac", "cf", "sc", "as", "the") and len(w) > 1])
-            a_words = frozenset([w for w in a.split() if w not in ("fc", "ac", "cf", "sc", "as", "the") and len(w) > 1])
+            EXCLUDED_CLUB_TERMS = (
+                "fc", "ac", "cf", "sc", "as", "the", "bc",
+                "pallacanestro", "pallacan", "baloncesto", "basquet", "basket", "calcio", "volley", "pallavolo", "club"
+            )
+            h_words = frozenset([w for w in h.split() if w not in EXCLUDED_CLUB_TERMS and len(w) > 1])
+            a_words = frozenset([w for w in a.split() if w not in EXCLUDED_CLUB_TERMS and len(w) > 1])
             if h_words and a_words:
                 return frozenset([h_words, a_words])
         return None
@@ -387,7 +395,8 @@ class CatalogService:
     def _clean_team_str(s: str) -> str:
         s = (s or "").lower().strip()
         s = unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode("utf-8")
-        return re.sub(r"[^a-z0-9]+", " ", s).strip()
+        s = re.sub(r"\b(pallacanestro|pallacan|baloncesto|basquet|basket|bc|fc|ac|cf|sc|as|calcio|volley|pallavolo|club)\b", " ", s)
+        return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9]+", " ", s)).strip()
 
     @classmethod
     def _teams_match_fuzzy(cls, t1: Optional[Dict[str, Any]], t2: Optional[Dict[str, Any]]) -> bool:

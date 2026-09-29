@@ -321,6 +321,8 @@ class TheSportsDBService:
         r"\bnewcastle\b": "newcastle united",
         r"\bleicester\b": "leicester city",
         r"\bwest ham\b": "west ham united",
+        r"\bvirtus pallacanestro bologna\b": "virtus",
+        r"\bvirtus pallacan\b": "virtus",
         r"\bvirtus bologna\b": "virtus",
         r"\bsegafredo virtus bologna\b": "virtus",
         r"\bolimpia milano\b": "milano",
@@ -1135,8 +1137,20 @@ class TheSportsDBService:
                 ev_id = ev_m.group(1) if ev_m else ""
                 ev_slug = ev_m.group(2) if ev_m else ""
 
+                # Decode untruncated event name from the URL slug (TSDB HTML cards truncate title at ~32 chars)
+                slug_title = ""
+                if ev_slug:
+                    slug_unquoted = urllib.parse.unquote(ev_slug).replace('-', ' ')
+                    slug_title = re.sub(r'\s+vs\s+', ' vs ', slug_unquoted.title(), flags=re.IGNORECASE).strip()
+
                 t_m = re.search(r'calendar\.png[^\>]*\>\s*([^<]+)<', card)
-                title = t_m.group(1).strip() if t_m else ev_slug.replace('-', ' ').title()
+                card_title = t_m.group(1).strip() if t_m else ""
+
+                # Prefer untruncated slug title if card title was truncated or missing
+                if slug_title and (not card_title or len(slug_title) > len(card_title)):
+                    title = slug_title
+                else:
+                    title = card_title or slug_title
                 if not title:
                     continue
 
@@ -1211,13 +1225,25 @@ class TheSportsDBService:
                 silo = "altri_sport"
                 comp = ""
                 if self._calendar_cache:
+                    clean_title_tokens = set(re.sub(r'[^a-z0-9]+', ' ', title.lower()).split())
                     for cev in self._calendar_cache:
-                        if cev.get("title", "").strip().lower() == title.lower():
+                        cev_title = cev.get("title", "").strip().lower()
+                        if cev_title == title.lower():
                             silo = cev.get("_silo", "altri_sport")
                             comp = cev.get("competition", "")
                             if not thumb and cev.get("thumb"):
                                 thumb = cev.get("thumb")
                             break
+                        # Token similarity match in calendar cache
+                        cev_tokens = set(re.sub(r'[^a-z0-9]+', ' ', cev_title).split())
+                        if len(clean_title_tokens) >= 2 and len(cev_tokens) >= 2:
+                            common = clean_title_tokens.intersection(cev_tokens)
+                            if len(common) >= 2 and len(common) >= min(len(clean_title_tokens), len(cev_tokens)) - 1:
+                                silo = cev.get("_silo", "altri_sport")
+                                comp = cev.get("competition", "")
+                                if not thumb and cev.get("thumb"):
+                                    thumb = cev.get("thumb")
+                                break
 
                 # Keyword fallback for silo if not in calendar
                 if silo == "altri_sport":
