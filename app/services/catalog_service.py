@@ -746,6 +746,12 @@ class CatalogService:
 
                 all_matches = filtered_matches
 
+                # Clean up cached posters and athlete cutouts of concluded events
+                try:
+                    tennis_poster_service.cleanup_finished_events(all_matches)
+                except Exception as e:
+                    logger.debug("Tennis cache cleanup error: %s", e)
+
                 self._cached_matches = all_matches
                 self._last_sync_time = time.time()
                 logger.info("Background sports sync complete. %d active events indexed in RAM.", len(all_matches))

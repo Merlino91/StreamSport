@@ -272,6 +272,79 @@ class TheSportsDBTestCase(unittest.IsolatedAsyncioTestCase):
             thumb = await thesportsdb_service.search_event_thumb_html("Ostia Mare Lidocalcio", "Forlì")
             self.assertEqual(thumb, "https://r2.thesportsdb.com/images/media/event/thumb/oadmnp1787395021.jpg/medium")
 
+    def test_is_tsdb_sport_compatible(self):
+        self.assertTrue(thesportsdb_service.is_tsdb_sport_compatible("Soccer", "football"))
+        self.assertFalse(thesportsdb_service.is_tsdb_sport_compatible("American-Football", "football"))
+        self.assertTrue(thesportsdb_service.is_tsdb_sport_compatible("American-Football", "american-football"))
+        self.assertFalse(thesportsdb_service.is_tsdb_sport_compatible("Baseball", "football"))
+        self.assertTrue(thesportsdb_service.is_tsdb_sport_compatible("Basketball", "basketball"))
+
+    async def test_semantic_html_search_filters_date_and_sport(self):
+        # Sample HTML containing NFL match (wrong sport + wrong date) and MLS match (correct)
+        sample_browse_html = """
+        <html>
+        <div class='col-sm-3'>
+        <a href='/event/2475479-seattle-seahawks-vs-kansas-city-chiefs'>
+            <img src='https://r2.thesportsdb.com/images/media/event/thumb/nfl_seahawks_chiefs.jpg/small'>
+            <img src='/images/icons/svg/sports/American-Football.svg'/> Seattle Seahawks vs Kansas City Chiefs
+        </a> (2026-10-26)
+        <a href='/event/2407065-seattle-sounders-vs-sporting-kansas-city'>
+            <img src='https://r2.thesportsdb.com/images/media/event/thumb/mls_sounders_kc.jpg/small'>
+            <img src='/images/icons/svg/sports/Soccer.svg'/> Seattle Sounders vs Sporting Kansas City
+        </a> (2026-10-02)
+        </div>
+        </html>
+        """
+        mock_resp = AsyncMock()
+        mock_resp.status_code = 200
+        mock_resp.text = sample_browse_html
+
+        with patch.object(thesportsdb_service, "_get_client") as mock_get_client:
+            mock_client = AsyncMock()
+            mock_client.get.return_value = mock_resp
+            mock_get_client.return_value = mock_client
+
+            # Match is on 2026-10-02 (timestamp 1790904600000), silo is 'football' (calcio)
+            thumb = await thesportsdb_service.search_event_thumb_html(
+                "Seattle Sounders FC",
+                "Sporting Kansas City",
+                match_date_ms=1790904600000,
+                expected_silo="football",
+            )
+            # Must strictly skip NFL match and pick the MLS match!
+            self.assertEqual(thumb, "https://r2.thesportsdb.com/images/media/event/thumb/mls_sounders_kc.jpg/medium")
+
+    def test_extract_teams_motorsport_and_stage_guards(self):
+        # 1. Motorsport silo must return empty teams (no home/away extraction)
+        motor_match = {
+            "title": "Formula 1: Azerbaijan Grand Prix - Gara (Baku City Circuit)",
+            "_silo": "motori",
+            "category": "motori",
+        }
+        h, a = thesportsdb_service._extract_teams(motor_match)
+        self.assertEqual(h, "")
+        self.assertEqual(a, "")
+
+        # 2. Hyphen separation with stage/tournament tokens must not extract fake teams
+        tennis_match = {
+            "title": "ATP Tokyo - Finals",
+            "_silo": "tennis",
+            "category": "tennis",
+        }
+        h2, a2 = thesportsdb_service._extract_teams(tennis_match)
+        self.assertEqual(h2, "")
+        self.assertEqual(a2, "")
+
+        # 3. Legitimate versus matches should extract normally
+        real_match = {
+            "title": "Jannik Sinner vs Carlos Alcaraz",
+            "_silo": "tennis",
+            "category": "tennis",
+        }
+        h3, a3 = thesportsdb_service._extract_teams(real_match)
+        self.assertEqual(h3, "jannik sinner")
+        self.assertEqual(a3, "carlos alcaraz")
+
 
 if __name__ == "__main__":
     unittest.main()

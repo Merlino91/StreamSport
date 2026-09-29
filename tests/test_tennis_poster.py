@@ -6,7 +6,15 @@ from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from app.services.tennis_poster_service import tennis_poster_service, CANVAS_WIDTH, CANVAS_HEIGHT, POSTERS_DIR
+from app.services.tennis_poster_service import (
+    tennis_poster_service,
+    CANVAS_WIDTH,
+    CANVAS_HEIGHT,
+    POSTERS_DIR,
+    ATHLETES_DIR,
+    ASSETS_DIR,
+    STATIC_ASSETS_DIR,
+)
 
 
 class TennisPosterTestCase(unittest.IsolatedAsyncioTestCase):
@@ -100,6 +108,49 @@ class TennisPosterTestCase(unittest.IsolatedAsyncioTestCase):
         rel_path = await tennis_poster_service.generate_poster(match_id, title, genre)
         self.assertIsNotNone(rel_path)
         self.assertTrue((POSTERS_DIR / rel_path.replace("/posters/", "")).exists())
+
+    def test_parse_players_hyphen_stage_guard(self):
+        # Hyphen split should NOT occur if tournament or stage tokens are present
+        p1, p2 = tennis_poster_service.parse_players("ATP Tokyo - Finals")
+        self.assertEqual(p2, "")
+        self.assertIn("ATP Tokyo - Finals", p1)
+
+        p1_r, p2_r = tennis_poster_service.parse_players("WTA Beijing - Round 1")
+        self.assertEqual(p2_r, "")
+
+    def test_parse_team_players(self):
+        team = tennis_poster_service.parse_team_players("Simone Bolelli / Andrea Vavassori")
+        self.assertEqual(team, ["Simone Bolelli", "Andrea Vavassori"])
+
+        single = tennis_poster_service.parse_team_players("Jannik Sinner")
+        self.assertEqual(single, ["Jannik Sinner"])
+
+    def test_unknown_cutout_loaded(self):
+        cutout = tennis_poster_service._get_unknown_cutout()
+        self.assertIsNotNone(cutout)
+        self.assertEqual(cutout.mode, "RGBA")
+
+    async def test_generate_doubles_poster_with_unknown(self):
+        match_id = "test_doubles_match_unit"
+        title = "Simone Bolelli / Andrea Vavassori vs Unknown Partner A / Unknown Partner B (ATP - Doubles)"
+        genre = "ATP"
+        rel_path = await tennis_poster_service.generate_poster(match_id, title, genre)
+        self.assertIsNotNone(rel_path)
+        file_path = POSTERS_DIR / rel_path.replace("/posters/", "")
+        self.assertTrue(file_path.exists())
+
+    def test_cleanup_finished_events(self):
+        # Create a mock athlete file that is not part of any active match
+        mock_file = ATHLETES_DIR / "obsolete_player_12345.png"
+        mock_file.touch(exist_ok=True)
+        self.assertTrue(mock_file.exists())
+
+        # Run cleanup with empty active matches
+        tennis_poster_service.cleanup_finished_events([])
+
+        # Verify obsolete player was deleted and Unknown.png still exists
+        self.assertFalse(mock_file.exists())
+        self.assertTrue((ASSETS_DIR / "Unknown.png").exists() or (STATIC_ASSETS_DIR / "Unknown.png").exists())
 
 
 if __name__ == "__main__":

@@ -55,9 +55,15 @@ KNOWN_COUNTRIES = {
 }
 
 STAGE_REGEX = re.compile(
-    r"((?:couples?\s+)?1/[248]\s*final(?:\s*\d+)?|quarter[- ]?finals?(?:\s*\d+)?|semi[- ]?finals?(?:\s*\d+)?|\bfinal\b|round of \d+|round \d+|day \d+|session \d+)",
+    r"((?:couples?\s+)?1/[248]\s*final(?:\s*\d+)?|quarter[- ]?finals?(?:\s*\d+)?|semi[- ]?finals?(?:\s*\d+)?|\bfinal\b|\bfinals\b|round of \d+|round \d+|r\d{1,2}\b|singles|doubles|qualification|qualifying|day \d+|session \d+|warmup|warm[- ]up)",
     re.I
 )
+
+TOURNAMENT_STAGE_WORDS = {
+    "atp", "wta", "itf", "challenger", "tour", "open", "finals", "final",
+    "semi-final", "quarter-final", "round", "day", "session", "singles",
+    "doubles", "qualifying", "qualification", "warmup", "r16", "r32", "r64",
+}
 
 
 class TennisPosterService:
@@ -66,8 +72,9 @@ class TennisPosterService:
     Features:
     - Official minimal brand backgrounds with tournament crests/logos
     - Strict sport-filtered athlete queries (rejects hockey players, goalkeepers, generic jerseys)
-    - Rate-limiting (2.5s) and persistent negative caching for TheSportsDB API
-    - Automatic detection and dedicated rendering for Country vs Country ties and Bracket Stages
+    - Rate-limiting (2.5s) for TheSportsDB API with in-memory session negative cache
+    - Automatic detection and dedicated rendering for Country vs Country ties, Bracket Stages, and Doubles (4 players)
+    - Automatic cleanup of concluded event cutouts & posters to keep storage lean
     """
 
     def __init__(self):
@@ -80,14 +87,18 @@ class TennisPosterService:
         self._is_enriching: bool = False
         self._tsdb_lock = asyncio.Lock()
         self._last_tsdb_call: float = 0.0
+        self._unknown_cutout_cache: Optional[Image.Image] = None
 
         # Pre-render missing background templates
         self._ensure_background_templates()
 
-        # Load existing negative cache markers from disk
+        # In-memory negative cache only (session-based). Clean any legacy .missing files from disk.
         self._missing_athletes: Set[str] = set()
         for p in ATHLETES_DIR.glob("*.missing"):
-            self._missing_athletes.add(p.stem)
+            try:
+                p.unlink()
+            except Exception:
+                pass
 
         # Purge legacy v1/v2 posters to free space and invalidate stale client caches
         for old_file in POSTERS_DIR.glob("tennis_*.jpg"):
@@ -198,6 +209,21 @@ class TennisPosterService:
         s = re.sub(r"\s+", " ", s)
         return s.strip()
 
+    @staticmethod
+    def parse_team_players(team_str: str) -> List[str]:
+        """Splits doubles partners (e.g. 'Simone Bolelli / Andrea Vavassori' or 'Bolelli & Vavassori')."""
+        if not team_str:
+            return []
+        cleaned = re.sub(r"\([^)]*\)", "", team_str).strip()
+        if "/" in cleaned:
+            parts = cleaned.split("/")
+        elif " & " in cleaned:
+            parts = cleaned.split(" & ")
+        else:
+            parts = [cleaned]
+        res = [TennisPosterService.clean_player_name(p) for p in parts if p.strip()]
+        return [p for p in res if p][:2]
+
     def parse_players(self, title: str) -> Tuple[str, str]:
         """Extracts clean player 1 and player 2 names from event title."""
         t = title or ""
@@ -211,6 +237,14 @@ class TennisPosterService:
             return p1, p2
         elif " - " in t:
             parts = t.split(" - ", 1)
+            p0_lower = parts[0].strip().lower()
+            p1_lower = parts[1].strip().lower()
+            has_stage = any(
+                re.search(rf"\b{re.escape(w)}\b", p0_lower) or re.search(rf"\b{re.escape(w)}\b", p1_lower)
+                for w in TOURNAMENT_STAGE_WORDS
+            )
+            if has_stage:
+                return self.clean_player_name(t), ""
             p1 = self.clean_player_name(parts[0])
             p2 = self.clean_player_name(parts[1])
             return p1, p2
@@ -288,23 +322,32 @@ class TennisPosterService:
             return True
         return False
 
+    def _get_unknown_cutout(self) -> Optional[Image.Image]:
+        """Loads the official locked/unknown athlete bust silhouette asset."""
+        if self._unknown_cutout_cache is not None:
+            return self._unknown_cutout_cache
+        for p in (STATIC_ASSETS_DIR / "Unknown.png", ASSETS_DIR / "Unknown.png"):
+            if p.exists():
+                try:
+                    self._unknown_cutout_cache = Image.open(p).convert("RGBA")
+                    return self._unknown_cutout_cache
+                except Exception as e:
+                    logger.warning("Failed loading Unknown.png from %s: %s", p, e)
+        return None
+
     async def get_player_cutout(self, player_name: str) -> Optional[Image.Image]:
         """
-        Retrieves transparent headshot/cutout PNG for a player.
+        Retrieves transparent headshot/cutout PNG for an individual player.
         Checks local cache first, then ESPN Search API, then TheSportsDB cutout fallback.
         Strictly enforces sport == 'tennis' and cutout only (rejects hockey, soccer, jersey renders).
+        Does not persist .missing markers on disk, ensuring future tournament re-queries.
         """
-        if not player_name or len(player_name) < 3:
-            return None
-
-        # If doubles name was passed, take only the first player's name
-        search_query = player_name.split("/")[0].strip()
-        if not search_query:
+        search_query = (player_name or "").strip()
+        if not search_query or len(search_query) < 3:
             return None
 
         slug = re.sub(r"[^a-zA-Z0-9]+", "_", search_query.lower()).strip("_")
         cached_file = ATHLETES_DIR / f"{slug}.png"
-        missing_file = ATHLETES_DIR / f"{slug}.missing"
 
         if cached_file.exists():
             try:
@@ -312,7 +355,7 @@ class TennisPosterService:
             except Exception:
                 pass
 
-        if slug in self._missing_athletes or missing_file.exists():
+        if slug in self._missing_athletes:
             return None
 
         headers = {
@@ -383,47 +426,9 @@ class TennisPosterService:
                 except Exception as e:
                     logger.debug("TheSportsDB athlete search error for '%s': %s", search_query, e)
 
-        # Negative Cache: athlete has no cutout
-        try:
-            missing_file.touch(exist_ok=True)
-            self._missing_athletes.add(slug)
-        except Exception:
-            pass
-
+        # In-memory negative cache only (no .missing files created on disk)
+        self._missing_athletes.add(slug)
         return None
-
-    def _draw_player_silhouette(self, canvas: Image.Image, x_center: int, y_bottom: int, height: int, name: str) -> Image.Image:
-        """Draws a stylized, modern athletic glassmorphic medallion with initials monogram."""
-        overlay = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
-        draw = ImageDraw.Draw(overlay)
-        radius = 105
-        head_cy = y_bottom - height // 2 + 10
-
-        # Outer soft glow ring
-        draw.ellipse(
-            [(x_center - radius - 8, head_cy - radius - 8), (x_center + radius + 8, head_cy + radius + 8)],
-            fill=(255, 255, 255, 25),
-        )
-
-        # Main glass circle
-        draw.ellipse(
-            [(x_center - radius, head_cy - radius), (x_center + radius, head_cy + radius)],
-            fill=(10, 18, 35, 215),
-            outline=(255, 255, 255, 140),
-            width=3,
-        )
-
-        # Monogram initials
-        parts = [w for w in name.replace("/", " ").split() if w]
-        initials = "".join([w[0].upper() for w in parts][:2]) or "T"
-        font_initials = self._get_font(70)
-        draw.text((x_center, head_cy - 6), initials, font=font_initials, fill=(255, 255, 255, 240), anchor="mm")
-
-        # Subtle sub-label
-        font_sub = self._get_font(16)
-        draw.text((x_center, head_cy + 55), "TENNIS PRO", font=font_sub, fill=(147, 197, 253, 190), anchor="mm")
-
-        return Image.alpha_composite(canvas, overlay)
 
     def get_theme_palette(self, genre: str, title: str) -> Dict[str, Any]:
         """Selects circuit background template and tournament title."""
@@ -488,34 +493,84 @@ class TennisPosterService:
         return canvas
 
     async def _render_standard_match(self, canvas: Image.Image, p1_name: str, p2_name: str) -> Image.Image:
-        """Renders player cutouts and continuous edge-to-edge lower-third broadcast banner."""
+        """Renders player cutouts (supporting both Singles and Doubles) and broadcast lower-third banner."""
         W, H = CANVAS_WIDTH, CANVAS_HEIGHT
         banner_h = 75
         banner_top = H - banner_h
-        target_h = 510
         y_bottom = banner_top  # Player image ends exactly where the banner begins
+        cx = W // 2
 
-        # Fetch cutouts concurrently
-        p1_task = self.get_player_cutout(p1_name)
-        p2_task = self.get_player_cutout(p2_name) if p2_name else asyncio.sleep(0, result=None)
-        p1_img, p2_img = await asyncio.gather(p1_task, p2_task)
+        unknown_cutout = self._get_unknown_cutout()
 
-        # Player 1 (Left)
-        if p1_img:
-            w1 = int(p1_img.width * (target_h / p1_img.height))
-            p1_resized = p1_img.resize((w1, target_h), Image.Resampling.LANCZOS)
-            canvas.paste(p1_resized, (170 - w1 // 4, y_bottom - target_h), p1_resized)
+        team1 = self.parse_team_players(p1_name)
+        team2 = self.parse_team_players(p2_name)
+        is_doubles = len(team1) > 1 or len(team2) > 1
+
+        if not is_doubles:
+            target_h = 510
+            p1_task = self.get_player_cutout(p1_name)
+            p2_task = self.get_player_cutout(p2_name) if p2_name else asyncio.sleep(0, result=None)
+            p1_img, p2_img = await asyncio.gather(p1_task, p2_task)
+
+            # Player 1 (Left)
+            img1 = p1_img or unknown_cutout
+            if img1:
+                w1 = int(img1.width * (target_h / img1.height))
+                p1_resized = img1.resize((w1, target_h), Image.Resampling.LANCZOS)
+                canvas.paste(p1_resized, (170 - w1 // 4, y_bottom - target_h), p1_resized)
+
+            # Player 2 (Right)
+            if p2_name:
+                img2 = p2_img or unknown_cutout
+                if img2:
+                    w2 = int(img2.width * (target_h / img2.height))
+                    p2_resized = img2.resize((w2, target_h), Image.Resampling.LANCZOS)
+                    canvas.paste(p2_resized, (W - 170 - (w2 * 3) // 4, y_bottom - target_h), p2_resized)
         else:
-            canvas = self._draw_player_silhouette(canvas, 290, y_bottom, target_h, p1_name)
+            # Doubles layout: 2 players per side with depth of field
+            p1_a_name = team1[0] if len(team1) > 0 else ""
+            p1_b_name = team1[1] if len(team1) > 1 else ""
+            p2_a_name = team2[0] if len(team2) > 0 else ""
+            p2_b_name = team2[1] if len(team2) > 1 else ""
 
-        # Player 2 (Right)
-        if p2_name:
-            if p2_img:
-                w2 = int(p2_img.width * (target_h / p2_img.height))
-                p2_resized = p2_img.resize((w2, target_h), Image.Resampling.LANCZOS)
-                canvas.paste(p2_resized, (W - 170 - (w2 * 3) // 4, y_bottom - target_h), p2_resized)
-            else:
-                canvas = self._draw_player_silhouette(canvas, W - 290, y_bottom, target_h, p2_name)
+            tasks = [
+                self.get_player_cutout(p1_a_name) if p1_a_name else asyncio.sleep(0, result=None),
+                self.get_player_cutout(p1_b_name) if p1_b_name else asyncio.sleep(0, result=None),
+                self.get_player_cutout(p2_a_name) if p2_a_name else asyncio.sleep(0, result=None),
+                self.get_player_cutout(p2_b_name) if p2_b_name else asyncio.sleep(0, result=None),
+            ]
+            t1_a_img, t1_b_img, t2_a_img, t2_b_img = await asyncio.gather(*tasks)
+
+            h_front = 500
+            h_back = 440
+
+            # Left Team - Player 1B (Back, shifted towards outside)
+            img1_b = t1_b_img or unknown_cutout
+            if p1_b_name and img1_b:
+                wb1 = int(img1_b.width * (h_back / img1_b.height))
+                b1_resized = img1_b.resize((wb1, h_back), Image.Resampling.LANCZOS)
+                canvas.paste(b1_resized, (60, y_bottom - h_back), b1_resized)
+
+            # Left Team - Player 1A (Front, shifted towards center, pasted over 1B)
+            img1_a = t1_a_img or unknown_cutout
+            if img1_a:
+                wa1 = int(img1_a.width * (h_front / img1_a.height))
+                a1_resized = img1_a.resize((wa1, h_front), Image.Resampling.LANCZOS)
+                canvas.paste(a1_resized, (220, y_bottom - h_front), a1_resized)
+
+            # Right Team - Player 2B (Back, shifted towards outside)
+            img2_b = t2_b_img or unknown_cutout
+            if p2_b_name and img2_b:
+                wb2 = int(img2_b.width * (h_back / img2_b.height))
+                b2_resized = img2_b.resize((wb2, h_back), Image.Resampling.LANCZOS)
+                canvas.paste(b2_resized, (W - 60 - wb2, y_bottom - h_back), b2_resized)
+
+            # Right Team - Player 2A (Front, shifted towards center, pasted over 2B)
+            img2_a = t2_a_img or unknown_cutout
+            if p2_a_name and img2_a:
+                wa2 = int(img2_a.width * (h_front / img2_a.height))
+                a2_resized = img2_a.resize((wa2, h_front), Image.Resampling.LANCZOS)
+                canvas.paste(a2_resized, (W - 220 - wa2, y_bottom - h_front), a2_resized)
 
         # Continuous Edge-to-Edge Broadcast Lower-Third Banner
         banner = Image.new("RGBA", (W, banner_h), (0, 0, 0, 0))
@@ -534,19 +589,18 @@ class TennisPosterService:
         b_draw.line([(0, 1), (W, 1)], fill=(255, 255, 255, 40), width=1)
 
         # Subtle center divider accent (where VS axis meets the lower third)
-        cx = W // 2
         b_draw.line([(cx, 10), (cx, banner_h - 10)], fill=(255, 255, 255, 50), width=1)
         b_draw.ellipse([(cx - 3, banner_h // 2 - 3), (cx + 3, banner_h // 2 + 3)], fill=(255, 255, 255, 120))
 
         # Typography
         font_name = self._get_font(28)
 
-        # Left Player (Centered in left half)
+        # Left Player / Team (Centered in left half)
         disp_p1 = self.format_short_display_name(p1_name)
         cx_left = cx // 2
         b_draw.text((cx_left, banner_h // 2), disp_p1, font=font_name, fill=(255, 255, 255), anchor="mm")
 
-        # Right Player (Centered in right half)
+        # Right Player / Team (Centered in right half)
         if p2_name:
             disp_p2 = self.format_short_display_name(p2_name)
             cx_right = cx + (W - cx) // 2
@@ -719,6 +773,75 @@ class TennisPosterService:
         await asyncio.gather(*tasks, return_exceptions=True)
         self._is_enriching = False
         logger.info("Tennis poster background generation complete.")
+
+    def cleanup_finished_events(self, active_matches: List[Dict[str, Any]]):
+        """
+        Purges athlete cutouts and generated match posters for events that have concluded.
+        Guarantees that disk storage remains lean and that players missing cutouts
+        will be re-queried during their next tournaments if official photos become available.
+        """
+        if not HAS_PIL:
+            return
+
+        active_slugs: Set[str] = set()
+        active_poster_filenames: Set[str] = set()
+
+        for m in active_matches:
+            cat = (m.get("category") or m.get("_catalog") or "").lower()
+            if "tennis" not in cat:
+                continue
+
+            m_id = str(m.get("id", ""))
+            if m_id:
+                clean_key = hashlib.md5(m_id.encode("utf-8")).hexdigest()[:12]
+                active_poster_filenames.add(f"tennis_{clean_key}_v3.jpg")
+
+            title = m.get("title", "")
+            p1_name, p2_name = self.parse_players(title)
+            for p_str in (p1_name, p2_name):
+                for single_p in self.parse_team_players(p_str):
+                    slug = re.sub(r"[^a-zA-Z0-9]+", "_", single_p.lower()).strip("_")
+                    if slug:
+                        active_slugs.add(slug)
+
+        # 1. Clean ATHLETES_DIR: keep Unknown.png and currently active athletes
+        purged_athletes = 0
+        for f in ATHLETES_DIR.glob("*"):
+            if f.is_file():
+                if f.suffix.lower() == ".missing":
+                    try:
+                        f.unlink()
+                        purged_athletes += 1
+                    except Exception:
+                        pass
+                elif f.suffix.lower() == ".png":
+                    if f.name.lower() == "unknown.png":
+                        continue
+                    if f.stem not in active_slugs:
+                        try:
+                            f.unlink()
+                            purged_athletes += 1
+                        except Exception:
+                            pass
+
+        # 2. Clean POSTERS_DIR: remove stale tennis posters not in active catalog
+        purged_posters = 0
+        for f in POSTERS_DIR.glob("tennis_*_v3.jpg"):
+            if f.name not in active_poster_filenames:
+                try:
+                    f.unlink()
+                    purged_posters += 1
+                except Exception:
+                    pass
+
+        # Clear in-memory missing athletes so future tournaments will re-query
+        self._missing_athletes.clear()
+
+        if purged_athletes > 0 or purged_posters > 0:
+            logger.info(
+                "Tennis Cache Cleanup: eliminati %d ritagli atleti e %d locandine di match conclusi.",
+                purged_athletes, purged_posters
+            )
 
 
 tennis_poster_service = TennisPosterService()

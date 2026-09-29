@@ -61,6 +61,38 @@ CATEGORY_SPORT_MAP = {
     "handball": {"handball"},
 }
 
+SILO_TO_TSDB_SPORT = {
+    "football": "football",
+    "calcio_italiano": "football",
+    "calcio_estero": "football",
+    "soccer": "football",
+    "calcio": "football",
+    "basketball": "basketball",
+    "basket": "basketball",
+    "tennis": "tennis",
+    "motor-sports": "motor-sports",
+    "motori": "motor-sports",
+    "motorsport": "motor-sports",
+    "american-football": "american-football",
+    "football_americano": "american-football",
+    "nfl": "american-football",
+    "cfl": "american-football",
+    "baseball": "baseball",
+    "hockey": "hockey",
+    "ice hockey": "hockey",
+    "volleyball": "volley",
+    "volley": "volley",
+    "pallavolo": "volley",
+    "fight": "fight",
+    "combattimento": "fight",
+    "mma": "fight",
+    "boxe": "fight",
+    "boxing": "fight",
+    "ufc": "fight",
+    "wrestling": "fight",
+    "rugby": "altri_sport",
+}
+
 
 class TheSportsDBService:
     """
@@ -364,7 +396,19 @@ class TheSportsDBService:
                 return True
         return False
 
+    NON_COMPETITOR_WORDS = {
+        "atp", "wta", "itf", "challenger", "tour", "open", "finals", "final",
+        "semi-final", "quarter-final", "round", "day", "session", "singles",
+        "doubles", "qualifying", "qualification", "practice", "fp1", "fp2",
+        "fp3", "sprint", "gara", "race", "qualif", "warmup", "gp", "grand prix",
+    }
+
     def _extract_teams(self, match: Dict[str, Any]) -> Tuple[str, str]:
+        # Motorsports do not have team-vs-team matches; never extract fake home/away
+        m_silo = self.get_match_tsdb_silo(match)
+        if any(k in m_silo for k in ("motor", "racing", "motori")):
+            return "", ""
+
         teams = match.get("teams")
         home = ""
         away = ""
@@ -383,10 +427,75 @@ class TheSportsDBService:
             for sep in (" vs ", " - ", " v "):
                 if sep in clean_t:
                     parts = clean_t.split(sep, 1)
+                    p0_lower = parts[0].strip().lower()
+                    p1_lower = parts[1].strip().lower()
+
+                    # Guard against non-competitor hyphen splits (e.g. 'ATP Tokyo - Finals', 'Formula 1 - Practice 1')
+                    if sep == " - ":
+                        has_nc_word = any(
+                            re.search(rf"\b{re.escape(w)}\b", p0_lower) or re.search(rf"\b{re.escape(w)}\b", p1_lower)
+                            for w in self.NON_COMPETITOR_WORDS
+                        )
+                        if has_nc_word:
+                            continue
+
                     home = self._clean_team_name(parts[0])
                     away = self._clean_team_name(parts[1])
                     break
         return home, away
+
+    @staticmethod
+    def get_match_tsdb_silo(m: Dict[str, Any]) -> str:
+        silo = (m.get("_silo") or "").lower().strip()
+        if silo in SILO_TO_TSDB_SPORT:
+            return SILO_TO_TSDB_SPORT[silo]
+        cat = (m.get("category") or "").lower().strip()
+        if cat in SILO_TO_TSDB_SPORT:
+            return SILO_TO_TSDB_SPORT[cat]
+        for k, v in SILO_TO_TSDB_SPORT.items():
+            if k in silo or k in cat:
+                return v
+        return "altri_sport"
+
+    @staticmethod
+    def is_tsdb_sport_compatible(event_sport_raw: str, expected_silo: Optional[str]) -> bool:
+        """
+        Verifies if the sport scraped from TheSportsDB (e.g. 'Soccer', 'American-Football')
+        is compatible with the match's canonical sport silo (e.g. 'football', 'american-football').
+        """
+        if not event_sport_raw or not expected_silo or expected_silo == "altri_sport":
+            return True
+        s = re.sub(r"[^\w]+", "", (event_sport_raw or "").lower())
+        e = re.sub(r"[^\w]+", "", (expected_silo or "").lower())
+
+        if e in ("football", "soccer", "calcio"):
+            return s in ("soccer", "football") and "american" not in s
+
+        if "american" in e or e in ("nfl", "cfl"):
+            return "american" in s or s in ("nfl", "cfl")
+
+        if "basket" in e:
+            return "basket" in s
+
+        if "tennis" in e:
+            return "tennis" in s
+
+        if "baseball" in e:
+            return "baseball" in s
+
+        if "hockey" in e:
+            return "hockey" in s
+
+        if any(k in e for k in ("motor", "racing", "motori")):
+            return any(k in s for k in ("motor", "racing"))
+
+        if "volley" in e or "pallavolo" in e:
+            return "volley" in s
+
+        if any(k in e for k in ("fight", "mma", "ufc", "box")):
+            return any(k in s for k in ("fight", "mma", "ufc", "box", "wrestling"))
+
+        return True
 
     def reconcile_matches(self, matches: List[Dict[str, Any]]) -> int:
         """
@@ -403,9 +512,11 @@ class TheSportsDBService:
 
         reconciled_count = 0
         for m in matches:
-            silo = m.get("_silo") or m.get("category") or ""
-            candidates = self._calendar_by_silo.get(silo, [])
+            tsdb_silo = self.get_match_tsdb_silo(m)
+            candidates = self._calendar_by_silo.get(tsdb_silo, [])
             if not candidates:
+                if tsdb_silo != "altri_sport":
+                    continue
                 candidates = self._calendar_cache
 
             m_home, m_away = self._extract_teams(m)
@@ -474,11 +585,17 @@ class TheSportsDBService:
         """
         return self.reconcile_matches(matches)
 
-    async def search_event_thumb_html(self, home_raw: str, away_raw: str) -> Optional[str]:
+    async def search_event_thumb_html(
+        self,
+        home_raw: str,
+        away_raw: str,
+        match_date_ms: int = 0,
+        expected_silo: Optional[str] = None,
+    ) -> Optional[str]:
         """
         LEVEL 2 SEARCH: Queries TheSportsDB web search (browse?s=...)
         using clean primary team keywords (e.g. 'Ostia Forli').
-        Parses matching event thumb and returns high-quality poster URL.
+        Parses matching event thumb and validates against expected date and sport.
         """
         h_clean = self._clean_team_name(home_raw)
         a_clean = self._clean_team_name(away_raw)
@@ -503,15 +620,36 @@ class TheSportsDBService:
                 return None
 
             pattern = re.compile(
-                r"<a\s+href=['\"]/event/(\d+)-([^'\"]+)['\"][^>]*>(.*?)</a>",
+                r"<a\s+href=['\"]/event/(\d+)-([^'\"]+)['\"][^>]*>(.*?)</a>(?:\s*(?:<[^>]+>\s*)*\(([0-9]{4}-[0-9]{2}-[0-9]{2})\))?",
                 re.DOTALL | re.IGNORECASE,
             )
-            for ev_id, slug, inner in pattern.findall(res.text):
+            for ev_id, slug, inner, date_str in pattern.findall(res.text):
                 slug_norm = unicodedata.normalize("NFKD", urllib.parse.unquote(slug)).encode("ascii", "ignore").decode("utf-8").lower()
-                if h_kw in slug_norm and a_kw in slug_norm:
-                    m_thumb = re.search(r"src=['\"](https?://[^'\" >]+/thumb/[^'\" >]+)['\"]", inner)
-                    if m_thumb and "no_thumb" not in m_thumb.group(1):
-                        return self.format_thumb_url(m_thumb.group(1))
+                if h_kw not in slug_norm or a_kw not in slug_norm:
+                    continue
+
+                # 1. Sport validation if SVG icon is present
+                sport_m = re.search(r'/sports/([^.\x27\x22/]+)\.svg', inner, re.IGNORECASE)
+                event_sport = sport_m.group(1) if sport_m else ""
+                if event_sport and expected_silo:
+                    if not self.is_tsdb_sport_compatible(event_sport, expected_silo):
+                        continue
+
+                # 2. Date proximity validation: tolerance of +/- 1 calendar day to absorb worldwide timezones
+                if match_date_ms > 0 and date_str:
+                    try:
+                        ev_dt = datetime.datetime.strptime(date_str, "%Y-%m-%d").date()
+                        m_dt = datetime.datetime.fromtimestamp(match_date_ms / 1000.0, tz=datetime.timezone.utc).date()
+                        diff_days = abs((m_dt - ev_dt).days)
+                        if diff_days > 1:
+                            continue
+                    except Exception:
+                        pass
+
+                # 3. Valid thumbnail extraction
+                m_thumb = re.search(r"src=['\"](https?://[^'\" >]+/thumb/[^'\" >]+)['\"]", inner)
+                if m_thumb and "no_thumb" not in m_thumb.group(1):
+                    return self.format_thumb_url(m_thumb.group(1))
         except Exception as e:
             logger.debug("TheSportsDB HTML search error for %s: %s", query, e)
 
@@ -548,7 +686,9 @@ class TheSportsDBService:
                     found_count += 1
                 continue
 
-            thumb = await self.search_event_thumb_html(m_home, m_away)
+            m_date = m.get("date", 0)
+            m_silo = self.get_match_tsdb_silo(m)
+            thumb = await self.search_event_thumb_html(m_home, m_away, match_date_ms=m_date, expected_silo=m_silo)
             if thumb:
                 m["poster"] = thumb
                 m["background"] = thumb
