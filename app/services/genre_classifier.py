@@ -261,6 +261,18 @@ class GenreClassifier:
         "canucks", "golden knights", "jets", "utah hockey club"
     }
 
+    # AFL / AFLW Teams (Australian Football League)
+    AFL_TEAMS = {
+        "adelaide crows", "crows", "brisbane lions", "carlton", "carlton blues", "blues",
+        "collingwood", "collingwood magpies", "magpies", "essendon", "essendon bombers", "bombers",
+        "fremantle", "fremantle dockers", "dockers", "geelong cats", "geelong", "cats",
+        "gold coast suns", "gold coast", "gws giants", "greater western sydney", "giants",
+        "hawthorn", "hawthorn hawks", "hawks", "melbourne demons", "demons",
+        "north melbourne", "north melbourne kangaroos", "kangaroos", "port adelaide", "power",
+        "richmond tigers", "richmond", "tigers", "st kilda", "saints", "sydney swans", "swans",
+        "west coast eagles", "eagles", "western bulldogs", "bulldogs"
+    }
+
     @staticmethod
     def _normalize_name(name: str) -> str:
         s = name.lower()
@@ -319,6 +331,8 @@ class GenreClassifier:
                 return "tennis", "Grandi Slam"
             if re.search(r"\b(davis|bjk|billie\s*jean|laver\s*cup)\b", title_lower):
                 return "tennis", "Coppa Davis e BJK Cup"
+            if "atp" in title_lower and "wta" in title_lower:
+                return "tennis", "Challenger e Altri"
             if is_women or "wta" in title_lower:
                 return "tennis", "WTA"
             if "atp" in title_lower:
@@ -480,8 +494,15 @@ class GenreClassifier:
         # ------------------------------------------------------------------
         # 9. ALTRI SPORT (Dedicated Catalog: 'altri_sport')
         # ------------------------------------------------------------------
+        is_afl_match = (
+            cat == "afl"
+            or bool(re.search(r"\b(afl|aflw|australian\s*rules|footy)\b", title_lower))
+            or (any(t in eval_text for t in ("carlton blues", "hawthorn hawks", "collingwood magpies", "richmond tigers", "geelong cats", "fremantle dockers", "essendon bombers", "sydney swans", "brisbane lions", "adelaide crows", "st kilda", "port adelaide power", "western bulldogs", "gold coast suns", "gws giants", "north melbourne kangaroos", "west coast eagles", "melbourne demons")))
+        )
+
         if (
-            cat in ("golf", "darts", "rugby", "afl", "cricket", "handball", "waterpolo", "table-tennis", "badminton", "billiards", "cycling")
+            cat in ("golf", "darts", "rugby", "afl", "cricket", "handball", "waterpolo", "table-tennis", "badminton", "billiards", "cycling", "altri_sport")
+            or is_afl_match
             or any(k in title_lower for k in (
                 "golf", "pga", "darts", "freccette", "rugby", "ciclismo", "cycling", "uci", "road race", "time trial", "snooker", "padel",
                 "handball", "dhb pokal", "pallamano", "ihf", "ehf", "table tennis", "ping pong", "waterpolo", "pallanuoto", "badminton",
@@ -489,14 +510,14 @@ class GenreClassifier:
             ))
             or re.search(r"\b(cricket|odi|t20|twenty20|ipl|ashes|uci|ihf|ehf)\b", title_lower)
         ):
+            if is_afl_match or re.search(r"\b(rugby|afl|aflw|six\s*nations|nrl|top\s*14|premiership\s*rugby)\b", title_lower) or cat in ("rugby", "afl"):
+                return "altri_sport", "Rugby e AFL"
             if re.search(r"\b(cricket|odi|t20|twenty20|test\s*match|ipl|one\s*day\s*international|the\s*hundred|big\s*bash|ashes)\b", title_lower) or cat == "cricket":
                 return "altri_sport", "Cricket"
             if re.search(r"\b(golf|pga|ryder\s*cup|presidents\s*cup|liv)\b", title_lower) or cat == "golf":
                 return "altri_sport", "Golf"
             if re.search(r"\b(darts|freccette|pdc)\b", title_lower):
                 return "altri_sport", "Freccette / Darts"
-            if re.search(r"\b(rugby|afl|six\s*nations|nrl|top\s*14)\b", title_lower) or cat == "rugby":
-                return "altri_sport", "Rugby e AFL"
             if re.search(r"\b(ciclismo|cycling|tour\s*de\s*france|giro\s*d['’]italia|vuelta|uci|road\s*race|time\s*trial)\b", title_lower) or cat == "cycling":
                 return "altri_sport", "Ciclismo"
             if re.search(r"\b(handball|pallamano|ihf|ehf|dhb\s*pokal)\b", title_lower) or cat == "handball":

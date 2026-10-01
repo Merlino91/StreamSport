@@ -120,6 +120,9 @@ class StreamSportTestCase(unittest.TestCase):
             ({"title": "England vs Sri Lanka (One Day International)", "category": "cricket"}, ("altri_sport", "Cricket")),
             ({"title": "England vs Sri Lanka (One Day International)", "category": "other"}, ("altri_sport", "Cricket")),
             ({"title": "South Africa vs Australia (T20 International)", "category": "other"}, ("altri_sport", "Cricket")),
+            ({"title": "Carlton Blues Women vs Hawthorn Hawks Women", "category": "altri_sport"}, ("altri_sport", "Rugby e AFL")),
+            ({"title": "AFL: Collingwood vs Brisbane Lions", "category": "other"}, ("altri_sport", "Rugby e AFL")),
+            ({"title": "ATP & WTA", "category": "tennis"}, ("tennis", "Challenger e Altri")),
         ]
         for match_dict, expected in test_cases:
             res = genre_classifier.classify(match_dict)

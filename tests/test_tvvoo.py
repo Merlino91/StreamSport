@@ -202,6 +202,54 @@ class TestTvVooService(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(matches[1]["sources"]), 1)
         self.assertEqual(matches[1]["sources"][0]["source"], "dlhd")
 
+    @patch("app.services.tvvoo_service.httpx.AsyncClient")
+    async def test_domain_mirrors_fallback(self, mock_client_cls):
+        """Tests that when default vavoo.to fails, it smoothly rotates to backup mirror (e.g. huhu.to)."""
+        mock_client = AsyncMock()
+        mock_client_cls.return_value.__aenter__.return_value = mock_client
+
+        # Ping response
+        mock_ping_resp = MagicMock()
+        mock_ping_resp.status_code = 200
+        mock_ping_resp.json.return_value = {"addonSig": "test_sig_fallback"}
+
+        # Simulate vavoo.to returning HTTP 502 Bad Gateway
+        mock_vavoo_fail = MagicMock()
+        mock_vavoo_fail.status_code = 502
+
+        # Simulate huhu.to returning HTTP 200 with channels
+        def make_cat_resp(items):
+            r = MagicMock()
+            r.status_code = 200
+            r.json.return_value = {"items": items, "nextCursor": None}
+            return r
+
+        huhu_resp = make_cat_resp([
+            {"name": "SKY SPORT UNO .c", "url": "https://huhu.to/play/sky1_c"},
+        ])
+        empty_resp = make_cat_resp([])
+
+        # Side effects:
+        # 1. ping
+        # 2. vavoo.to catalog (returns 502)
+        # 3. huhu.to catalog (group 1: Italy returns item, groups 2..5 return empty)
+        mock_client.post.side_effect = [
+            mock_ping_resp,
+            mock_vavoo_fail,
+            huhu_resp,
+            empty_resp,
+            empty_resp,
+            empty_resp,
+            empty_resp,
+        ]
+
+        # Reset active domain before test
+        self.service._active_domain = "vavoo.to"
+        res = await self.service.sync_channels(force=True)
+
+        self.assertIn("sky sport uno", res)
+        self.assertEqual(self.service.active_domain, "huhu.to")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -21,8 +21,8 @@ class TvVooService:
     """
 
     PING_URL = "https://www.vypn.net/api/app/ping"
-    CATALOG_URL = "https://vavoo.to/mediahubmx-catalog.json"
-    RESOLVE_URL = "https://vavoo.to/mediahubmx-resolve.json"
+    DEFAULT_DOMAIN = "vavoo.to"
+    DOMAIN_MIRRORS: List[str] = ["vavoo.to", "huhu.to", "kool.to", "oha.to"]
 
     # Supported Vavoo country groups for sports broadcasting
     TVVOO_COUNTRY_GROUPS: List[str] = ["Italy", "Spain", "Germany", "France", "United Kingdom"]
@@ -666,6 +666,19 @@ class TvVooService:
         self._sync_lock = asyncio.Lock()
         self._addon_sig: Optional[str] = None
         self._sig_time: float = 0.0
+        self._active_domain: str = self.DEFAULT_DOMAIN
+
+    @property
+    def active_domain(self) -> str:
+        return self._active_domain
+
+    def get_catalog_url(self, domain: Optional[str] = None) -> str:
+        d = domain or self._active_domain
+        return f"https://{d}/mediahubmx-catalog.json"
+
+    def get_resolve_url(self, domain: Optional[str] = None) -> str:
+        d = domain or self._active_domain
+        return f"https://{d}/mediahubmx-resolve.json"
 
     @staticmethod
     def cleanup_channel_name(name: str) -> str:
@@ -829,38 +842,66 @@ class TvVooService:
 
             all_raw_items: List[Dict[str, Any]] = []
 
-            try:
-                async with httpx.AsyncClient(timeout=15.0) as client:
-                    for group in self.TVVOO_COUNTRY_GROUPS:
-                        cursor: Any = 0
-                        while True:
-                            cat_body = {
-                                "language": "de",
-                                "region": "AT",
-                                "catalogId": "iptv",
-                                "id": "iptv",
-                                "adult": False,
-                                "search": "",
-                                "sort": "name",
-                                "filter": {"group": group},
-                                "cursor": cursor,
-                                "clientVersion": "3.1.0",
-                            }
-                            r_cat = await client.post(self.CATALOG_URL, headers=cat_headers, json=cat_body)
-                            if r_cat.status_code != 200:
+            # Determine mirror candidate order: start with default/active domain first
+            candidate_domains = [self._active_domain]
+            for mirror in self.DOMAIN_MIRRORS:
+                if mirror not in candidate_domains:
+                    candidate_domains.append(mirror)
+
+            for domain in candidate_domains:
+                catalog_url = self.get_catalog_url(domain)
+                domain_items: List[Dict[str, Any]] = []
+                domain_succeeded = True
+
+                try:
+                    async with httpx.AsyncClient(timeout=15.0) as client:
+                        for group in self.TVVOO_COUNTRY_GROUPS:
+                            cursor: Any = 0
+                            while True:
+                                cat_body = {
+                                    "language": "de",
+                                    "region": "AT",
+                                    "catalogId": "iptv",
+                                    "id": "iptv",
+                                    "adult": False,
+                                    "search": "",
+                                    "sort": "name",
+                                    "filter": {"group": group},
+                                    "cursor": cursor,
+                                    "clientVersion": "3.1.0",
+                                }
+                                r_cat = await client.post(catalog_url, headers=cat_headers, json=cat_body)
+                                if r_cat.status_code != 200:
+                                    logger.warning("Vavoo catalog query to %s group %s returned HTTP %s", domain, group, r_cat.status_code)
+                                    domain_succeeded = False
+                                    break
+                                data = r_cat.json()
+                                items = data.get("items", [])
+                                if not items:
+                                    break
+                                for it in items:
+                                    it["_country_group"] = group
+                                domain_items.extend(items)
+                                cursor = data.get("nextCursor")
+                                if not cursor:
+                                    break
+                            if not domain_succeeded:
                                 break
-                            data = r_cat.json()
-                            items = data.get("items", [])
-                            if not items:
-                                break
-                            for it in items:
-                                it["_country_group"] = group
-                            all_raw_items.extend(items)
-                            cursor = data.get("nextCursor")
-                            if not cursor:
-                                break
-            except Exception as e:
-                logger.error("Error fetching Vavoo multi-country catalog: %s", e)
+                except Exception as e:
+                    logger.warning("Error fetching Vavoo catalog from %s: %s", domain, e)
+                    domain_succeeded = False
+
+                if domain_succeeded and domain_items:
+                    all_raw_items = domain_items
+                    if domain != self._active_domain:
+                        logger.info("TvVoo fallback activated: switched active domain from %s to %s", self._active_domain, domain)
+                        self._active_domain = domain
+                    break
+                else:
+                    logger.warning("TvVoo mirror %s failed or returned empty items. Trying next fallback mirror...", domain)
+
+            if not all_raw_items:
+                logger.error("All TvVoo catalog mirrors (%s) failed to provide channels.", ", ".join(candidate_domains))
                 return self._channels_by_canonical
 
             # Group and map channels to canonical names respecting country silos

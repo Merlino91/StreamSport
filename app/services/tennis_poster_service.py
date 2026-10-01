@@ -54,8 +54,10 @@ KNOWN_COUNTRIES = {
     "indonesia", "paraguay", "south africa", "georgia", "latvia", "lettonia", "philippines"
 }
 
+CIRCUIT_NAMES = {"atp", "wta", "itf", "challenger", "davis cup", "bjk cup", "united cup", "laver cup"}
+
 STAGE_REGEX = re.compile(
-    r"((?:couples?\s+)?1/[248]\s*final(?:\s*\d+)?|quarter[- ]?finals?(?:\s*\d+)?|semi[- ]?finals?(?:\s*\d+)?|\bfinal\b|\bfinals\b|round of \d+|round \d+|r\d{1,2}\b|singles|doubles|qualification|qualifying|day \d+|session \d+|warmup|warm[- ]up)",
+    r"((?:couples?\s+)?1/[248]\s*final(?:\s*\d+)?|quarter[- ]?finals?(?:\s*\d+)?|semi[- ]?finals?(?:\s*\d+)?|\bfinal\b|\bfinals\b|round of \d+|round \d+|r\d{1,2}\b|singles|doubles|qualification|qualifying|day \d+|session \d+|warmup|warm[- ]up|\batp\s*(?:&|and|\+)\s*wta\b|\bwta\s*(?:&|and|\+)\s*atp\b)",
     re.I
 )
 
@@ -222,7 +224,9 @@ class TennisPosterService:
         else:
             parts = [cleaned]
         res = [TennisPosterService.clean_player_name(p) for p in parts if p.strip()]
-        return [p for p in res if p][:2]
+        # Discard circuit/tour tokens (ATP, WTA, ITF, Challenger) that are never individual athletes
+        valid_players = [p for p in res if p and p.lower() not in CIRCUIT_NAMES]
+        return valid_players[:2]
 
     def parse_players(self, title: str) -> Tuple[str, str]:
         """Extracts clean player 1 and player 2 names from event title."""
@@ -298,6 +302,10 @@ class TennisPosterService:
             raw_stage = re.sub(r"1/4\s*FINAL", "QUARTER FINAL", raw_stage)
             raw_stage = re.sub(r"1/2\s*FINAL", "SEMI FINAL", raw_stage)
             raw_stage = re.sub(r"COUPLES?\s*", "DOUBLES ", raw_stage).strip()
+            if any(k in raw_stage.lower() for k in ("atp & wta", "atp and wta", "wta & atp", "wta and atp")):
+                raw_stage = "LIVE BROADCAST"
+                if tourn == "ATP TOUR":
+                    tourn = "ATP & WTA TOURS"
             stage = raw_stage
 
         return tourn, stage
@@ -305,6 +313,12 @@ class TennisPosterService:
     def is_stage_placeholder(self, title: str) -> Optional[Dict[str, str]]:
         """Returns stage info if title is a tournament bracket stage announcement without player vs player."""
         has_vs = " vs " in (title or "").lower()
+        t_clean = (title or "").strip().lower()
+
+        # Direct broadcast title match for generic circuit feeds
+        if t_clean in ("atp & wta", "atp and wta", "wta & atp", "wta and atp", "atp + wta", "wta + atp", "atp", "wta"):
+            return {"tournament": "ATP & WTA TOURS", "stage": "LIVE BROADCAST"}
+
         m = STAGE_REGEX.search(title or "")
         if m and not has_vs:
             tourn, stage = self.extract_tournament_and_stage(title, "")

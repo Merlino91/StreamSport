@@ -88,6 +88,16 @@ class TennisPosterTestCase(unittest.IsolatedAsyncioTestCase):
         title_normal = "Jannik Sinner vs Carlos Alcaraz"
         self.assertIsNone(tennis_poster_service.is_stage_placeholder(title_normal))
 
+        # ATP & WTA broadcast feeds should be detected as stage placeholder cards, not athletes
+        atp_wta_info = tennis_poster_service.is_stage_placeholder("ATP & WTA")
+        self.assertIsNotNone(atp_wta_info)
+        self.assertEqual(atp_wta_info["stage"], "LIVE BROADCAST")
+
+    def test_parse_team_players_excludes_circuits(self):
+        """Tests that tournament circuits (ATP, WTA, ITF) are never parsed as athletes in doubles."""
+        self.assertEqual(tennis_poster_service.parse_team_players("ATP & WTA"), [])
+        self.assertEqual(tennis_poster_service.parse_team_players("Simone Bolelli / Andrea Vavassori"), ["Simone Bolelli", "Andrea Vavassori"])
+
     def test_country_match_detection(self):
         self.assertTrue(tennis_poster_service.is_country_match("Italy vs China", "Italy", "China", "Coppa Davis e BJK Cup"))
         self.assertTrue(tennis_poster_service.is_country_match("Ukraine vs Belgium (Billie Jean King Cup)", "Ukraine", "Belgium", "WTA"))
