@@ -28,6 +28,7 @@ from app.services.banner_service import banner_service, BANNER_VERSION
 from app.services.tennis_poster_service import tennis_poster_service
 from app.services.thesportsdb_service import thesportsdb_service
 from app.services.tvvoo_service import tvvoo_service
+from app.services.italian_epg_service import italian_epg_service
 from app.services.virgilio_service import virgilio_service
 
 
@@ -661,13 +662,14 @@ class CatalogService:
 
             logger.info("Starting background sports schedule sync...")
             try:
-                # 1. Fetch live matches from StreamedAPI, DaddyLiveAPI, Virgilio Sport (TvVoo), and official registries concurrently
+                # 1. Fetch live matches from StreamedAPI, DaddyLiveAPI, Italian EPG (Sky & Tivùsat), and official registries concurrently
                 tasks = [
                     streamed_api.get_all_matches(force_refresh=True),
                     daddylive_api.get_matches(force=True),
                     espn_service.get_official_events(),
                     ocblacktop_service.get_official_sessions(),
                     thesportsdb_service.fetch_multi_day_calendar(days_ahead=3, days_behind=1),
+                    italian_epg_service.get_matches(),
                     virgilio_service.get_matches(),
                     thesportsdb_service.fetch_browse_tv_matches(),
                 ]
@@ -676,20 +678,18 @@ class CatalogService:
                 daddylive_raw = results[1] if isinstance(results[1], list) else []
                 espn_events = results[2] if isinstance(results[2], list) else []
                 ocb_sessions = results[3] if isinstance(results[3], list) else []
-                virgilio_raw = results[5] if isinstance(results[5], list) else []
-                tsdb_tv_raw = results[6] if isinstance(results[6], list) else []
+                epg_raw = results[5] if isinstance(results[5], list) else []
+                virgilio_raw = results[6] if isinstance(results[6], list) else []
+                tsdb_tv_raw = results[7] if isinstance(results[7], list) else []
 
                 streamed_matches = [m for m in streamed_raw if self.is_real_match(m)]
                 daddylive_matches = [m for m in daddylive_raw if self.is_real_match(m)]
+                epg_matches = [m for m in epg_raw if self.is_real_match(m)]
                 virgilio_matches = [m for m in virgilio_raw if self.is_real_match(m)]
                 tsdb_tv_matches = [m for m in tsdb_tv_raw if self.is_real_match(m)]
 
                 # Merge streamed and daddylive matches silo-by-silo into combined fresh
                 combined_fresh = self.merge_and_deduplicate_by_silos(streamed_matches, daddylive_matches)
-
-                # Merge Virgilio Italian schedule with TvVoo streams (attaches TvVoo to existing matches or adds Italian matches)
-                if virgilio_matches:
-                    combined_fresh = self.merge_and_deduplicate_by_silos(combined_fresh, virgilio_matches)
 
                 # Merge TheSportsDB multi-nation TV schedule with TvVoo streams
                 if tsdb_tv_matches:
@@ -701,6 +701,9 @@ class CatalogService:
 
                 # Enrich any match (from DaddyLive, Streamed, etc.) with TvVoo FHD streams if matching recognized broadcasters
                 tvvoo_service.enrich_matches_with_tvvoo(all_matches)
+
+                # Enrich confirmed real matches with official Italian Sky & Tivùsat TvVoo channels from Italian EPG (strictly channel mapper)
+                await italian_epg_service.enrich_matches_with_epg_channels(all_matches)
 
 
                 # 3. Persist merged matches in DB

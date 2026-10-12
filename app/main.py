@@ -31,6 +31,7 @@ from app.services.dailymotion_service import dailymotion_service
 from app.services.db_service import db_service
 from app.services.doh_client import doh_client
 from app.services.stream_service import stream_service
+from app.services.tvvoo_service import tvvoo_service
 from app.services.youtube_service import youtube_service
 
 # Setup logging
@@ -353,6 +354,35 @@ async def configured_stream(request: Request, config: str, type: str, id: str):
         base_url=base_url,
     )
     return JSONResponse(content={"streams": streams})
+
+
+@app.get("/live/manifest.m3u8")
+@app.get("/{config}/live/manifest.m3u8")
+async def live_manifest_proxy(request: Request, url: str):
+    """
+    Live M3U8 Manifest Proxy Endpoint (Auto token renewal, 0% video bandwidth).
+    Serves rewritten playlists pointing directly to upstream CDN chunks,
+    proactively renewing tokens in background to prevent stream freezing.
+    """
+    if not url:
+        raise HTTPException(status_code=400, detail="Parametro url mancante")
+
+    client_ip = request.headers.get("x-forwarded-for") or (request.client.host if request.client else None)
+    if client_ip and "," in client_ip:
+        client_ip = client_ip.split(",")[0].strip()
+
+    manifest_content = await tvvoo_service.get_live_manifest(url, client_ip)
+    if not manifest_content:
+        raise HTTPException(status_code=502, detail="Impossibile generare il manifest live dello stream")
+
+    return Response(
+        content=manifest_content,
+        media_type="application/vnd.apple.mpegurl",
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+        },
+    )
 
 
 @app.get("/dailymotion/stream/{video_id}.m3u8")

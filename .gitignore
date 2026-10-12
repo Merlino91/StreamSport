@@ -30,3 +30,6 @@ data/posters/banners/
 # Local backup files (never push to GitHub)
 *_backup.py
 
+# Scratch scripts
+scratch/
+

@@ -391,7 +391,7 @@ class StreamService:
         """
         Resolves streams for an event ID and formats them for Stremio.
         """
-        if not ep_url:
+        if not ep_url and not base_url:
             return [
                 {
                     "name": "⚠️ EasyProxy non configurato",
@@ -530,80 +530,94 @@ class StreamService:
             flag_prefix = "" if has_flag else f"{flag} "
             name_label = f"{flag_prefix}{raw_name}" if count == 1 else f"{flag_prefix}{raw_name} (Server {count})"
 
-            stream_url = self.build_easyproxy_url(ep_url, ep_pass, "Vavoo", vavoo_url)
-            tvvoo_streams.append({
-                "name": name_label,
-                "title": f"{flag} {c_name} • ⚡ Fonte: TvVoo • Qualità FHD 1080p",
-                "url": stream_url,
-                "behaviorHints": {"notWebReady": False},
-            })
+            # 1. Native No-Freeze stream (auto token renewal, 0% video bandwidth)
+            if base_url:
+                no_freeze_url = f"{base_url.rstrip('/')}/live/manifest.m3u8?url={urllib.parse.quote(vavoo_url, safe='')}"
+                tvvoo_streams.append({
+                    "name": f"{name_label} ⚡ No-Freeze",
+                    "title": f"{flag} {c_name} • ⚡ Fonte: TvVoo (No-Freeze) • Qualità FHD 1080p",
+                    "url": no_freeze_url,
+                    "behaviorHints": {"isLive": True, "notWebReady": False},
+                })
+
+            # 2. EasyProxy stream (if configured)
+            if ep_url:
+                stream_url = self.build_easyproxy_url(ep_url, ep_pass, "Vavoo", vavoo_url)
+                tvvoo_streams.append({
+                    "name": name_label,
+                    "title": f"{flag} {c_name} • ⚡ Fonte: TvVoo • Qualità FHD 1080p",
+                    "url": stream_url,
+                    "behaviorHints": {"notWebReady": False},
+                })
 
         # Keep Italian TvVoo streams at index 0, followed by international TvVoo streams
         tvvoo_streams.sort(key=lambda s: 0 if "🇮🇹" in s.get("name", "") else 1)
 
         # 2. Process DaddyLive (dlhd) streams with StreamViX / MediaFlow Proxy format
         dlhd_streams: List[Dict[str, Any]] = []
-        dlhd_sources = [s for s in sources if s.get("source") == "dlhd"]
-        dl_domain = await daddylive_api.get_active_domain() if dlhd_sources else "dlive.sx"
-        for idx, s in enumerate(dlhd_sources, 1):
-            ch_id = s.get("id")
-            ch_name = s.get("name") or f"Canale {idx}"
-            flag = self.get_channel_flag(ch_name)
-            flag_prefix = f"{flag} " if flag else ""
+        if ep_url:
+            dlhd_sources = [s for s in sources if s.get("source") == "dlhd"]
+            dl_domain = await daddylive_api.get_active_domain() if dlhd_sources else "dlive.sx"
+            for idx, s in enumerate(dlhd_sources, 1):
+                ch_id = s.get("id")
+                ch_name = s.get("name") or f"Canale {idx}"
+                flag = self.get_channel_flag(ch_name)
+                flag_prefix = f"{flag} " if flag else ""
 
-            # Exact StreamViX destination URL and EasyProxy parameters: host=DLHD, redirect_stream=true
-            d_url = f"https://{dl_domain}/watch.php?id={ch_id}"
-            stream_url = self.build_easyproxy_url(ep_url, ep_pass, "DLHD", d_url)
+                # Exact StreamViX destination URL and EasyProxy parameters: host=DLHD, redirect_stream=true
+                d_url = f"https://{dl_domain}/watch.php?id={ch_id}"
+                stream_url = self.build_easyproxy_url(ep_url, ep_pass, "DLHD", d_url)
 
-            dlhd_streams.append({
-                "name": f"{flag_prefix}{ch_name}",
-                "title": "📡 Fonte: DaddyLive • Qualità: Live TV",
-                "url": stream_url,
-                "behaviorHints": {"notWebReady": False},
-            })
+                dlhd_streams.append({
+                    "name": f"{flag_prefix}{ch_name}",
+                    "title": "📡 Fonte: DaddyLive • Qualità: Live TV",
+                    "url": stream_url,
+                    "behaviorHints": {"notWebReady": False},
+                })
 
         # 3. Process Streamed upstream sources (hotel, delta, etc.)
         streamed_streams: List[Dict[str, Any]] = []
-        other_sources = [(s.get("source"), s.get("id")) for s in sources if s.get("source") not in ("dlhd", "tvvoo") and s.get("source") and s.get("id")]
-        if other_sources:
-            tasks = [streamed_api.get_streams_for_source(src_name, src_id) for src_name, src_id in other_sources]
-            results = await asyncio.gather(*tasks, return_exceptions=True)
+        if ep_url:
+            other_sources = [(s.get("source"), s.get("id")) for s in sources if s.get("source") not in ("dlhd", "tvvoo") and s.get("source") and s.get("id")]
+            if other_sources:
+                tasks = [streamed_api.get_streams_for_source(src_name, src_id) for src_name, src_id in other_sources]
+                results = await asyncio.gather(*tasks, return_exceptions=True)
 
-            stream_index = 1
-            for res in results:
-                if isinstance(res, list):
-                    for stream_info in res:
-                        embed_url = stream_info.get("embedUrl")
-                        if not embed_url:
-                            continue
+                stream_index = 1
+                for res in results:
+                    if isinstance(res, list):
+                        for stream_info in res:
+                            embed_url = stream_info.get("embedUrl")
+                            if not embed_url:
+                                continue
 
-                        host = self.detect_host(embed_url)
-                        stream_url = self.build_easyproxy_url(ep_url, ep_pass, host, embed_url)
+                            host = self.detect_host(embed_url)
+                            stream_url = self.build_easyproxy_url(ep_url, ep_pass, host, embed_url)
 
-                        flag, lang_label = self.resolve_streamed_language(stream_info.get("language"))
-                        flag_prefix = f"{flag} " if flag else ""
+                            flag, lang_label = self.resolve_streamed_language(stream_info.get("language"))
+                            flag_prefix = f"{flag} " if flag else ""
 
-                        hd = " [HD]" if stream_info.get("hd") else ""
-                        name_display = f"{flag_prefix}Stream #{stream_index}{hd}"
+                            hd = " [HD]" if stream_info.get("hd") else ""
+                            name_display = f"{flag_prefix}Stream #{stream_index}{hd}"
 
-                        desc_parts = []
-                        if lang_label:
-                            desc_parts.append(f"{flag_prefix}Lingua: {lang_label}".strip())
-                        if stream_info.get("hd"):
-                            desc_parts.append("Risoluzione: HD")
-                        desc_header = " • ".join(desc_parts)
+                            desc_parts = []
+                            if lang_label:
+                                desc_parts.append(f"{flag_prefix}Lingua: {lang_label}".strip())
+                            if stream_info.get("hd"):
+                                desc_parts.append("Risoluzione: HD")
+                            desc_header = " • ".join(desc_parts)
 
-                        title_display = f"{desc_header}\n📡 Fonte: Streamed" if desc_header else "📡 Fonte: Streamed"
+                            title_display = f"{desc_header}\n📡 Fonte: Streamed" if desc_header else "📡 Fonte: Streamed"
 
-                        streamed_streams.append({
-                            "name": name_display,
-                            "title": title_display,
-                            "url": stream_url,
-                            "behaviorHints": {
-                                "notWebReady": False,
-                            },
-                        })
-                        stream_index += 1
+                            streamed_streams.append({
+                                "name": name_display,
+                                "title": title_display,
+                                "url": stream_url,
+                                "behaviorHints": {
+                                    "notWebReady": False,
+                                },
+                            })
+                            stream_index += 1
 
         # Sort non-TvVoo streams: Italian DaddyLive channels immediately below TvVoo
         secondary_streams = dlhd_streams + streamed_streams
@@ -613,6 +627,16 @@ class StreamService:
         final_streams = tvvoo_streams + secondary_streams
 
         if not final_streams:
+            if not ep_url:
+                return [
+                    {
+                        "name": "⚠️ EasyProxy non configurato",
+                        "title": "Per questo evento sono disponibili solo flussi Web che richiedono EasyProxy.",
+                        "url": "",
+                        "description": "Apri il pannello /configure per impostare l'URL del tuo proxy.",
+                        "behaviorHints": {"notWebReady": True},
+                    }
+                ]
             return []
 
         return final_streams

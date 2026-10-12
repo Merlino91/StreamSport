@@ -1,8 +1,10 @@
 from __future__ import annotations
 import asyncio
+from dataclasses import dataclass
 import logging
 import re
 import time
+import urllib.parse
 import uuid
 from typing import Any, Dict, List, Optional, Set
 import httpx
@@ -10,6 +12,139 @@ import httpx
 from app.config import ENABLE_TVVOO, TVVOO_CACHE_INTERVAL
 
 logger = logging.getLogger("streamsport.tvvoo_service")
+
+
+@dataclass
+class LiveStreamSession:
+    play_url: str
+    client_ip: Optional[str]
+    stream_url: str
+    base_url: str
+    valid_until: float  # Unix timestamp in seconds
+    last_fetched_at: float
+    last_manifest: Optional[str] = None
+    last_manifest_time: float = 0.0
+    refresh_task: Optional[asyncio.Task] = None
+
+
+class LiveManifestManager:
+    """
+    No-Freeze Live Manifest Manager for Vavoo Streams.
+    Acts as a zero-video-bandwidth manifest proxy:
+    - Rewrites relative .ts/.m4s video chunks into absolute URLs pointing directly to Vavoo CDN edge servers (0% video bandwidth on our server).
+    - Proactively renews temporary Vavoo tokens in the background when < 5 mins remain, without interrupting player playback.
+    - Throttles rapid repeated manifest requests (< 1.5s).
+    - Guards against player buffer stalls: on transient 401/403 or network errors, serves the recent manifest (< 10s) while asynchronously re-resolving tokens.
+    """
+
+    def __init__(self, service: "TvVooService"):
+        self.service = service
+        self.sessions: Dict[str, LiveStreamSession] = {}
+        self._lock = asyncio.Lock()
+
+    def _get_key(self, play_url: str, client_ip: Optional[str]) -> str:
+        return f"{play_url}:{client_ip or 'default'}"
+
+    def cleanup(self) -> None:
+        now = time.time()
+        stale_keys = [k for k, s in self.sessions.items() if (now - s.last_fetched_at) > 2700]  # 45 minutes
+        for k in stale_keys:
+            self.sessions.pop(k, None)
+
+    async def get_live_manifest(self, play_url: str, client_ip: Optional[str] = None) -> Optional[str]:
+        self.cleanup()
+        key = self._get_key(play_url, client_ip)
+        now = time.time()
+
+        async with self._lock:
+            session = self.sessions.get(key)
+            if not session or session.valid_until <= now:
+                session = await self._refresh_session(session, play_url, client_ip)
+            elif (session.valid_until - now) < 300 and (not session.refresh_task or session.refresh_task.done()):
+                # Proactive non-blocking background token renewal when < 5 mins left
+                session.refresh_task = asyncio.create_task(self._refresh_session(session, play_url, client_ip))
+
+        if not session:
+            return None
+
+        session.last_fetched_at = now
+
+        # 3. Fast throttle for rapid repeated manifest requests (< 1.5 seconds)
+        if session.last_manifest and (now - session.last_manifest_time) < 1.5:
+            return session.last_manifest
+
+        # 4. Fetch upstream playlist
+        try:
+            raw_m3u8 = await self._fetch_upstream(session.stream_url)
+        except Exception as exc:
+            logger.warning("[LiveManifest] Upstream fetch issue (%s) for %s", exc, play_url[:80])
+            # If we have an existing recent manifest (< 10 seconds), serve immediately to prevent player buffer stall!
+            if session.last_manifest and (now - session.last_manifest_time) < 10.0:
+                if any(err in str(exc).lower() for err in ("401", "403", "auth")):
+                    asyncio.create_task(self._refresh_session(session, play_url, client_ip))
+                return session.last_manifest
+
+            # Synchronous refresh
+            session = await self._refresh_session(session, play_url, client_ip)
+            if not session:
+                return None
+            raw_m3u8 = await self._fetch_upstream(session.stream_url)
+
+        rewritten = self._rewrite_manifest(raw_m3u8, session.base_url)
+        session.last_manifest = rewritten
+        session.last_manifest_time = time.time()
+        return rewritten
+
+    async def _fetch_upstream(self, stream_url: str) -> str:
+        headers = {
+            "User-Agent": "VAVOO/2.6",
+            "Accept": "*/*",
+        }
+        async with httpx.AsyncClient(timeout=4.0) as client:
+            res = await client.get(stream_url, headers=headers)
+            if res.status_code in (401, 403):
+                raise RuntimeError(f"Upstream auth error: {res.status_code}")
+            if res.status_code != 200:
+                raise RuntimeError(f"Upstream error: {res.status_code}")
+            return res.text
+
+    async def _refresh_session(self, current: Optional[LiveStreamSession], play_url: str, client_ip: Optional[str]) -> Optional[LiveStreamSession]:
+        resolved = await self.service.resolve_clean_stream_url(play_url, client_ip)
+        if not resolved or not resolved.get("url"):
+            logger.warning("[LiveManifest] Failed to resolve Vavoo stream URL for %s", play_url[:80])
+            return current
+
+        stream_url = resolved["url"]
+        last_slash = stream_url.rfind("/")
+        base_url = stream_url[:last_slash + 1] if last_slash != -1 else stream_url
+        valid_until = resolved.get("valid_until", time.time() + 1200)
+
+        updated = LiveStreamSession(
+            play_url=play_url,
+            client_ip=client_ip,
+            stream_url=stream_url,
+            base_url=base_url,
+            valid_until=valid_until,
+            last_fetched_at=time.time(),
+            last_manifest=current.last_manifest if current else None,
+            last_manifest_time=current.last_manifest_time if current else 0.0,
+            refresh_task=None,
+        )
+        key = self._get_key(play_url, client_ip)
+        self.sessions[key] = updated
+        logger.info("[LiveManifest] Session refreshed for %s (valid for ~%ds)", play_url[:60], int(valid_until - time.time()))
+        return updated
+
+    def _rewrite_manifest(self, raw: str, base_url: str) -> str:
+        lines = raw.splitlines()
+        out_lines = []
+        for line in lines:
+            trimmed = line.strip()
+            if not trimmed or trimmed.startswith("#") or trimmed.startswith("http://") or trimmed.startswith("https://"):
+                out_lines.append(line)
+            else:
+                out_lines.append(urllib.parse.urljoin(base_url, trimmed))
+        return "\n".join(out_lines)
 
 
 class TvVooService:
@@ -75,6 +210,58 @@ class TvVooService:
         "au", "australia",
         "nz", "new zealand",
         "za", "south africa",
+    }
+
+    # Direct mapping for Sky Italia Guida TV API (apid.sky.it) channel IDs
+    SKY_CHANNEL_IDS: Dict[str, str] = {
+        "9094": "sky sport 24",       # LCN 200
+        "9097": "sky sport uno",      # LCN 201
+        "9113": "sky sport calcio",   # LCN 202
+        "11237": "sky sport tennis",  # LCN 203
+        "9093": "sky sport arena",    # LCN 204
+        "9116": "sky sport basket",   # LCN 205
+        "9103": "sky sport max",      # LCN 206
+        "9096": "sky sport f1",       # LCN 207
+        "9102": "sky sport motogp",   # LCN 208
+        "10254": "sky sport golf",    # LCN 209
+        "11910": "sky sport legend",  # LCN 210
+        "11909": "sky sport mix",     # LCN 211
+        "6000": "supertennis",        # LCN 212
+        "10013": "sky sport 4k",      # LCN 213
+        "11402": "dazn 1",            # LCN 214
+        "11401": "dazn 2",            # LCN 215
+        "11849": "dazn 3",            # LCN 216
+        "11850": "dazn 4",            # LCN 217
+        "807": "rai sport",           # LCN 227
+        "7587": "sport tv",           # LCN 228
+        "9513": "milan tv",           # LCN 230
+        "9893": "inter tv",           # LCN 232
+        "11497": "sky sport 251",     # LCN 251
+        "11496": "sky sport 252",     # LCN 252
+        "11494": "sky sport 253",     # LCN 253
+        "11490": "sky sport 254",     # LCN 254
+        "11491": "sky sport 255",     # LCN 255
+        "11492": "sky sport 256",     # LCN 256
+        "11386": "sky sport 257",     # LCN 257
+        "9046": "sky sport 258",      # LCN 258
+        "8613": "sky sport 259",      # LCN 259
+        "899": "rai 1",               # LCN 101
+        "898": "rai 2",               # LCN 102
+        "897": "rai 3",               # LCN 103
+    }
+
+    # Direct mapping for Tivùsat EPG API (services.tivulaguida.it) channel IDs
+    TIVUSAT_CHANNEL_IDS: Dict[str, str] = {
+        "42": "rai 1",                # Rai 1 HD
+        "43": "rai 2",                # Rai 2 HD
+        "44": "rai 3",                # Rai 3 HD
+        "88": "rai sport",            # Rai Sport HD
+        "145": "canale 5",            # Canale 5 HD
+        "148": "italia 1",            # Italia 1 HD
+        "249": "20 mediaset",         # 20 Mediaset HD
+        "279": "tv8",                 # TV8 HD
+        "280": "cielo",               # Cielo HD
+        "295": "sportitalia solocalcio", # SOLOCALCIO (Sportitalia)
     }
 
     # Country-specific alias mapping (Silos) including official LCN numbering
@@ -218,6 +405,122 @@ class TvVooService:
             "sky 215": "dazn 2",
             "sky sport 215": "dazn 2",
             "215": "dazn 2",
+            "dazn 3": "dazn 3",
+            "dazn 3 it": "dazn 3",
+            "dazn 3 italia": "dazn 3",
+            "zona dazn 3": "dazn 3",
+            "zona dazn 216": "dazn 3",
+            "dazn 216": "dazn 3",
+            "sky 216": "dazn 3",
+            "sky sport 216": "dazn 3",
+            "216": "dazn 3",
+            "dazn 4": "dazn 4",
+            "dazn 4 it": "dazn 4",
+            "dazn 4 italia": "dazn 4",
+            "zona dazn 4": "dazn 4",
+            "zona dazn 217": "dazn 4",
+            "dazn 217": "dazn 4",
+            "sky 217": "dazn 4",
+            "sky sport 217": "dazn 4",
+            "217": "dazn 4",
+
+            # Sky Sport 4K (LCN 213) & Sky Sport Legend (LCN 210) & Mix (LCN 211)
+            "sky sport 4k": "sky sport 4k",
+            "sky 4k": "sky sport 4k",
+            "sky sport 213": "sky sport 4k",
+            "sky 213": "sky sport 4k",
+            "213": "sky sport 4k",
+            "sky sport legend": "sky sport legend",
+            "sky legend": "sky sport legend",
+            "sky sport 210": "sky sport legend",
+            "sky 210": "sky sport legend",
+            "sky sport mix 211": "sky sport mix",
+            "sky 211": "sky sport mix",
+
+            # Sky Sport Calcio Contemporanea (LCN 251 - 259) - Mappatura Difensiva & ID Ufficiali
+            "sky sport 251": "sky sport 251",
+            "sky sport calcio 251": "sky sport 251",
+            "sky calcio 251": "sky sport 251",
+            "sky calcio 1": "sky sport 251",
+            "sky 251": "sky sport 251",
+            "251": "sky sport 251",
+
+            "sky sport 252": "sky sport 252",
+            "sky sport calcio 252": "sky sport 252",
+            "sky calcio 252": "sky sport 252",
+            "sky calcio 2": "sky sport 252",
+            "sky 252": "sky sport 252",
+            "252": "sky sport 252",
+
+            "sky sport 253": "sky sport 253",
+            "sky sport calcio 253": "sky sport 253",
+            "sky calcio 253": "sky sport 253",
+            "sky calcio 3": "sky sport 253",
+            "sky 253": "sky sport 253",
+            "253": "sky sport 253",
+
+            "sky sport 254": "sky sport 254",
+            "sky sport calcio 254": "sky sport 254",
+            "sky calcio 254": "sky sport 254",
+            "sky calcio 4": "sky sport 254",
+            "sky 254": "sky sport 254",
+            "254": "sky sport 254",
+
+            "sky sport 255": "sky sport 255",
+            "sky sport calcio 255": "sky sport 255",
+            "sky calcio 255": "sky sport 255",
+            "sky calcio 5": "sky sport 255",
+            "sky 255": "sky sport 255",
+            "255": "sky sport 255",
+
+            "sky sport 256": "sky sport 256",
+            "sky sport calcio 256": "sky sport 256",
+            "sky calcio 256": "sky sport 256",
+            "sky calcio 6": "sky sport 256",
+            "sky 256": "sky sport 256",
+            "256": "sky sport 256",
+
+            "sky sport 257": "sky sport 257",
+            "sky sport calcio 257": "sky sport 257",
+            "sky calcio 257": "sky sport 257",
+            "sky calcio 7": "sky sport 257",
+            "sky 257": "sky sport 257",
+            "257": "sky sport 257",
+
+            "sky sport 258": "sky sport 258",
+            "sky sport calcio 258": "sky sport 258",
+            "sky calcio 258": "sky sport 258",
+            "sky calcio 8": "sky sport 258",
+            "sky 258": "sky sport 258",
+            "258": "sky sport 258",
+
+            "sky sport 259": "sky sport 259",
+            "sky sport calcio 259": "sky sport 259",
+            "sky calcio 259": "sky sport 259",
+            "sky calcio 9": "sky sport 259",
+            "sky 259": "sky sport 259",
+            "259": "sky sport 259",
+
+            # Club Channels (LCN 228, 230, 232)
+            "sport tv": "sport tv",
+            "sport tv 228": "sport tv",
+            "sky 228": "sport tv",
+            "228": "sport tv",
+            "milan tv": "milan tv",
+            "milan tv 230": "milan tv",
+            "sky 230": "milan tv",
+            "230": "milan tv",
+            "inter tv": "inter tv",
+            "inter tv 232": "inter tv",
+            "sky 232": "inter tv",
+            "232": "inter tv",
+
+            # Mediaset & Rai 4K
+            "20 mediaset": "20 mediaset",
+            "canale 20": "20 mediaset",
+            "mediaset 20": "20 mediaset",
+            "20": "20 mediaset",
+            "rai 4k": "rai 4k",
 
             # Rai Sport & Generalist FTA
             "rai sport": "rai sport",
@@ -242,6 +545,16 @@ class TvVooService:
             "rai 2 hd": "rai 2",
             "rai 3": "rai 3",
             "rai 3 hd": "rai 3",
+
+            # Amazon Prime Video IT
+            "prime video": "prime video it",
+            "prime video it": "prime video it",
+            "prime video italia": "prime video it",
+            "amazon prime": "prime video it",
+            "amazon prime video": "prime video it",
+            "amazon prime video it": "prime video it",
+            "amazon prime video italia": "prime video it",
+            "amazon prime sport": "prime video it",
         },
 
         "Germany": {
@@ -342,6 +655,17 @@ class TvVooService:
             "sport1 de": "sport1 de",
             "sport 1 de": "sport1 de",
             "sport1 germany": "sport1 de",
+
+            # Amazon Prime Video DE & DAZN NBA
+            "amazon prime sport": "amazon prime sport de",
+            "amazon pr me sport": "amazon prime sport de",
+            "amazon prime": "amazon prime de",
+            "amazon prime de": "amazon prime de",
+            "amazon prime video": "amazon prime de",
+            "amazon prime video 1": "amazon prime video 1 de",
+            "amazon prime video 2": "amazon prime video 2 de",
+            "germany box amazon prime": "amazon prime de",
+            "dazn nba": "dazn nba de",
         },
 
         "Spain": {
@@ -405,6 +729,13 @@ class TvVooService:
             "teledeporte": "teledeporte",
             "tve teledeporte": "teledeporte",
             "bein sports la liga": "bein sports la liga",
+
+            # Amazon Prime Video ES
+            "prime video": "prime video es",
+            "prime video es": "prime video es",
+            "amazon prime": "prime video es",
+            "amazon prime video": "prime video es",
+            "amazon prime video es": "prime video es",
         },
 
         "France": {
@@ -462,6 +793,23 @@ class TvVooService:
             "dazn 3 fr": "dazn 3 fr",
             "rmc sport 1": "rmc sport 1",
             "rmc sport 2": "rmc sport 2",
+
+            # Amazon Prime Video FR (Ligue 1 & Roland Garros)
+            "amazon prime 1": "amazon prime 1 fr",
+            "amazon prime 1 +": "amazon prime 1 fr",
+            "amazon prime 2": "amazon prime 2 fr",
+            "amazon prime 2 +": "amazon prime 2 fr",
+            "amazon prime 3": "amazon prime 3 fr",
+            "amazon prime 3 +": "amazon prime 3 fr",
+            "amazon prime 4": "amazon prime 4 fr",
+            "amazon prime 4 +": "amazon prime 4 fr",
+            "amazon prime 5": "amazon prime 5 fr",
+            "amazon prime 5 +": "amazon prime 5 fr",
+            "amazon prime 6": "amazon prime 6 fr",
+            "amazon prime 7": "amazon prime 7 fr",
+            "amazon prime 8": "amazon prime 8 fr",
+            "amazon prime": "amazon prime 1 fr",
+            "amazon prime video": "amazon prime 1 fr",
         },
 
         "United Kingdom": {
@@ -500,11 +848,22 @@ class TvVooService:
             "bbc two": "bbc two",
             "itv 1": "itv 1",
             "itv 4": "itv 4",
+
+            # Amazon Prime Video UK
+            "amazon": "amazon prime uk",
+            "amazon prime": "amazon prime uk",
+            "amazon prime uk": "amazon prime uk",
+            "amazon prime video": "amazon prime uk",
+            "amazon prime video uk": "amazon prime uk",
+            "prime video uk": "amazon prime uk",
         },
 
         "World": {
             "euroleague tv": "euroleague tv",
             "nba tv": "nba tv",
+            "nba tv usa": "nba tv",
+            "nba league pass": "nba league pass",
+            "nba pass": "nba league pass",
         }
     }
 
@@ -547,6 +906,25 @@ class TvVooService:
         "rai 1": "Rai 1",
         "rai 2": "Rai 2",
         "rai 3": "Rai 3",
+        "rai 4k": "Rai 4K",
+        "prime video it": "Prime Video",
+        "sky sport 4k": "Sky Sport 4K",
+        "sky sport legend": "Sky Sport Legend",
+        "dazn 3": "DAZN 3",
+        "dazn 4": "DAZN 4",
+        "sky sport 251": "Sky Sport 251",
+        "sky sport 252": "Sky Sport 252",
+        "sky sport 253": "Sky Sport 253",
+        "sky sport 254": "Sky Sport 254",
+        "sky sport 255": "Sky Sport 255",
+        "sky sport 256": "Sky Sport 256",
+        "sky sport 257": "Sky Sport 257",
+        "sky sport 258": "Sky Sport 258",
+        "sky sport 259": "Sky Sport 259",
+        "sport tv": "Sport TV",
+        "milan tv": "Milan TV",
+        "inter tv": "Inter TV",
+        "20 mediaset": "20 Mediaset",
 
         # Germany
         "magenta sport 1": "🇩🇪 Magenta Sport 1",
@@ -585,6 +963,11 @@ class TvVooService:
         "dazn 1 de": "🇩🇪 DAZN 1 DE",
         "dazn 2 de": "🇩🇪 DAZN 2 DE",
         "sport1 de": "🇩🇪 Sport1 DE",
+        "amazon prime sport de": "🇩🇪 Amazon Prime Sport",
+        "amazon prime de": "🇩🇪 Amazon Prime Video",
+        "amazon prime video 1 de": "🇩🇪 Amazon Prime Video 1",
+        "amazon prime video 2 de": "🇩🇪 Amazon Prime Video 2",
+        "dazn nba de": "🇩🇪 DAZN NBA",
 
         # Spain
         "movistar laliga": "🇪🇸 Movistar LaLiga",
@@ -612,6 +995,7 @@ class TvVooService:
         "gol play": "🇪🇸 Gol Play",
         "teledeporte": "🇪🇸 Teledeporte",
         "bein sports la liga": "🇪🇸 beIN Sports LaLiga",
+        "prime video es": "🇪🇸 Prime Video",
 
         # France
         "canal plus sport": "🇫🇷 Canal+ Sport",
@@ -631,6 +1015,14 @@ class TvVooService:
         "dazn 3 fr": "🇫🇷 DAZN 3 FR",
         "rmc sport 1": "🇫🇷 RMC Sport 1",
         "rmc sport 2": "🇫🇷 RMC Sport 2",
+        "amazon prime 1 fr": "🇫🇷 Amazon Prime 1",
+        "amazon prime 2 fr": "🇫🇷 Amazon Prime 2",
+        "amazon prime 3 fr": "🇫🇷 Amazon Prime 3",
+        "amazon prime 4 fr": "🇫🇷 Amazon Prime 4",
+        "amazon prime 5 fr": "🇫🇷 Amazon Prime 5",
+        "amazon prime 6 fr": "🇫🇷 Amazon Prime 6",
+        "amazon prime 7 fr": "🇫🇷 Amazon Prime 7",
+        "amazon prime 8 fr": "🇫🇷 Amazon Prime 8",
 
         # United Kingdom
         "sky sports main event": "🇬🇧 Sky Sports Main Event",
@@ -654,10 +1046,12 @@ class TvVooService:
         "bbc two": "🇬🇧 BBC Two",
         "itv 1": "🇬🇧 ITV 1",
         "itv 4": "🇬🇧 ITV 4",
+        "amazon prime uk": "🇬🇧 Amazon Prime Video",
 
         # World
         "euroleague tv": "🌍 EuroLeague TV",
         "nba tv": "🌍 NBA TV",
+        "nba league pass": "🌍 NBA League Pass",
     }
 
     def __init__(self):
@@ -666,7 +1060,9 @@ class TvVooService:
         self._sync_lock = asyncio.Lock()
         self._addon_sig: Optional[str] = None
         self._sig_time: float = 0.0
+        self._sig_ip: Optional[str] = None
         self._active_domain: str = self.DEFAULT_DOMAIN
+        self.manifest_manager = LiveManifestManager(self)
 
     @property
     def active_domain(self) -> str:
@@ -694,8 +1090,8 @@ class TvVooService:
         s = re.sub(r"\[[^\]]*\]", "", s)
         # Remove parentheses tags
         s = re.sub(r"\([^)]*\)", "", s)
-        # Remove quality markers and codecs
-        s = re.sub(r"\b(fhd|uhd|4k|sd|hd\+?|hevc|raw|h\.?265)\b", "", s)
+        # Remove quality markers and codecs (4K is preserved here for channel identity, stripped only in noise-word fallback)
+        s = re.sub(r"\b(fhd|uhd|sd|hd\+?|hevc|raw|h\.?265)\b", "", s)
         # Normalize punctuation preserving # and +
         s = re.sub(r"[^a-z0-9#+]+", " ", s)
         return re.sub(r"\s+", " ", s).strip()
@@ -709,7 +1105,7 @@ class TvVooService:
         if not cleaned:
             return None
 
-        # Check trailing country word/code (e.g. 'dazn ca', 'dazn de', 'bein sports 1 france')
+        # Check trailing country word/code (e.g. 'dazn ca', 'dazn de', 'dazn 1 de', 'bein sports 1 france')
         trailing_word_match = re.search(r"\b([a-z]{2,12})$", cleaned)
         if trailing_word_match and country is None:
             trailing_code = trailing_word_match.group(1)
@@ -717,7 +1113,14 @@ class TvVooService:
                 # Explicit non-supported foreign broadcast (e.g. Canada, USA, Brazil) -> Do NOT fallback to Italy
                 return None
             if trailing_code in self.COUNTRY_SUFFIX_MAP:
-                country = self.COUNTRY_SUFFIX_MAP[trailing_code]
+                detected_country = self.COUNTRY_SUFFIX_MAP[trailing_code]
+                base_without_suffix = cleaned[:trailing_word_match.start()].strip()
+                silo = self.COUNTRY_ALIASES.get(detected_country, {})
+                if base_without_suffix in silo:
+                    return silo[base_without_suffix]
+                if cleaned in silo:
+                    return silo[cleaned]
+                country = detected_country
 
         # Build candidate dictionaries: prioritize country silo if specified or detected
         candidate_dicts: List[Dict[str, str]] = []
@@ -740,8 +1143,8 @@ class TvVooService:
             if cleaned_no_sym in aliases_map:
                 return aliases_map[cleaned_no_sym]
 
-            # 3. Match with common noise words stripped (e.g., 'hd', 'uhd', 'fhd', 'tv', 'channel', 'canale', 'live')
-            cleaned_no_noise = re.sub(r"\b(hd|uhd|fhd|sd|tv|channel|canale|live)\b", " ", cleaned)
+            # 3. Match with common noise words stripped (e.g., 'hd', 'uhd', 'fhd', '4k', 'tv', 'channel', 'canale', 'live')
+            cleaned_no_noise = re.sub(r"\b(hd|uhd|fhd|4k|sd|tv|channel|canale|live)\b", " ", cleaned)
             cleaned_no_noise = re.sub(r"\s+", " ", cleaned_no_noise).strip()
             if cleaned_no_noise and cleaned_no_noise in aliases_map:
                 return aliases_map[cleaned_no_noise]
@@ -765,7 +1168,7 @@ class TvVooService:
     async def get_vavoo_signature(self, client_ip: Optional[str] = None) -> Optional[str]:
         """Obtains session authorization signature via Vavoo ping endpoint."""
         now = time.time()
-        if self._addon_sig and (now - self._sig_time) < 1800:
+        if self._addon_sig and (now - self._sig_time) < 1500 and (client_ip is None or self._sig_ip == client_ip):
             return self._addon_sig
 
         payload = {
@@ -787,6 +1190,7 @@ class TvVooService:
             "castConnected": False,
             "package": "net.vypn.app",
             "version": "1.4.1",
+            "ipLocation": client_ip,
         }
 
         headers = {
@@ -804,6 +1208,7 @@ class TvVooService:
                     if sig:
                         self._addon_sig = sig
                         self._sig_time = now
+                        self._sig_ip = client_ip
                         logger.info("Successfully acquired new Vavoo session signature.")
                         return sig
         except Exception as e:
@@ -965,13 +1370,41 @@ class TvVooService:
         if not self._channels_by_canonical:
             await self.sync_channels()
 
-    def get_channel_streams(self, channel_name: str, country: Optional[str] = None) -> List[Dict[str, Any]]:
+    @classmethod
+    def get_canonical_from_sky_id(cls, channel_id: Any) -> Optional[str]:
+        """Resolves canonical channel key directly from Sky Italia channel ID (apid.sky.it)."""
+        return cls.SKY_CHANNEL_IDS.get(str(channel_id).strip())
+
+    @classmethod
+    def get_canonical_from_tivusat_id(cls, channel_id: Any) -> Optional[str]:
+        """Resolves canonical channel key directly from Tivùsat channel ID (services.tivulaguida.it)."""
+        return cls.TIVUSAT_CHANNEL_IDS.get(str(channel_id).strip())
+
+    def get_channel_streams(
+        self,
+        channel_name: Optional[str] = None,
+        country: Optional[str] = None,
+        sky_id: Optional[Any] = None,
+        tivusat_id: Optional[Any] = None,
+    ) -> List[Dict[str, Any]]:
         """
         Finds all available TvVoo stream targets for a requested TV channel.
-        Optionally scopes to a specific country silo (e.g., 'Italy', 'Germany').
+        Supports direct official API resolution via sky_id (apid.sky.it) or tivusat_id (services.tivulaguida.it),
+        or text channel_name with optional country silo scoping.
         Returns a list of dicts with 'canonical', 'url', 'display_name', 'tag', 'country'.
         """
-        canonical = self.get_canonical_key(channel_name, country=country)
+        canonical = None
+        if sky_id:
+            canonical = self.get_canonical_from_sky_id(sky_id)
+            if not country:
+                country = "Italy"
+        elif tivusat_id:
+            canonical = self.get_canonical_from_tivusat_id(tivusat_id)
+            if not country:
+                country = "Italy"
+        elif channel_name:
+            canonical = self.get_canonical_key(channel_name, country=country)
+
         if not canonical:
             return []
 
@@ -983,16 +1416,15 @@ class TvVooService:
 
         return list(self._channels_by_canonical.get(canonical, []))
 
-    def has_channel(self, channel_name: str, country: Optional[str] = None) -> bool:
+    def has_channel(
+        self,
+        channel_name: Optional[str] = None,
+        country: Optional[str] = None,
+        sky_id: Optional[Any] = None,
+        tivusat_id: Optional[Any] = None,
+    ) -> bool:
         """Returns True if the requested channel exists and has at least one valid stream."""
-        canonical = self.get_canonical_key(channel_name, country=country)
-        if not canonical:
-            return False
-        if country:
-            scoped_key = f"{country.lower()[:2]}:{canonical}"
-            if scoped_key in self._channels_by_canonical:
-                return len(self._channels_by_canonical[scoped_key]) > 0
-        return len(self._channels_by_canonical.get(canonical, [])) > 0
+        return len(self.get_channel_streams(channel_name=channel_name, country=country, sky_id=sky_id, tivusat_id=tivusat_id)) > 0
 
     def enrich_matches_with_tvvoo(self, matches: List[Dict[str, Any]]) -> int:
         """
@@ -1046,6 +1478,63 @@ class TvVooService:
         if enriched_count > 0:
             logger.info("TvVoo: agganciati flussi FHD diretti a %d match con emittenti internazionali.", enriched_count)
         return enriched_count
+
+    async def resolve_clean_stream_url(self, play_url: str, client_ip: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        """
+        Resolves a Vavoo play URL (https://vavoo.to/play/.../index.m3u8) to a direct playable stream URL.
+        """
+        if not play_url or "vavoo" not in play_url:
+            return None
+
+        sig = await self.get_vavoo_signature(client_ip)
+        if not sig:
+            return None
+
+        headers = {
+            "user-agent": "MediaHubMX/2",
+            "accept": "application/json",
+            "content-type": "application/json; charset=utf-8",
+            "accept-encoding": "gzip",
+            "mediahubmx-signature": sig,
+        }
+        if client_ip:
+            headers["x-forwarded-for"] = client_ip
+            headers["x-real-ip"] = client_ip
+
+        payload = {
+            "language": "de",
+            "region": "AT",
+            "url": play_url,
+            "clientVersion": "3.1.0",
+        }
+
+        candidate_domains = [self._active_domain] + [d for d in self.DOMAIN_MIRRORS if d != self._active_domain]
+        for domain in candidate_domains:
+            resolve_url = f"https://{domain}/mediahubmx-resolve.json"
+            try:
+                async with httpx.AsyncClient(timeout=8.0) as client:
+                    res = await client.post(resolve_url, headers=headers, json=payload)
+                    if res.status_code == 200:
+                        data = res.json()
+                        direct_url = None
+                        if isinstance(data, list) and data and data[0].get("url"):
+                            direct_url = str(data[0]["url"])
+                        elif isinstance(data, dict) and data.get("url"):
+                            direct_url = str(data["url"])
+
+                        if direct_url:
+                            return {
+                                "url": direct_url,
+                                "valid_until": time.time() + 1200,
+                            }
+            except Exception as e:
+                logger.debug("Failed resolve via %s: %s", domain, e)
+
+        return None
+
+    async def get_live_manifest(self, play_url: str, client_ip: Optional[str] = None) -> Optional[str]:
+        """Serves rewritten M3U8 manifest with auto token renewal (No-Freeze)."""
+        return await self.manifest_manager.get_live_manifest(play_url, client_ip)
 
 
 tvvoo_service = TvVooService()

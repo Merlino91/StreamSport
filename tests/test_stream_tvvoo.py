@@ -53,24 +53,54 @@ class TestStreamServiceTvVoo(unittest.IsolatedAsyncioTestCase):
         )
 
 
-        self.assertEqual(len(streams), 4)
+        self.assertEqual(len(streams), 6)
 
-        # 1st and 2nd streams must be TvVoo!
-        self.assertEqual(streams[0]["name"], "🇮🇹 Sky Sport Calcio")
-        self.assertEqual(streams[0]["title"], "🇮🇹 Italia • ⚡ Fonte: TvVoo • Qualità FHD 1080p")
-        self.assertIn("host=Vavoo", streams[0]["url"])
+        # 1st stream is TvVoo No-Freeze!
+        self.assertIn("No-Freeze", streams[0]["name"])
+        self.assertIn("live/manifest.m3u8", streams[0]["url"])
 
-        self.assertEqual(streams[1]["name"], "🇮🇹 DAZN 1")
-        self.assertEqual(streams[1]["title"], "🇮🇹 Italia • ⚡ Fonte: TvVoo • Qualità FHD 1080p")
-        self.assertIn("host=Vavoo", streams[1]["url"])
+        # EasyProxy TvVoo streams are also available
+        easyproxy_tvvoo = [s for s in streams if "host=Vavoo" in s["url"]]
+        self.assertEqual(len(easyproxy_tvvoo), 2)
+        self.assertEqual(easyproxy_tvvoo[0]["name"], "🇮🇹 Sky Sport Calcio")
+        self.assertEqual(easyproxy_tvvoo[0]["title"], "🇮🇹 Italia • ⚡ Fonte: TvVoo • Qualità FHD 1080p")
+        self.assertIn("host=Vavoo", easyproxy_tvvoo[0]["url"])
 
-        # 3rd stream must be Italian DaddyLive!
-        self.assertIn("🇮🇹", streams[2]["name"])
-        self.assertIn("Fonte: DaddyLive", streams[2]["title"])
+        # DaddyLive streams follow
+        dl_streams = [s for s in streams if "DaddyLive" in s.get("title", "")]
+        self.assertEqual(len(dl_streams), 2)
+        self.assertIn("🇮🇹", dl_streams[0]["name"])
+        self.assertIn("🇬🇧", dl_streams[1]["name"])
 
-        # 4th stream must be UK DaddyLive!
-        self.assertIn("🇬🇧", streams[3]["name"])
-        self.assertIn("Fonte: DaddyLive", streams[3]["title"])
+    @patch("app.services.stream_service.daddylive_api")
+    async def test_tvvoo_no_freeze_without_easyproxy(self, mock_dl):
+        """Verifies that TvVoo No-Freeze streams work seamlessly even when EasyProxy is not configured."""
+        match = {
+            "id": "test_match_2",
+            "title": "Inter vs Roma",
+            "date": 0,
+            "sources": [
+                {
+                    "source": "tvvoo",
+                    "id": "sky_sport_calcio",
+                    "name": "Sky Sport Calcio",
+                    "url": "https://vavoo.to/play/calcio_1",
+                },
+            ],
+        }
+        from app.services.catalog_service import catalog_service
+        catalog_service._cached_matches = [match]
+
+        streams = await self.service.get_streams_for_event(
+            "streamsport:test_match_2",
+            ep_url=None,
+            ep_pass=None,
+            user_tz="Europe/Rome",
+            base_url="https://addon.example.com",
+        )
+        self.assertEqual(len(streams), 1)
+        self.assertIn("No-Freeze", streams[0]["name"])
+        self.assertIn("live/manifest.m3u8", streams[0]["url"])
 
     def test_resolve_streamed_language(self):
         cases = [
