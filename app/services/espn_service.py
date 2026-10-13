@@ -196,7 +196,7 @@ class ESPNService:
                                     if item:
                                         parsed.append(item)
 
-                                # Query remaining scheduled dates in the next 7 days from the league calendar
+                                # Query remaining scheduled dates in the next 3 days (today + 2 days ahead)
                                 cal = data.get("leagues", [{}])[0].get("calendar", [])
                                 extra_dates = set()
                                 now_dt = datetime.datetime.now(datetime.timezone.utc)
@@ -205,14 +205,14 @@ class ESPNService:
                                     for c in cal:
                                         try:
                                             dt = datetime.datetime.fromisoformat(c.replace("Z", "+00:00"))
-                                            if 0 <= (dt.date() - now_dt.date()).days <= 7:
+                                            if 0 <= (dt.date() - now_dt.date()).days <= 2:
                                                 extra_dates.add(dt.strftime("%Y%m%d"))
                                         except Exception:
                                             pass
                                 else:
                                     # Tournaments, cups or non-string calendars (e.g. UEFA, cups, playoffs):
-                                    # Scan the 7 upcoming days
-                                    for i in range(1, 8):
+                                    # Scan max 2 upcoming days
+                                    for i in range(1, 3):
                                         extra_dates.add((now_dt + datetime.timedelta(days=i)).strftime("%Y%m%d"))
 
                                 for ed in extra_dates:
