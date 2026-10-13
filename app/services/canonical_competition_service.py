@@ -86,6 +86,26 @@ CANONICAL_LEAGUES = {
         "silo": "football",
         "patterns": [r"ligue\s*1", r"france\s*-\s*ligue\s*1"],
     },
+    "football_ligue_2": {
+        "display": "Ligue 2",
+        "silo": "football",
+        "patterns": [r"ligue\s*2", r"france\s*-\s*ligue\s*2"],
+    },
+    "football_coupe_de_france": {
+        "display": "Coupe de France",
+        "silo": "football",
+        "patterns": [r"coupe\s*de\s*france"],
+    },
+    "football_uefa_youth_league": {
+        "display": "UEFA Youth League",
+        "silo": "football",
+        "patterns": [r"uefa-youth-league", r"uefa\s*youth\s*league", r"youth\s*league"],
+    },
+    "football_uwcl": {
+        "display": "UEFA Women's Champions League",
+        "silo": "football",
+        "patterns": [r"uwcl", r"women['’]?s\s*champions\s*league", r"uefa\s*women\s*champions"],
+    },
     "football_uefa_cl": {
         "display": "UEFA Champions League",
         "silo": "football",
@@ -101,10 +121,50 @@ CANONICAL_LEAGUES = {
         "silo": "football",
         "patterns": [r"uefa-conference-league", r"conference\s*league", r"uefa\s*conference\s*league", r"\buecl\b"],
     },
+    "football_uefa_super_cup": {
+        "display": "UEFA Super Cup",
+        "silo": "football",
+        "patterns": [r"uefa\s*super\s*cup", r"super\s*cup\s*uefa"],
+    },
     "football_uefa_nations": {
         "display": "UEFA Nations League",
         "silo": "football",
         "patterns": [r"nations\s*league", r"uefa\s*nations\s*league"],
+    },
+    "football_eredivisie": {
+        "display": "Eredivisie",
+        "silo": "football",
+        "patterns": [r"eredivisie", r"netherlands\s*-\s*eredivisie", r"holland\s*eredivisie"],
+    },
+    "football_primeira_liga": {
+        "display": "Primeira Liga",
+        "silo": "football",
+        "patterns": [r"primeira\s*liga", r"liga\s*portugal", r"portugal\s*-\s*primeira"],
+    },
+    "football_scottish_prem": {
+        "display": "Scottish Premiership",
+        "silo": "football",
+        "patterns": [r"scottish\s*premiership", r"scotland\s*-\s*premiership", r"\bspfl\b"],
+    },
+    "football_super_lig": {
+        "display": "Süper Lig",
+        "silo": "football",
+        "patterns": [r"s[uü]per\s*lig", r"turkey\s*-\s*super\s*lig", r"turkish\s*super\s*lig"],
+    },
+    "football_belgian_pro": {
+        "display": "Belgian Pro League",
+        "silo": "football",
+        "patterns": [r"belgian\s*pro\s*league", r"jupiler\s*pro\s*league", r"belgium\s*-\s*first\s*division"],
+    },
+    "football_efl_league_one": {
+        "display": "EFL League One",
+        "silo": "football",
+        "patterns": [r"league\s*one", r"england\s*-\s*league\s*one"],
+    },
+    "football_efl_league_two": {
+        "display": "EFL League Two",
+        "silo": "football",
+        "patterns": [r"league\s*two", r"england\s*-\s*league\s*two"],
     },
     "football_copa_libertadores": {
         "display": "Copa Libertadores",
@@ -121,6 +181,21 @@ CANONICAL_LEAGUES = {
         "silo": "football",
         "patterns": [r"\bmls\b", r"major\s*league\s*soccer"],
     },
+    "football_liga_mx": {
+        "display": "Liga MX",
+        "silo": "football",
+        "patterns": [r"liga\s*mx", r"mexico\s*-\s*liga\s*mx"],
+    },
+    "football_brasileirao": {
+        "display": "Brasileirão Serie A",
+        "silo": "football",
+        "patterns": [r"brasileir[aã]o", r"brazil\s*-\s*serie\s*a", r"campeonato\s*brasileiro"],
+    },
+    "football_liga_profesional_arg": {
+        "display": "Liga Profesional Argentina",
+        "silo": "football",
+        "patterns": [r"liga\s*profesional", r"argentina\s*-\s*primera\s*division", r"primera\s*division\s*argentina"],
+    },
     "football_saudi_pro": {
         "display": "Saudi Pro League",
         "silo": "football",
@@ -130,6 +205,51 @@ CANONICAL_LEAGUES = {
         "display": "AFC Champions League",
         "silo": "football",
         "patterns": [r"afc\s*champions\s*league"],
+    },
+    "football_world_cup_qual": {
+        "display": "Qualificazioni Mondiali",
+        "silo": "football",
+        "patterns": [r"world\s*cup\s*qual", r"qualificazioni\s*mondiali", r"wc\s*qual"],
+    },
+    "football_world_cup": {
+        "display": "FIFA World Cup",
+        "silo": "football",
+        "patterns": [r"fifa\s*world\s*cup", r"world\s*cup", r"coppa\s*del\s*mondo"],
+    },
+    "football_euro_qual": {
+        "display": "Qualificazioni Europei",
+        "silo": "football",
+        "patterns": [r"euro\s*qual", r"uefa\s*euro\s*qual", r"qualificazioni\s*europei"],
+    },
+    "football_euro": {
+        "display": "UEFA Euro",
+        "silo": "football",
+        "patterns": [r"uefa\s*euro\b", r"european\s*championship", r"\beuro\s*202[48]\b"],
+    },
+    "football_copa_america": {
+        "display": "Copa América",
+        "silo": "football",
+        "patterns": [r"copa\s*am[eé]rica"],
+    },
+    "football_afcon": {
+        "display": "Coppa d'Africa (AFCON)",
+        "silo": "football",
+        "patterns": [r"africa\s*cup\s*of\s*nations", r"\bafcon\b", r"coppa\s*d['’]africa"],
+    },
+    "football_gold_cup": {
+        "display": "CONCACAF Gold Cup",
+        "silo": "football",
+        "patterns": [r"gold\s*cup", r"concacaf\s*gold\s*cup"],
+    },
+    "football_club_world_cup": {
+        "display": "FIFA Club World Cup",
+        "silo": "football",
+        "patterns": [r"club\s*world\s*cup", r"coppa\s*del\s*mondo\s*per\s*club"],
+    },
+    "football_international_friendly": {
+        "display": "Amichevoli Nazionali",
+        "silo": "football",
+        "patterns": [r"international\s*friendly", r"amichevole\s*internazionale", r"amichevoli\s*internazionali"],
     },
 
     # --------------------------------------------------------------------------

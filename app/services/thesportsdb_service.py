@@ -790,6 +790,10 @@ class TheSportsDBService:
         query = f"{h_kw} {a_kw}"
         url = f"https://www.thesportsdb.com/browse?s={urllib.parse.quote(query)}"
 
+        full_query_low = f"{home_raw} {away_raw}".lower()
+        is_target_youth = bool(re.search(r"\b(u-?1[5-9]|u-?2[01]|under\s*1[5-9]|under\s*2[01]|youth|juvenil|primavera)\b", full_query_low))
+        is_target_women = bool(re.search(r"\b(women(?:['']s)?|femminile|ladies|frauen|femenino|w-|wta|uwcl)\b", full_query_low))
+
         try:
             client = await self._get_client()
             res = await client.get(url)
@@ -806,6 +810,14 @@ class TheSportsDBService:
             for ev_id, slug, inner, date_str in pattern.findall(res.text):
                 slug_norm = unicodedata.normalize("NFKD", urllib.parse.unquote(slug)).encode("ascii", "ignore").decode("utf-8").lower()
                 if h_kw not in slug_norm or a_kw not in slug_norm:
+                    continue
+
+                # Guard: Youth & Women coherence - prevent junior/women events from inheriting senior/men posters (and vice versa)
+                is_result_youth = bool(re.search(r"\b(u-?1[5-9]|u-?2[01]|under\s*1[5-9]|under\s*2[01]|youth|juvenil|primavera)\b", slug_norm))
+                is_result_women = bool(re.search(r"\b(women(?:['']s)?|femminile|ladies|frauen|femenino|w-|wta|uwcl)\b", slug_norm))
+                if is_target_youth != is_result_youth:
+                    continue
+                if is_target_women != is_result_women:
                     continue
 
                 # 1. Sport validation if SVG icon is present
@@ -1239,26 +1251,54 @@ class TheSportsDBService:
                 silo = "altri_sport"
                 comp = ""
                 if self._calendar_cache:
-                    clean_title_tokens = set(re.sub(r'[^a-z0-9]+', ' ', title.lower()).split())
+                    NOISE_TOKENS = {"vs", "at", "the", "fc", "cf", "sc", "ac", "bc", "as", "club"}
+                    clean_title_tokens = {w for w in re.sub(r'[^a-z0-9]+', ' ', title.lower()).split() if w not in NOISE_TOKENS and len(w) > 1}
+                    is_title_youth = bool(re.search(r"\b(u-?1[5-9]|u-?2[01]|under\s*1[5-9]|under\s*2[01]|youth|juvenil|primavera)\b", title.lower()))
+                    is_title_women = bool(re.search(r"\b(women(?:['']s)?|femminile|ladies|frauen|femenino|w-|wta|uwcl)\b", title.lower()))
+
+                    h_toks = set()
+                    a_toks = set()
+                    if teams_dict and teams_dict.get("home") and teams_dict.get("away"):
+                        h_name = (teams_dict["home"].get("name") or "").lower()
+                        a_name = (teams_dict["away"].get("name") or "").lower()
+                        h_toks = {w for w in re.sub(r'[^a-z0-9]+', ' ', h_name).split() if w not in NOISE_TOKENS and len(w) > 1}
+                        a_toks = {w for w in re.sub(r'[^a-z0-9]+', ' ', a_name).split() if w not in NOISE_TOKENS and len(w) > 1}
+
                     for cev in self._calendar_cache:
                         cev_id = str(cev.get("id") or "")
                         cev_title = cev.get("title", "").strip().lower()
+                        cev_tokens = {w for w in re.sub(r'[^a-z0-9]+', ' ', cev_title).split() if w not in NOISE_TOKENS and len(w) > 1}
+                        is_cev_youth = bool(re.search(r"\b(u-?1[5-9]|u-?2[01]|under\s*1[5-9]|under\s*2[01]|youth|juvenil|primavera)\b", cev_title))
+                        is_cev_women = bool(re.search(r"\b(women(?:['']s)?|femminile|ladies|frauen|femenino|w-|wta|uwcl)\b", cev_title))
+
+                        # Strict youth / women separation
+                        if is_title_youth != is_cev_youth or is_title_women != is_cev_women:
+                            continue
+
+                        # Exact ID or exact title match
                         if (ev_id and cev_id == ev_id) or cev_title == title.lower():
                             silo = cev.get("_silo", "altri_sport")
                             comp = cev.get("competition", "")
                             if not thumb and cev.get("thumb"):
                                 thumb = cev.get("thumb")
                             break
-                        # Token similarity match in calendar cache
-                        cev_tokens = set(re.sub(r'[^a-z0-9]+', ' ', cev_title).split())
-                        if len(clean_title_tokens) >= 2 and len(cev_tokens) >= 2:
+
+                        # Bilateral team matching (both home and away must overlap)
+                        matched = False
+                        if h_toks and a_toks:
+                            if h_toks.intersection(cev_tokens) and a_toks.intersection(cev_tokens):
+                                matched = True
+                        elif len(clean_title_tokens) >= 2 and len(cev_tokens) >= 2:
                             common = clean_title_tokens.intersection(cev_tokens)
-                            if len(common) >= 2 and len(common) >= min(len(clean_title_tokens), len(cev_tokens)) - 1:
-                                silo = cev.get("_silo", "altri_sport")
-                                comp = cev.get("competition", "")
-                                if not thumb and cev.get("thumb"):
-                                    thumb = cev.get("thumb")
-                                break
+                            if len(common) >= 2 and len(common) >= len(clean_title_tokens) - 1:
+                                matched = True
+
+                        if matched:
+                            silo = cev.get("_silo", "altri_sport")
+                            comp = cev.get("competition", "")
+                            if not thumb and cev.get("thumb"):
+                                thumb = cev.get("thumb")
+                            break
 
                 # Keyword fallback for silo if not in calendar
                 if silo == "altri_sport":
@@ -1266,7 +1306,7 @@ class TheSportsDBService:
                     from app.services.genre_classifier import genre_classifier
                     if any(w in t_low for w in ("basket", "baloncesto", "olimpia", "virtus", "partizan", "barcelona basket", "real madrid basket", "euroleague")) or any(team in t_low for team in genre_classifier.NBA_TEAMS):
                         silo = "basketball"
-                    elif any(w in t_low for w in ("fc ", "united", "inter", "milan", "juventus", "calcio", "madrid", "harrogate", "aldershot", "gateshead", "spain vs croatia", "england", "scotland", "national league")):
+                    elif any(w in t_low for w in ("fc ", "united", "inter", "milan", "juventus", "calcio", "madrid", "galatasaray", "barcelona", "harrogate", "aldershot", "gateshead", "spain vs croatia", "england", "scotland", "national league")):
                         silo = "football"
                     elif any(w in t_low for w in ("nfl", "cfl", "super bowl", "redzone")) or any(team in t_low for team in genre_classifier.NFL_TEAMS):
                         silo = "american-football"
