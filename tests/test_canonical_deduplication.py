@@ -124,6 +124,56 @@ class TestCanonicalDeduplication(unittest.TestCase):
         merged_time_fail = self.cs.merge_and_deduplicate(primary, sec_time_fail)
         self.assertEqual(len(merged_time_fail), 2, ">45 min should never merge!")
 
+    def test_latin_american_serie_leagues_classification(self):
+        # 1. Brazil Serie B detection & classification
+        canon_brazil_b = detect_canonical_competition("⚽ Brazil - Serie B : Athletic Club 🇧🇷 vs Londrina 🇧🇷", "football")
+        self.assertEqual(canon_brazil_b, "football_brazil_serie_b")
+        cat_id, genre = genre_classifier.classify({
+            "title": "Athletic Club 🇧🇷 vs Londrina 🇧🇷",
+            "category": "football",
+            "canonical_competition": canon_brazil_b,
+        })
+        self.assertEqual(cat_id, "calcio_estero")
+        self.assertEqual(genre, "Americhe e Leghe Extra-UE")
+
+        # 2. Brazil Serie A detection & classification
+        canon_brazil_a = detect_canonical_competition("Brazil - Serie A : Flamengo vs Palmeiras", "football")
+        self.assertEqual(canon_brazil_a, "football_brasileirao")
+        cat_id, genre = genre_classifier.classify({
+            "title": "Flamengo vs Palmeiras",
+            "category": "football",
+            "canonical_competition": canon_brazil_a,
+        })
+        self.assertEqual(cat_id, "calcio_estero")
+        self.assertEqual(genre, "Americhe e Leghe Extra-UE")
+
+        # 3. Italian Serie B detection & classification
+        canon_ita_b = detect_canonical_competition("Italy - Serie B : Palermo vs Spezia", "football")
+        self.assertEqual(canon_ita_b, "football_serie_b")
+        cat_id, genre = genre_classifier.classify({
+            "title": "Palermo vs Spezia",
+            "category": "football",
+            "canonical_competition": canon_ita_b,
+        })
+        self.assertEqual(cat_id, "calcio_italiano")
+        self.assertEqual(genre, "Serie B")
+
+        # 4. Fallback classification with Brazil flag without canonical competition
+        cat_id, genre = genre_classifier.classify({
+            "title": "Athletic Club 🇧🇷 vs Londrina 🇧🇷",
+            "category": "football",
+        })
+        self.assertEqual(cat_id, "calcio_estero")
+        self.assertEqual(genre, "Americhe e Leghe Extra-UE")
+
+    def test_basket_category_classification(self):
+        # Category 'basket' should not fall through to Calcio
+        cat_id, genre = genre_classifier.classify({
+            "title": "BC Roma SPQR vs BC Balkan Botevgrad",
+            "category": "basket",
+        })
+        self.assertEqual(cat_id, "basket")
+
 
 if __name__ == "__main__":
     unittest.main()

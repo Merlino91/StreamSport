@@ -295,6 +295,12 @@ class GenreClassifier:
         # 1. Early Canonical Competition routing
         canon = match.get("canonical_competition")
         if canon:
+            # Country-specific guard for homonym league names (Serie A, Serie B, Serie C)
+            if canon in ("football_serie_a", "football_serie_b", "football_serie_c"):
+                raw_eval = f"{title_lower} {(match.get('competition') or '').lower()}"
+                if any(x in raw_eval for x in ("brazil", "brasil", "ecuador", "colombia", "chile", "peru", "argentina", "mexico", "usa", "🇧🇷", "🇪🇨")):
+                    return "calcio_estero", "Americhe e Leghe Extra-UE"
+
             canon_map = {
                 "football_serie_a": ("calcio_italiano", "Serie A"),
                 "football_serie_b": ("calcio_italiano", "Serie B"),
@@ -329,6 +335,10 @@ class GenreClassifier:
                 "football_mls": ("calcio_estero", "Americhe e Leghe Extra-UE"),
                 "football_liga_mx": ("calcio_estero", "Americhe e Leghe Extra-UE"),
                 "football_brasileirao": ("calcio_estero", "Americhe e Leghe Extra-UE"),
+                "football_brazil_serie_b": ("calcio_estero", "Americhe e Leghe Extra-UE"),
+                "football_brazil_serie_c": ("calcio_estero", "Americhe e Leghe Extra-UE"),
+                "football_ecuador_serie_a": ("calcio_estero", "Americhe e Leghe Extra-UE"),
+                "football_ecuador_serie_b": ("calcio_estero", "Americhe e Leghe Extra-UE"),
                 "football_liga_profesional_arg": ("calcio_estero", "Americhe e Leghe Extra-UE"),
                 "football_saudi_pro": ("calcio_estero", "Americhe e Leghe Extra-UE"),
                 "football_afc_cl": ("calcio_estero", "Americhe e Leghe Extra-UE"),
@@ -456,13 +466,14 @@ class GenreClassifier:
         # 3. BASKET (Dedicated Catalog: 'basket')
         # ------------------------------------------------------------------
         if (
-            cat == "basketball"
+            cat in ("basketball", "basket")
+            or silo == "basketball"
             or "basketball" in title_lower
             or "nba" in title_lower
             or "euroleague" in title_lower
             or "wnba" in title_lower
             or "nbl" in title_lower
-        ):
+        ) and not is_football_context:
             # A) WNBA & Basket Femminile
             is_wnba_title = bool(re.search(r"\b(wnba)\b", title_lower)) or any(t in title_lower for t in self.WNBA_TEAMS)
             if is_wnba_title or (is_women and "nba" not in title_lower):
@@ -622,7 +633,8 @@ class GenreClassifier:
         # 10. CALCIO (FOOTBALL / SOCCER)
         # ------------------------------------------------------------------
         if cat in ("football", "soccer") or silo == "football" or "vs" in title_lower or any(k in title_lower for k in ("fc ", "cf ", "sc ", "ac ", "league", "copa", "cup")):
-            is_extra_eu = bool(self._EXTRA_EU_CONFED_REGEX.search(eval_text) or self._EXTRA_EU_LEAGUES_REGEX.search(eval_text))
+            has_extra_eu_flag = any(flag in eval_text for flag in ("🇧🇷", "🇦🇷", "🇨🇴", "🇺🇾", "🇵🇾", "🇨🇱", "🇵🇪", "🇪🇨", "🇲🇽", "🇺🇸", "🇸🇦", "🇯🇵", "🇰🇷", "🇦🇺"))
+            is_extra_eu = bool(self._EXTRA_EU_CONFED_REGEX.search(eval_text) or self._EXTRA_EU_LEAGUES_REGEX.search(eval_text) or has_extra_eu_flag)
             is_foreign = bool(self._FOREIGN_LEAGUE_REGEX.search(eval_text)) or is_extra_eu or "inter miami" in title_lower
             is_extra_eu_confed = bool(self._EXTRA_EU_CONFED_REGEX.search(eval_text))
 
@@ -704,7 +716,7 @@ class GenreClassifier:
                 return "calcio_estero", "Nazionali e Amichevoli"
 
             # 3. North/South American & Extra-EU Soccer Leagues
-            if is_extra_eu_confed or bool(self._EXTRA_EU_LEAGUES_REGEX.search(eval_text)):
+            if is_extra_eu_confed or bool(self._EXTRA_EU_LEAGUES_REGEX.search(eval_text)) or has_extra_eu_flag:
                 return "calcio_estero", "Americhe e Leghe Extra-UE"
 
             # 4. European Cups (UEFA Champions, Europa, Conference League)

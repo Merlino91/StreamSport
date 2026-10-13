@@ -11,20 +11,95 @@ CANONICAL_LEAGUES = {
     # --------------------------------------------------------------------------
     # CALCIO / SOCCER (football)
     # --------------------------------------------------------------------------
+    # Latin American leagues sharing 'Serie A / Serie B / Serie C' nomenclature
+    # MUST be evaluated BEFORE Italian Serie A/B/C to avoid misclassification
+    "football_brasileirao": {
+        "display": "Brasileirão Série A",
+        "silo": "football",
+        "patterns": [
+            r"brasileir[aã]o(?:\s*serie\s*a)?\b",
+            r"brazil\s*(?:-\s*)?serie\s*a\b",
+            r"brasil\s*(?:-\s*)?serie\s*a\b",
+            r"serie\s*a\s*(?:brazil|brasil)\b",
+            r"campeonato\s*brasileiro(?:\s*serie\s*a)?\b",
+            r"🇧🇷.*?serie\s*a\b",
+            r"\bserie\s*a.*?🇧🇷",
+        ],
+    },
+    "football_brazil_serie_b": {
+        "display": "Brasileirão Série B",
+        "silo": "football",
+        "patterns": [
+            r"brazil\s*(?:-\s*)?serie\s*b\b",
+            r"brasil\s*(?:-\s*)?serie\s*b\b",
+            r"serie\s*b\s*(?:brazil|brasil)\b",
+            r"brasileir[aã]o\s*(?:serie\s*)?b\b",
+            r"campeonato\s*brasileiro\s*(?:serie\s*)?b\b",
+            r"🇧🇷.*?serie\s*b\b",
+            r"\bserie\s*b.*?🇧🇷",
+        ],
+    },
+    "football_brazil_serie_c": {
+        "display": "Brasileirão Série C",
+        "silo": "football",
+        "patterns": [
+            r"brazil\s*(?:-\s*)?serie\s*c\b",
+            r"brasil\s*(?:-\s*)?serie\s*c\b",
+            r"serie\s*c\s*(?:brazil|brasil)\b",
+            r"brasileir[aã]o\s*(?:serie\s*)?c\b",
+            r"campeonato\s*brasileiro\s*(?:serie\s*)?c\b",
+            r"🇧🇷.*?serie\s*c\b",
+            r"\bserie\s*c.*?🇧🇷",
+        ],
+    },
+    "football_ecuador_serie_a": {
+        "display": "LigaPro Serie A",
+        "silo": "football",
+        "patterns": [
+            r"ecuador\s*(?:-\s*)?serie\s*a\b",
+            r"serie\s*a\s*ecuador\b",
+            r"ligapro\s*(?:serie\s*)?a\b",
+            r"🇪🇨.*?serie\s*a\b",
+            r"\bserie\s*a.*?🇪🇨",
+        ],
+    },
+    "football_ecuador_serie_b": {
+        "display": "LigaPro Serie B",
+        "silo": "football",
+        "patterns": [
+            r"ecuador\s*(?:-\s*)?serie\s*b\b",
+            r"serie\s*b\s*ecuador\b",
+            r"ligapro\s*(?:serie\s*)?b\b",
+            r"🇪🇨.*?serie\s*b\b",
+            r"\bserie\s*b.*?🇪🇨",
+        ],
+    },
     "football_serie_a": {
         "display": "Serie A",
         "silo": "football",
-        "patterns": [r"\bserie\s*a\b", r"italy\s*-\s*serie\s*a", r"italy\s+serie\s*a"],
+        "patterns": [
+            r"italy\s*-\s*serie\s*a",
+            r"italy\s+serie\s*a",
+            r"(?<!brazil\s)(?<!brazil\s-\s)(?<!brasil\s)(?<!brasil\s-\s)(?<!ecuador\s)(?<!ecuador\s-\s)\bserie\s*a\b(?!\s*brazil)(?!\s*brasil)(?!\s*ecuador)",
+        ],
     },
     "football_serie_b": {
         "display": "Serie B",
         "silo": "football",
-        "patterns": [r"\bserie\s*b\b", r"italy\s*-\s*serie\s*b", r"italy\s+serie\s*b"],
+        "patterns": [
+            r"italy\s*-\s*serie\s*b",
+            r"italy\s+serie\s*b",
+            r"(?<!brazil\s)(?<!brazil\s-\s)(?<!brasil\s)(?<!brasil\s-\s)(?<!ecuador\s)(?<!ecuador\s-\s)\bserie\s*b\b(?!\s*brazil)(?!\s*brasil)(?!\s*ecuador)",
+        ],
     },
     "football_serie_c": {
         "display": "Serie C",
         "silo": "football",
-        "patterns": [r"\bserie\s*c\b", r"italy\s*-\s*serie\s*c", r"italy\s+serie\s*c"],
+        "patterns": [
+            r"italy\s*-\s*serie\s*c",
+            r"italy\s+serie\s*c",
+            r"(?<!brazil\s)(?<!brazil\s-\s)(?<!brasil\s)(?<!brasil\s-\s)(?<!ecuador\s)(?<!ecuador\s-\s)\bserie\s*c\b(?!\s*brazil)(?!\s*brasil)(?!\s*ecuador)",
+        ],
     },
     "football_coppa_italia": {
         "display": "Coppa Italia",
@@ -185,11 +260,6 @@ CANONICAL_LEAGUES = {
         "display": "Liga MX",
         "silo": "football",
         "patterns": [r"liga\s*mx", r"mexico\s*-\s*liga\s*mx"],
-    },
-    "football_brasileirao": {
-        "display": "Brasileirão Serie A",
-        "silo": "football",
-        "patterns": [r"brasileir[aã]o", r"brazil\s*-\s*serie\s*a", r"campeonato\s*brasileiro"],
     },
     "football_liga_profesional_arg": {
         "display": "Liga Profesional Argentina",
