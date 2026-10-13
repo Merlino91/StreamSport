@@ -16,6 +16,10 @@ from app.config import (
     THESPORTSDB_BROWSE_TV_INTERVAL,
 )
 from app.services.db_service import db_service
+from app.services.canonical_competition_service import (
+    detect_canonical_competition,
+    is_competition_conflict,
+)
 
 logger = logging.getLogger("streamsport.thesportsdb")
 
@@ -229,6 +233,11 @@ class TheSportsDBService:
                 home = parts[0].strip()
                 away = parts[1].strip()
 
+            full_cal_text = f"{league_raw} : {event_raw}"
+            cal_canon = detect_canonical_competition(full_cal_text, silo_hint=silo)
+            is_cal_youth = bool(re.search(r"\b(u-?1[5-9]|u-?2[01]|under\s*1[5-9]|under\s*2[01]|youth|juvenil|primavera|junior)\b", full_cal_text, re.IGNORECASE))
+            is_cal_women = bool(re.search(r"\b(women(?:['']s)?|femminile|femenino|ladies|frauen|w-|wta|wnba|uwcl)\b", full_cal_text, re.IGNORECASE))
+
             events.append({
                 "title": event_raw,
                 "home": home,
@@ -237,6 +246,9 @@ class TheSportsDBService:
                 "_silo": silo,
                 "competition": league_raw,
                 "_competition": league_raw,
+                "canonical_competition": cal_canon,
+                "is_youth": is_cal_youth,
+                "is_women": is_cal_women,
                 "date_str": date_str,
                 "time_str": time_str,
                 "date_ms": date_ms,
@@ -496,17 +508,133 @@ class TheSportsDBService:
         if any(k in e for k in ("fight", "mma", "ufc", "box")):
             return any(k in s for k in ("fight", "mma", "ufc", "box", "wrestling"))
 
-        return True
+    COUNTRY_ALIASES = {
+        "italy": "ita", "italian": "ita", "italia": "ita",
+        "england": "eng", "english": "eng",
+        "spain": "esp", "spanish": "esp", "espana": "esp",
+        "germany": "ger", "german": "ger", "deutschland": "ger",
+        "france": "fra", "french": "fra",
+        "brazil": "bra", "brazilian": "bra", "brasil": "bra",
+        "argentina": "arg", "argentinian": "arg",
+        "ecuador": "ecu", "ecuadorian": "ecu",
+        "colombia": "col", "colombian": "col",
+        "chile": "chi", "chilean": "chi",
+        "peru": "per", "peruvian": "per",
+        "uruguay": "uru", "uruguayan": "uru",
+        "mexico": "mex", "mexican": "mex",
+        "usa": "usa", "american": "usa",
+        "egypt": "egy", "egyptian": "egy",
+        "turkey": "tur", "turkish": "tur", "turkiye": "tur",
+        "portugal": "por", "portuguese": "por",
+        "netherlands": "ned", "dutch": "ned", "holland": "ned",
+        "belgium": "bel", "belgian": "bel",
+        "scotland": "sco", "scottish": "sco",
+        "greece": "gre", "greek": "gre",
+    }
+
+    @classmethod
+    def clean_competition_str(cls, s: str) -> str:
+        if not s:
+            return ""
+        t = s.lower()
+        t = unicodedata.normalize("NFKD", t).encode("ascii", "ignore").decode("utf-8")
+        # Strip sub-group designations like 'Girone B', 'Group 1', 'Division A', 'Zone 2'
+        t = re.sub(r"\b(girone|group|divisione|division|zone|zona|conference|conf)\s+[a-z0-9]+\b", " ", t)
+        # Strip matchdays, rounds, weeks
+        t = re.sub(r"\b\d+[\.\xAA\xBA]?\s*(?:giornata|matchday|round|settimana|week|jornada|spieltag)\b", " ", t)
+        t = re.sub(r"[^a-z0-9]+", " ", t)
+        return re.sub(r"\s+", " ", t).strip()
+
+    @classmethod
+    def extract_country_token(cls, text: str) -> Optional[str]:
+        words = re.sub(r"[^a-z0-9]+", " ", (text or "").lower()).split()
+        for w in words:
+            if w in cls.COUNTRY_ALIASES:
+                return cls.COUNTRY_ALIASES[w]
+        return None
+
+    @classmethod
+    def extract_division_token(cls, text: str) -> Optional[str]:
+        t = (text or "").lower()
+        m_serie = re.search(r"\bserie\s*([a-d])\b", t)
+        if m_serie:
+            return m_serie.group(1)
+        m_ligue = re.search(r"\bligue\s*([1-3])\b", t)
+        if m_ligue:
+            return m_ligue.group(1)
+        m_liga2 = re.search(r"\b(segunda|la\s*liga\s*2)\b", t)
+        if m_liga2:
+            return "2"
+        m_bunde2 = re.search(r"\b(2\.\s*bundesliga|bundesliga\s*2)\b", t)
+        if m_bunde2:
+            return "2"
+        m_div = re.search(r"\b(?:tier|division|league)\s*([1-4])\b", t)
+        if m_div:
+            return m_div.group(1)
+        return None
+
+    @classmethod
+    def are_competitions_compatible(
+        cls,
+        comp1: str,
+        comp2: str,
+        canon1: Optional[str] = None,
+        canon2: Optional[str] = None,
+    ) -> Tuple[bool, str]:
+        """
+        Evaluates whether two competition representations are mutually compatible.
+        Acts as an exclusionary semaphore:
+        - Neutral (True) if either is empty/missing.
+        - False if explicit Youth/Women conflict, Country conflict, Division tier conflict,
+          or canonical competition conflict occurs.
+        - True if no conflict is detected.
+        """
+        # 0. Canonical conflict check (highest precedence)
+        if canon1 and canon2 and is_competition_conflict(canon1, canon2):
+            return False, f"canonical_conflict_{canon1}_vs_{canon2}"
+
+        if not comp1 or not comp2:
+            return True, "neutral_missing"
+
+        c1 = comp1.lower()
+        c2 = comp2.lower()
+
+        # 1. Youth mismatch veto
+        y1 = bool(re.search(r"\b(youth|u-?\d+|under\s*\d+|primavera|juvenil|junior)\b", c1))
+        y2 = bool(re.search(r"\b(youth|u-?\d+|under\s*\d+|primavera|juvenil|junior)\b", c2))
+        if y1 != y2:
+            return False, "veto_youth_mismatch"
+
+        # 2. Women mismatch veto
+        w1 = bool(re.search(r"\b(women(?:['']s)?|femminile|femenino|ladies|frauen|w-|wta|wnba|uwcl)\b", c1))
+        w2 = bool(re.search(r"\b(women(?:['']s)?|femminile|femenino|ladies|frauen|w-|wta|wnba|uwcl)\b", c2))
+        if w1 != w2:
+            return False, "veto_women_mismatch"
+
+        # 3. Country conflict veto (only if both explicitly declare different countries)
+        co1 = cls.extract_country_token(c1)
+        co2 = cls.extract_country_token(c2)
+        if co1 and co2 and co1 != co2:
+            return False, f"veto_country_{co1}_vs_{co2}"
+
+        # 4. Division tier conflict veto (e.g. Serie A vs Serie B, Ligue 1 vs Ligue 2)
+        div1 = cls.extract_division_token(c1)
+        div2 = cls.extract_division_token(c2)
+        if div1 and div2 and div1 != div2:
+            return False, f"veto_division_{div1}_vs_{div2}"
+
+        return True, "compatible"
 
     def reconcile_matches(self, matches: List[Dict[str, Any]]) -> int:
         """
         LEVEL 1 RECONCILIATION:
         Matches upstream matches (Streamed, DaddyLive, Virgilio) against the official TheSportsDB Calendar.
         Prioritizes:
-        1. Official 16:9 event poster (cal['thumb'])
-        2. Official competition name (cal['competition'])
-        3. Canonical home/away team names
-        4. Tags match with _tsdb_matched = True
+        1. Bilateral team match (Mandatory)
+        2. Strict time proximity (<= 90 min)
+        3. Youth and Women coherence guards
+        4. Competition compatibility semaphore (Girone/subgroup tolerant, conflict exclusionary)
+        5. Inheritance of official poster, competition and canonical_competition
         """
         if not self._calendar_cache or not matches:
             return 0
@@ -525,6 +653,14 @@ class TheSportsDBService:
                 continue
 
             m_date = m.get("date", 0)
+            m_comp = m.get("competition") or m.get("_competition") or ""
+            m_canon = m.get("canonical_competition")
+            if not m_canon:
+                m_canon = detect_canonical_competition(f"{m_comp} : {m.get('title', '')}", silo_hint=tsdb_silo)
+
+            m_text = f"{m_comp} {m.get('title', '')}".lower()
+            m_is_youth = bool(re.search(r"\b(u-?1[5-9]|u-?2[01]|under\s*1[5-9]|under\s*2[01]|youth|juvenil|primavera|junior)\b", m_text))
+            m_is_women = bool(re.search(r"\b(women(?:['']s)?|femminile|femenino|ladies|frauen|w-|wta|wnba|uwcl)\b", m_text))
 
             best_match = None
             for cal in candidates:
@@ -538,17 +674,36 @@ class TheSportsDBService:
                 h_inverted = self._team_matches(m_home, cal_away)
                 a_inverted = self._team_matches(m_away, cal_home)
 
-                if (h_direct and a_direct) or (h_inverted and a_inverted):
-                    # Check date proximity (+/- 14 hours for timezone flexibility)
-                    cal_date = cal.get("date_ms", 0)
-                    if m_date and cal_date:
-                        diff_hours = abs(m_date - cal_date) / 3600000.0
-                        if diff_hours <= 14:
-                            best_match = cal
-                            break
-                    else:
-                        best_match = cal
-                        break
+                # Gatekeeper 1: Bilateral team match is MANDATORY
+                if not ((h_direct and a_direct) or (h_inverted and a_inverted)):
+                    continue
+
+                # Gatekeeper 2: Strict time window (max 90 minutes for team sports)
+                cal_date = cal.get("date_ms", 0)
+                if m_date and cal_date:
+                    diff_hours = abs(m_date - cal_date) / 3600000.0
+                    if diff_hours > 1.5:  # > 90 minutes
+                        continue
+
+                # Gatekeeper 3: Youth & Women coherence check
+                cal_is_youth = cal.get("is_youth", False)
+                cal_is_women = cal.get("is_women", False)
+                if m_is_youth != cal_is_youth:
+                    continue
+                if m_is_women != cal_is_women:
+                    continue
+
+                # Gatekeeper 4: Semaphore check on competition compatibility
+                cal_comp = cal.get("competition") or ""
+                cal_canon = cal.get("canonical_competition")
+                compat, reason = self.are_competitions_compatible(
+                    m_comp, cal_comp, canon1=m_canon, canon2=cal_canon
+                )
+                if not compat:
+                    continue
+
+                best_match = cal
+                break
 
             if best_match:
                 # 1. Poster assignment
@@ -565,7 +720,13 @@ class TheSportsDBService:
                     m["competition"] = cal_comp
                     m["_competition"] = cal_comp
 
-                # 3. Canonical team names if missing
+                # 3. Canonical competition inheritance if missing
+                cal_canon = best_match.get("canonical_competition")
+                if cal_canon and not m.get("canonical_competition"):
+                    m["canonical_competition"] = cal_canon
+                    m["_canonical_competition"] = cal_canon
+
+                # 4. Canonical team names if missing
                 if not m.get("teams") or not isinstance(m.get("teams"), dict):
                     m["teams"] = {
                         "home": {"name": best_match["home"]},

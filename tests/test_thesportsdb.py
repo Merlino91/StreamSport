@@ -533,6 +533,114 @@ class TheSportsDBTestCase(unittest.IsolatedAsyncioTestCase):
         finally:
             tvvoo_service._channels_by_canonical = old_channels
 
+    def test_are_competitions_compatible(self):
+        # 1. Sub-group / Girone tolerance
+        ok, _ = thesportsdb_service.are_competitions_compatible("Italy - Serie C", "Italian Serie C Girone B")
+        self.assertTrue(ok)
+        ok, _ = thesportsdb_service.are_competitions_compatible("Italy - Serie D", "Italy Serie D Girone D")
+        self.assertTrue(ok)
+
+        # 2. Youth and Women mismatch vetoes
+        ok, reason = thesportsdb_service.are_competitions_compatible("UEFA Youth League", "UEFA Champions League")
+        self.assertFalse(ok)
+        self.assertIn("youth", reason)
+
+        ok, reason = thesportsdb_service.are_competitions_compatible("UEFA Women's Champions League", "UEFA Champions League")
+        self.assertFalse(ok)
+        self.assertIn("women", reason)
+
+        # 3. Country conflict veto
+        ok, reason = thesportsdb_service.are_competitions_compatible("English Premier League", "Egyptian Premier League")
+        self.assertFalse(ok)
+        self.assertIn("country", reason)
+
+        # 4. Division tier conflict veto
+        ok, reason = thesportsdb_service.are_competitions_compatible("Italy - Serie A", "Italian Serie B")
+        self.assertFalse(ok)
+        self.assertIn("division", reason)
+
+        # 5. Missing / Neutral provider competition
+        ok, reason = thesportsdb_service.are_competitions_compatible("", "Italian Serie C Girone B")
+        self.assertTrue(ok)
+        self.assertEqual(reason, "neutral_missing")
+
+    def test_reconcile_matches_guards_and_inheritance(self):
+        base_time = 1791838800000  # e.g. 21:00 UTC
+        cal_item_ucl = {
+            "title": "Inter vs Arsenal",
+            "home": "Inter",
+            "away": "Arsenal",
+            "sport": "Soccer",
+            "_silo": "football",
+            "competition": "UEFA Champions League",
+            "canonical_competition": "football_uefa_cl",
+            "is_youth": False,
+            "is_women": False,
+            "date_ms": base_time,
+            "thumb": "https://r2.thesportsdb.com/images/media/event/thumb/inter_arsenal.jpg/medium",
+        }
+        cal_item_uyl = {
+            "title": "Inter Youth vs Arsenal Youth",
+            "home": "Inter Youth",
+            "away": "Arsenal Youth",
+            "sport": "Soccer",
+            "_silo": "football",
+            "competition": "UEFA Youth League",
+            "canonical_competition": "football_uefa_youth_league",
+            "is_youth": True,
+            "is_women": False,
+            "date_ms": base_time - (7 * 3600 * 1000),  # 14:00 UTC (7 hours earlier)
+            "thumb": "https://r2.thesportsdb.com/images/media/event/thumb/inter_arsenal_uyl.jpg/medium",
+        }
+
+        old_cache = thesportsdb_service._calendar_cache
+        old_silo = thesportsdb_service._calendar_by_silo
+        try:
+            thesportsdb_service._calendar_cache = [cal_item_ucl, cal_item_uyl]
+            thesportsdb_service._calendar_by_silo = {"football": [cal_item_ucl, cal_item_uyl]}
+
+            # Case A: Streamed match with no league, perfectly timed -> matches UCL and inherits canonical_competition
+            streamed_match = {
+                "id": "streamed-inter-arsenal",
+                "title": "Inter Milan vs Arsenal",
+                "date": base_time + (10 * 60 * 1000),  # +10 min (well within 90 min)
+                "_silo": "football",
+                "category": "football",
+            }
+            count = thesportsdb_service.reconcile_matches([streamed_match])
+            self.assertEqual(count, 1)
+            self.assertEqual(streamed_match["poster"], cal_item_ucl["thumb"])
+            self.assertEqual(streamed_match["competition"], "UEFA Champions League")
+            self.assertEqual(streamed_match["canonical_competition"], "football_uefa_cl")
+
+            # Case B: Youth match at 14:00 UTC must match UYL and NOT steal UCL senior match
+            youth_match = {
+                "id": "dlhd-inter-arsenal-youth",
+                "title": "Inter U19 vs Arsenal U19",
+                "date": base_time - (7 * 3600 * 1000),  # 14:00 UTC
+                "_silo": "football",
+                "category": "football",
+            }
+            count_youth = thesportsdb_service.reconcile_matches([youth_match])
+            self.assertEqual(count_youth, 1)
+            self.assertEqual(youth_match["poster"], cal_item_uyl["thumb"])
+            self.assertEqual(youth_match["canonical_competition"], "football_uefa_youth_league")
+
+            # Case C: Match with same teams but > 90 min away -> NOT reconciled
+            late_match = {
+                "id": "dlhd-inter-arsenal-late",
+                "title": "Inter vs Arsenal",
+                "date": base_time + (3 * 3600 * 1000),  # +3 hours (> 90 min)
+                "_silo": "football",
+                "category": "football",
+            }
+            count_late = thesportsdb_service.reconcile_matches([late_match])
+            self.assertEqual(count_late, 0)
+            self.assertNotIn("poster", late_match)
+        finally:
+            thesportsdb_service._calendar_cache = old_cache
+            thesportsdb_service._calendar_by_silo = old_silo
+
 
 if __name__ == "__main__":
     unittest.main()
