@@ -1,6 +1,7 @@
 import asyncio
 import os
 import sys
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch, MagicMock
@@ -640,6 +641,43 @@ class TheSportsDBTestCase(unittest.IsolatedAsyncioTestCase):
         finally:
             thesportsdb_service._calendar_cache = old_cache
             thesportsdb_service._calendar_by_silo = old_silo
+
+    def test_fallback_semantic_search_skips_tennis(self):
+        """Verifies that Level 2 Fallback skips tennis matches completely to prevent 100+ useless HTTP queries."""
+        tennis_match = {
+            "id": "streamed-tennis-1",
+            "title": "Kimberly Birrell vs Katie Boulter",
+            "category": "tennis",
+            "_silo": "tennis",
+            "date": int(time.time() * 1000),
+            "poster": None,
+        }
+        with patch.object(thesportsdb_service, "search_event_thumb_html", new_callable=AsyncMock) as mock_search:
+            asyncio.run(thesportsdb_service.fallback_semantic_search_orphans([tennis_match]))
+            mock_search.assert_not_called()
+
+    def test_live_window_soccer_youth(self):
+        """Verifies that soccer youth matches (even with category='other') receive 170m live window instead of 240m."""
+        from app.services.catalog_service import catalog_service
+        youth_match = {
+            "id": "dlhd-villarreal-u19-vs-napoli-u19-uefa-youth-league-000000",
+            "title": "Villarreal U19 🇪🇸 vs Napoli U19 🇮🇹 (UEFA Youth League)",
+            "category": "other",
+            "date": 1791900000000,
+        }
+        window = catalog_service.get_live_window_minutes(youth_match)
+        self.assertEqual(window, 170)
+
+        # Standard Serie A match -> 150 min
+        serie_a_match = {
+            "id": "streamed-juve-inter",
+            "title": "Juventus vs Inter",
+            "category": "football",
+            "competition": "Serie A",
+            "date": int(time.time() * 1000),
+        }
+        window_sa = catalog_service.get_live_window_minutes(serie_a_match)
+        self.assertEqual(window_sa, 150)
 
 
 if __name__ == "__main__":

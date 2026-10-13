@@ -1027,6 +1027,10 @@ class TheSportsDBService:
 
         found_count = 0
         for m in orphans:
+            m_silo = self.get_match_tsdb_silo(m)
+            if m_silo == "tennis":
+                continue
+
             m_home, m_away = self._extract_teams(m)
             if not m_home or not m_away:
                 continue

@@ -218,7 +218,12 @@ class DaddyLiveAPI:
         title_lower = (clean_title or "").lower()
 
         # 1. Football (Soccer)
-        if any(k in cat_lower for k in ("soccer", "league one", "league two", "national league", "mls", "usl")):
+        if any(k in cat_lower for k in (
+            "soccer", "league one", "league two", "national league", "mls", "usl",
+            "youth league", "champions league", "europa league", "conference league",
+            "serie a", "serie b", "serie c", "la liga", "bundesliga", "ligue 1", "premier league",
+            "eredivisie", "coppa italia", "fa cup", "copa del rey", "copa libertadores", "copa sudamericana"
+        )):
             return "football", "football"
         if "football" in cat_lower and "american" not in cat_lower and "am." not in cat_lower and "cfl" not in cat_lower and "college" not in cat_lower:
             return "football", "football"
@@ -397,6 +402,25 @@ class DaddyLiveAPI:
                             continue
                         silo_id, category = silo_info
                         canon = detect_canonical_competition(f"{cat_raw} : {raw_title}", silo_hint=silo_id)
+                        if canon:
+                            if canon.startswith("football_"):
+                                silo_id, category = "football", "football"
+                            elif canon.startswith("basketball_"):
+                                silo_id, category = "basketball", "basketball"
+                            elif canon.startswith("tennis_"):
+                                silo_id, category = "tennis", "tennis"
+                            elif canon.startswith("motorsport_"):
+                                silo_id, category = "motor-sports", "motor-sports"
+                            elif canon.startswith("am_football_"):
+                                silo_id, category = "american-football", "american-football"
+                            elif canon.startswith("baseball_"):
+                                silo_id, category = "baseball", "baseball"
+                            elif canon.startswith("hockey_"):
+                                silo_id, category = "hockey", "hockey"
+                            elif canon.startswith("fight_"):
+                                silo_id, category = "fight", "fight"
+                            elif canon.startswith("volleyball_"):
+                                silo_id, category = "volley", "volleyball"
                         comp_disp = get_canonical_display_name(canon) or cat_raw
 
                     slug = re.sub(r"[^a-z0-9]+", "-", clean_title.lower()).strip("-")[:60]

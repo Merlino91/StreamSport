@@ -141,32 +141,50 @@ class CatalogService:
         """
         Returns the duration in minutes an event remains 'LIVE ORA' after its kickoff/start time.
         Tailored to each sport's real-world duration.
-        Falls back to 240 minutes (4 hours) for unrecognized or uncategorized events.
         """
-        cat = (match.get("category") or match.get("_catalog") or "").lower()
-        title = (match.get("title") or "").lower()
+        cat = (match.get("_catalog") or match.get("category") or "").lower()
         genre = (match.get("_genre") or "").lower()
+        silo = (match.get("_silo") or "").lower()
+        comp = (match.get("competition") or match.get("_competition") or match.get("canonical_competition") or "").lower()
+        title = (match.get("title") or "").lower()
 
-        # 1. Tennis: marathons up to 5 hours (especially Grand Slams)
-        if "tennis" in cat or "tennis" in genre:
+        # If catalog is unassigned or generic, run classifier heuristic to determine sport
+        if not match.get("_catalog") or cat in ("other", "altri_sport", ""):
+            try:
+                from app.services.genre_classifier import genre_classifier
+                c_cat, c_gen = genre_classifier.classify(match)
+                if c_cat and c_cat != "altri_sport":
+                    cat = c_cat.lower()
+                    genre = c_gen.lower()
+            except Exception:
+                pass
+
+        # 1. Tennis: matches up to 5 hours (especially Grand Slams)
+        if "tennis" in cat or "tennis" in genre or "tennis" in silo or "atp" in comp or "wta" in comp:
             return 300  # 5 hours
 
         # 2. Football Americano (NFL / NCAA / CFL / UFL) - must precede regular football/soccer!
-        if any(k in cat for k in ("american-football", "football_americano", "nfl", "cfl", "ufl")) or "nfl" in genre:
+        if any(k in cat for k in ("american-football", "football_americano", "nfl", "cfl", "ufl")) or "nfl" in genre or silo == "american-football":
             return 230  # 3h 50m
 
         # 3. Calcio / Football (Soccer): 150m for regular league matches, 170m for knockout cup competitions
-        if any(k in cat for k in ("football", "soccer", "calcio")) or "calcio" in genre:
-            if any(k in title for k in ("cup", "coppa", "champions", "europa", "conference", "trophy", "pokal", "del rey", "supercup", "supercoppa")):
+        if (
+            any(k in cat for k in ("football", "soccer", "calcio"))
+            or "calcio" in genre
+            or silo in ("football", "soccer")
+            or any(k in comp for k in ("uefa", "fifa", "serie a", "serie b", "serie c", "champions", "europa league", "conference league", "youth league", "premier league", "la liga", "bundesliga", "ligue 1", "coppa italia", "fa cup"))
+            or any(k in title for k in ("u19", "u20", "u21", "under 19", "under 20", "under 21", "calcio", "football club"))
+        ):
+            if any(k in title or k in comp for k in ("cup", "coppa", "champions", "europa", "conference", "trophy", "pokal", "del rey", "supercup", "supercoppa", "youth league", "playoff", "spareggio")):
                 return 170  # ~2h 50m
             return 150  # 2h 30m
 
         # 4. Basket: 150m (Eurolega / Serie A / NBA)
-        if "basket" in cat or "basket" in genre:
+        if "basket" in cat or "basket" in genre or silo == "basketball" or any(k in comp for k in ("nba", "euroleague", "eurolega", "lba", "fiba")):
             return 150  # 2h 30m
 
         # 5. Motori: sprints/practice/qualifying vs full races
-        if any(k in cat for k in ("motor", "racing", "motori")) or "motori" in genre:
+        if any(k in cat for k in ("motor", "racing", "motori")) or "motori" in genre or silo == "motor-sports":
             if any(k in title for k in ("practice", "fp1", "fp2", "fp3", "qualif", "sprint", "warm up", "warm-up")):
                 return 80  # 1h 20m
             if any(k in title for k in ("nascar", "indycar", "wec", "endurance", "24h")):
@@ -174,27 +192,27 @@ class CatalogService:
             return 160  # ~2h 40m for F1 / MotoGP Grand Prix
 
         # 6. Baseball (MLB)
-        if "baseball" in cat or "baseball" in genre:
+        if "baseball" in cat or "baseball" in genre or silo == "baseball" or "mlb" in comp:
             return 200  # 3h 20m
 
         # 7. Hockey (NHL)
-        if "hockey" in cat or "hockey" in genre:
+        if "hockey" in cat or "hockey" in genre or silo == "hockey" or "nhl" in comp:
             return 170  # 2h 50m
 
         # 8. Sport da combattimento (UFC / Boxe / MMA)
-        if any(k in cat for k in ("fight", "combattimento", "mma", "ufc", "boxing")):
+        if any(k in cat for k in ("fight", "combattimento", "mma", "ufc", "boxing")) or silo == "fight":
             return 240  # 4 hours (covers 5-fight main cards)
 
         # 9. Volley / Pallavolo
-        if any(k in cat for k in ("volley", "pallavolo")):
+        if any(k in cat for k in ("volley", "pallavolo")) or silo == "volley":
             return 150  # 2h 30m
 
         # 10. Rugby
-        if "rugby" in cat or "rugby" in genre:
+        if "rugby" in cat or "rugby" in genre or silo == "rugby":
             return 140  # 2h 20m
 
-        # Fallback for uncategorized or any other sport: 240 minutes (4 hours)
-        return 240
+        # Fallback for uncategorized or any other sport: 180 minutes (3 hours max)
+        return 180
 
     def build_meta_item(
         self,
