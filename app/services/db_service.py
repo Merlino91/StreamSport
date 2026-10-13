@@ -8,10 +8,14 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from app.config import ENABLE_REPLAYS
 
-logger = logging.getLogger("easysports.db")
+import os
+import tempfile
+
+logger = logging.getLogger("streamsport.db")
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-DATA_DIR = BASE_DIR.parent / "data"
+DEFAULT_DATA_DIR = BASE_DIR.parent / "data"
+DATA_DIR = Path(os.getenv("STREAMSPORT_DATA_DIR", os.getenv("DATA_DIR", str(DEFAULT_DATA_DIR))))
 DB_PATH = DATA_DIR / "events.db"
 
 class DBService:
@@ -19,43 +23,82 @@ class DBService:
 
     def __init__(self, db_path: Optional[Path] = None):
         self._db_path = db_path or DB_PATH
+        self._fallback_path: Optional[Path] = None
         self._ensure_db()
 
     def _get_connection(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(str(self._db_path))
-        conn.row_factory = sqlite3.Row
-        return conn
+        target_path = self._fallback_path or self._db_path
+        try:
+            try:
+                target_path.parent.mkdir(parents=True, exist_ok=True)
+            except Exception:
+                pass
+            conn = sqlite3.connect(
+                str(target_path),
+                timeout=30.0,
+                check_same_thread=False
+            )
+            conn.row_factory = sqlite3.Row
+            try:
+                conn.execute("PRAGMA journal_mode = WAL")
+                conn.execute("PRAGMA synchronous = NORMAL")
+                conn.execute("PRAGMA busy_timeout = 30000")
+            except Exception:
+                pass
+            return conn
+        except (sqlite3.OperationalError, OSError, PermissionError) as e:
+            if not self._fallback_path:
+                logger.error(
+                    "SQLite cannot open '%s' (%s). Switching to fallback directory in temp storage.",
+                    target_path, e
+                )
+                fallback_dir = Path(tempfile.gettempdir()) / "streamsport_data"
+                try:
+                    fallback_dir.mkdir(parents=True, exist_ok=True)
+                except Exception:
+                    pass
+                self._fallback_path = fallback_dir / "events.db"
+                self._ensure_db(path_to_ensure=self._fallback_path)
+                return self._get_connection()
+            raise
 
-    def _ensure_db(self):
+    def _ensure_db(self, path_to_ensure: Optional[Path] = None):
         """Initializes data directory and database schema."""
-        self._db_path.parent.mkdir(parents=True, exist_ok=True)
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS matches (
-                    id TEXT PRIMARY KEY,
-                    title TEXT NOT NULL,
-                    category TEXT NOT NULL,
-                    date INTEGER NOT NULL,
-                    poster TEXT,
-                    popular INTEGER DEFAULT 0,
-                    sources TEXT,
-                    updated_at INTEGER NOT NULL
-                )
-            """)
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_matches_date ON matches(date)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_matches_cat ON matches(category)")
+        target = path_to_ensure or self._fallback_path or self._db_path
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            pass
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS matches (
+                        id TEXT PRIMARY KEY,
+                        title TEXT NOT NULL,
+                        category TEXT NOT NULL,
+                        date INTEGER NOT NULL,
+                        poster TEXT,
+                        popular INTEGER DEFAULT 0,
+                        sources TEXT,
+                        updated_at INTEGER NOT NULL
+                    )
+                """)
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_matches_date ON matches(date)")
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_matches_cat ON matches(category)")
 
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS thesportsdb_cache (
-                    query_key TEXT PRIMARY KEY,
-                    thumb_url TEXT,
-                    status TEXT NOT NULL,
-                    checked_at INTEGER NOT NULL
-                )
-            """)
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_thesportsdb_status ON thesportsdb_cache(status)")
-            conn.commit()
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS thesportsdb_cache (
+                        query_key TEXT PRIMARY KEY,
+                        thumb_url TEXT,
+                        status TEXT NOT NULL,
+                        checked_at INTEGER NOT NULL
+                    )
+                """)
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_thesportsdb_status ON thesportsdb_cache(status)")
+                conn.commit()
+        except Exception as e:
+            logger.error("Failed to ensure database schema at %s: %s", target, e)
 
     def upsert_matches(self, matches: List[Dict[str, Any]]):
         """Inserts or updates matches in SQLite store."""
@@ -79,90 +122,108 @@ class DBService:
         if not records:
             return
 
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.executemany("""
-                INSERT INTO matches (id, title, category, date, poster, popular, sources, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(id) DO UPDATE SET
-                    title = excluded.title,
-                    category = excluded.category,
-                    date = excluded.date,
-                    poster = CASE 
-                        WHEN excluded.poster IS NOT NULL AND excluded.poster != '' THEN excluded.poster 
-                        ELSE matches.poster 
-                    END,
-                    popular = excluded.popular,
-                    sources = excluded.sources,
-                    updated_at = excluded.updated_at
-            """, records)
-            conn.commit()
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.executemany("""
+                    INSERT INTO matches (id, title, category, date, poster, popular, sources, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(id) DO UPDATE SET
+                        title = excluded.title,
+                        category = excluded.category,
+                        date = excluded.date,
+                        poster = CASE 
+                            WHEN excluded.poster IS NOT NULL AND excluded.poster != '' THEN excluded.poster 
+                            ELSE matches.poster 
+                        END,
+                        popular = excluded.popular,
+                        sources = excluded.sources,
+                        updated_at = excluded.updated_at
+                """, records)
+                conn.commit()
+        except Exception as e:
+            logger.error("Failed to upsert matches to SQLite: %s", e)
 
     def update_match_poster(self, match_id: str, poster_url: str):
         """Updates the poster of a specific match in SQLite."""
         if not match_id or not poster_url:
             return
         now = int(time.time())
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                UPDATE matches SET poster = ?, updated_at = ? WHERE id = ?
-            """, (poster_url, now, match_id))
-            conn.commit()
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    UPDATE matches SET poster = ?, updated_at = ? WHERE id = ?
+                """, (poster_url, now, match_id))
+                conn.commit()
+        except Exception as e:
+            logger.error("Failed to update match poster for %s: %s", match_id, e)
 
     def get_poster_from_cache(self, query_key: str) -> Optional[Tuple[str, Optional[str], int]]:
         """
         Retrieves cached TheSportsDB poster result.
         Returns (status, thumb_url, checked_at) or None.
         """
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT status, thumb_url, checked_at FROM thesportsdb_cache WHERE query_key = ?", (query_key,))
-            row = cursor.fetchone()
-            if not row:
-                return None
-            return (row["status"], row["thumb_url"], row["checked_at"])
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT status, thumb_url, checked_at FROM thesportsdb_cache WHERE query_key = ?", (query_key,))
+                row = cursor.fetchone()
+                if not row:
+                    return None
+                return (row["status"], row["thumb_url"], row["checked_at"])
+        except Exception as e:
+            logger.debug("Failed to get poster from cache for %s: %s", query_key, e)
+            return None
 
     def save_poster_to_cache(self, query_key: str, thumb_url: Optional[str], status: str):
         """Saves a poster query result to the SQLite cache."""
         now = int(time.time())
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                INSERT INTO thesportsdb_cache (query_key, thumb_url, status, checked_at)
-                VALUES (?, ?, ?, ?)
-                ON CONFLICT(query_key) DO UPDATE SET
-                    thumb_url = excluded.thumb_url,
-                    status = excluded.status,
-                    checked_at = excluded.checked_at
-            """, (query_key, thumb_url, status, now))
-            conn.commit()
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT INTO thesportsdb_cache (query_key, thumb_url, status, checked_at)
+                    VALUES (?, ?, ?, ?)
+                    ON CONFLICT(query_key) DO UPDATE SET
+                        thumb_url = excluded.thumb_url,
+                        status = excluded.status,
+                        checked_at = excluded.checked_at
+                """, (query_key, thumb_url, status, now))
+                conn.commit()
+        except Exception as e:
+            logger.debug("Failed to save poster to cache for %s: %s", query_key, e)
 
     def clear_failed_poster_cache(self):
         """Clears all 'not_found' entries from thesportsdb_cache so they can be re-evaluated."""
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("DELETE FROM thesportsdb_cache WHERE status = 'not_found'")
-            conn.commit()
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("DELETE FROM thesportsdb_cache WHERE status = 'not_found'")
+                conn.commit()
+        except Exception as e:
+            logger.debug("Failed to clear failed poster cache: %s", e)
 
     def get_match_by_id(self, match_id: str) -> Optional[Dict[str, Any]]:
         """Retrieves a single match from the database by ID."""
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT * FROM matches WHERE id = ?", (match_id,))
-            row = cursor.fetchone()
-            if not row:
-                return None
-            return self._row_to_match(row)
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT * FROM matches WHERE id = ?", (match_id,))
+                row = cursor.fetchone()
+                if not row:
+                    return None
+                return self._row_to_match(row)
+        except Exception as e:
+            logger.warning("Failed to fetch match %s from DB: %s", match_id, e)
+            return None
 
     def get_concluded_matches(self, category_id: str = "all", max_age_hours: int = 72) -> List[Dict[str, Any]]:
         """
         Returns matches that started more than 4 hours ago, but less than max_age_hours ago.
         """
         now_ms = int(time.time() * 1000)
-        # 4 hours after start
         cutoff_recent = now_ms - (4 * 3600 * 1000)
-        # 72 hours ago
         cutoff_oldest = now_ms - (max_age_hours * 3600 * 1000)
 
         query = """
@@ -177,11 +238,15 @@ class DBService:
 
         query += " ORDER BY date DESC"
 
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute(query, params)
-            rows = cursor.fetchall()
-            return [self._row_to_match(r) for r in rows]
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(query, params)
+                rows = cursor.fetchall()
+                return [self._row_to_match(r) for r in rows]
+        except Exception as e:
+            logger.error("Failed to get concluded matches from DB: %s", e)
+            return []
 
     def save_matches(self, matches: List[Dict[str, Any]]):
         """Alias for upsert_matches."""
@@ -196,15 +261,19 @@ class DBService:
             max_age_hours = 72 if ENABLE_REPLAYS else 6
         now_ms = int(time.time() * 1000)
         cutoff_oldest = now_ms - (max_age_hours * 3600 * 1000)
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT * FROM matches
-                WHERE (date = 0) OR (date >= ?)
-                ORDER BY date DESC
-            """, (cutoff_oldest,))
-            rows = cursor.fetchall()
-            return [self._row_to_match(r) for r in rows]
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT * FROM matches
+                    WHERE (date = 0) OR (date >= ?)
+                    ORDER BY date DESC
+                """, (cutoff_oldest,))
+                rows = cursor.fetchall()
+                return [self._row_to_match(r) for r in rows]
+        except Exception as e:
+            logger.error("Failed to get active matches from DB: %s", e)
+            return []
 
     def purge_expired_matches(self, max_age_hours: Optional[int] = None) -> int:
         """Deletes matches concluded more than max_age_hours ago (defaults to 72h if ENABLE_REPLAYS else 6h)."""
@@ -212,33 +281,43 @@ class DBService:
             max_age_hours = 72 if ENABLE_REPLAYS else 6
         now_ms = int(time.time() * 1000)
         cutoff_oldest = now_ms - (max_age_hours * 3600 * 1000)
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("DELETE FROM matches WHERE date > 0 AND date < ?", (cutoff_oldest,))
-            deleted = cursor.rowcount
-            # Purge failed ('not_found') poster lookups older than 24 hours to keep cache lean
-            now_sec = int(time.time())
-            cursor.execute("DELETE FROM thesportsdb_cache WHERE status = 'not_found' AND checked_at < ?", (now_sec - 86400,))
-            conn.commit()
-            if deleted > 0:
-                logger.info("Purged %d expired matches older than %d hours (ENABLE_REPLAYS=%s)", deleted, max_age_hours, ENABLE_REPLAYS)
-            return deleted
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("DELETE FROM matches WHERE date > 0 AND date < ?", (cutoff_oldest,))
+                deleted = cursor.rowcount
+                # Purge failed ('not_found') poster lookups older than 24 hours to keep cache lean
+                now_sec = int(time.time())
+                cursor.execute("DELETE FROM thesportsdb_cache WHERE status = 'not_found' AND checked_at < ?", (now_sec - 86400,))
+                conn.commit()
+                if deleted > 0:
+                    logger.info("Purged %d expired matches older than %d hours (ENABLE_REPLAYS=%s)", deleted, max_age_hours, ENABLE_REPLAYS)
+                return deleted
+        except Exception as e:
+            logger.error("Failed to purge expired matches from DB: %s", e)
+            return 0
 
     def delete_matches_by_ids(self, match_ids: List[str]) -> int:
         """Deletes specific matches by their IDs from the database."""
         if not match_ids:
             return 0
         total_deleted = 0
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            # Batch in chunks of 500 to stay well under SQLite parameter limits
-            chunk_size = 500
-            for i in range(0, len(match_ids), chunk_size):
-                chunk = match_ids[i:i + chunk_size]
-                placeholders = ",".join("?" for _ in chunk)
-                cursor.execute(f"DELETE FROM matches WHERE id IN ({placeholders})", chunk)
-                total_deleted += cursor.rowcount
-            conn.commit()
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                chunk_size = 500
+                for i in range(0, len(match_ids), chunk_size):
+                    chunk = match_ids[i:i + chunk_size]
+                    placeholders = ",".join("?" for _ in chunk)
+                    cursor.execute(f"DELETE FROM matches WHERE id IN ({placeholders})", chunk)
+                    total_deleted += cursor.rowcount
+                conn.commit()
+                if total_deleted > 0:
+                    logger.info("Purged %d ineligible concluded matches from SQLite database.", total_deleted)
+                return total_deleted
+        except Exception as e:
+            logger.error("Failed to delete matches from DB: %s", e)
+            return 0
             if total_deleted > 0:
                 logger.info("Purged %d ineligible concluded matches from SQLite database.", total_deleted)
             return total_deleted

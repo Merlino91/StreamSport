@@ -152,7 +152,10 @@ class VirgilioService:
         """
         Converts 'HH:MM' string in Europe/Rome timezone to epoch ms for today.
         """
-        tz = ZoneInfo("Europe/Rome")
+        try:
+            tz = ZoneInfo("Europe/Rome")
+        except Exception:
+            tz = datetime.timezone(datetime.timedelta(hours=2))
         now_rome = datetime.datetime.now(tz)
         try:
             parts = time_str.split(":")

@@ -62,6 +62,7 @@ class TestVirgilioService(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(teams["home"]["name"], "Norway")
         self.assertEqual(teams["away"]["name"], "Portugal")
 
+    @patch("app.services.virgilio_service.ENABLE_VIRGILIO", True)
     @patch("app.services.virgilio_service.tvvoo_service")
     @patch("app.services.virgilio_service.httpx.AsyncClient")
     async def test_get_matches_mock(self, mock_client_cls, mock_tvvoo):
@@ -107,6 +108,7 @@ class TestVirgilioService(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(norway["teams"]["home"]["name"], "Norway")
         self.assertEqual(norway["teams"]["away"]["name"], "Portugal")
 
+    @patch("app.services.virgilio_service.ENABLE_VIRGILIO", True)
     @patch("app.services.virgilio_service.tvvoo_service")
     @patch("httpx.AsyncClient")
     async def test_parse_oggi_section_only(self, mock_client_cls, mock_tvvoo):

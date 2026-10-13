@@ -7,7 +7,6 @@ import time
 import unicodedata
 import urllib.parse
 from typing import Any, Dict, List, Optional, Tuple
-import pytz
 
 from app.config import (
     CATALOG_ID,
@@ -56,9 +55,14 @@ class CatalogService:
     def format_event_date(self, timestamp_ms: int, user_tz: Optional[str] = None) -> str:
         """Converts timestamp in ms to localized Italian date string (e.g. '21 Sep 2026, 20:45')."""
         try:
-            tz = pytz.timezone(user_tz or "Europe/Rome")
+            from zoneinfo import ZoneInfo
+            tz = ZoneInfo(user_tz or "Europe/Rome")
         except Exception:
-            tz = pytz.timezone("Europe/Rome")
+            try:
+                import pytz
+                tz = pytz.timezone(user_tz or "Europe/Rome")
+            except Exception:
+                tz = datetime.timezone(datetime.timedelta(hours=2))
 
         dt_utc = datetime.datetime.fromtimestamp(timestamp_ms / 1000, tz=datetime.timezone.utc)
         dt_local = dt_utc.astimezone(tz)
@@ -744,7 +748,7 @@ class CatalogService:
                     daddylive_api.get_matches(force=True),
                     espn_service.get_official_events(),
                     ocblacktop_service.get_official_sessions(),
-                    thesportsdb_service.fetch_multi_day_calendar(days_ahead=3, days_behind=1),
+                    thesportsdb_service.fetch_multi_day_calendar(days_ahead=5, days_behind=1),
                     italian_epg_service.get_matches(),
                     virgilio_service.get_matches(),
                     thesportsdb_service.fetch_browse_tv_matches(),
@@ -1057,7 +1061,10 @@ class CatalogService:
 
         # 3. Check SQLite DB
         if not match:
-            match = db_service.get_match_by_id(clean_id)
+            try:
+                match = db_service.get_match_by_id(clean_id)
+            except Exception as e:
+                logger.warning("DB lookup failed for %s: %s", clean_id, e)
 
         if not match:
             return None

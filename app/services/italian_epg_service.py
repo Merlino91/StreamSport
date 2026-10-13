@@ -501,7 +501,10 @@ class ItalianEPGService:
         """Queries Tivùsat Guida TV API for sport channels across today and tomorrow."""
         matches: List[Dict[str, Any]] = []
         all_tivu_channels = {**self.TIVUSAT_SPORTS_CHANNELS, **self.TIVUSAT_GENERALIST_CHANNELS}
-        tz_rome = ZoneInfo("Europe/Rome")
+        try:
+            tz_rome = ZoneInfo("Europe/Rome")
+        except Exception:
+            tz_rome = datetime.timezone(datetime.timedelta(hours=2))
 
         async def fetch_one(ch_id: str, meta: Dict[str, Any], date_str: str):
             url = f"https://services.tivulaguida.it/api/epg/channels/{ch_id}/date/{date_str}"
@@ -634,10 +637,11 @@ class ItalianEPGService:
             # Ensure TvVoo channel directory is synced
             await tvvoo_service.ensure_synced()
 
-            # Date calculation: now - 3.5h to tomorrow 23:59:59Z
+            # Date calculation: now - 2h to tomorrow 23:59:59Z
+            # Sky API strictly enforces a max 3h backward window and returns 422 if 'from' is > 3h in past.
             tz_utc = datetime.timezone.utc
             dt_now = datetime.datetime.now(tz_utc)
-            dt_from = dt_now - datetime.timedelta(hours=3.5)
+            dt_from = dt_now - datetime.timedelta(hours=2)
             dt_tomorrow = dt_now + datetime.timedelta(days=1)
 
             iso_from = dt_from.strftime("%Y-%m-%dT%H:%M:%SZ")

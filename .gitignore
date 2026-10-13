@@ -17,8 +17,8 @@ ENV/
 *.swo
 
 # StreamSport Runtime Data (do not commit dynamic cache & databases)
-data/*.db
-data/*.sqlite
+data/*.db*
+data/*.sqlite*
 data/posters/*.jpg
 data/posters/athletes/
 data/posters/banners/
