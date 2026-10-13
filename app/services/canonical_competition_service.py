@@ -1,0 +1,447 @@
+import re
+from typing import Optional, Tuple
+
+# ==============================================================================
+# CANONICAL COMPETITION TAXONOMY
+# Comprehensive multi-sport catalog coverage: Calcio, Basket, Tennis, Motori,
+# American Football, Baseball, Hockey, Combattimento, Volley, Altri Sport.
+# ==============================================================================
+
+CANONICAL_LEAGUES = {
+    # --------------------------------------------------------------------------
+    # CALCIO / SOCCER (football)
+    # --------------------------------------------------------------------------
+    "football_serie_a": {
+        "display": "Serie A",
+        "silo": "football",
+        "patterns": [r"\bserie\s*a\b", r"italy\s*-\s*serie\s*a", r"italy\s+serie\s*a"],
+    },
+    "football_serie_b": {
+        "display": "Serie B",
+        "silo": "football",
+        "patterns": [r"\bserie\s*b\b", r"italy\s*-\s*serie\s*b", r"italy\s+serie\s*b"],
+    },
+    "football_serie_c": {
+        "display": "Serie C",
+        "silo": "football",
+        "patterns": [r"\bserie\s*c\b", r"italy\s*-\s*serie\s*c", r"italy\s+serie\s*c"],
+    },
+    "football_coppa_italia": {
+        "display": "Coppa Italia",
+        "silo": "football",
+        "patterns": [r"coppa\s*italia", r"supercoppa\s*italiana"],
+    },
+    "football_primavera": {
+        "display": "Campionato Primavera",
+        "silo": "football",
+        "patterns": [r"\bprimavera\b", r"u-?19\s*campionato"],
+    },
+    "football_premier_league": {
+        "display": "Premier League",
+        "silo": "football",
+        "patterns": [r"premier\s*league", r"england\s*-\s*premier\s*league"],
+    },
+    "football_championship": {
+        "display": "Championship",
+        "silo": "football",
+        "patterns": [r"\bchampionship\b", r"england\s*-\s*championship"],
+    },
+    "football_fa_cup": {
+        "display": "FA Cup",
+        "silo": "football",
+        "patterns": [r"\bfa\s*cup\b", r"\bcarabao\s*cup\b", r"efl\s*cup"],
+    },
+    "football_la_liga": {
+        "display": "LaLiga",
+        "silo": "football",
+        "patterns": [r"\bla\s*liga\b", r"spain\s*-\s*la\s*liga", r"spain\s*-\s*liga", r"primera\s*division"],
+    },
+    "football_segunda": {
+        "display": "Segunda División",
+        "silo": "football",
+        "patterns": [r"segunda\s*division", r"spain\s*-\s*segunda", r"\bla\s*liga\s*2\b"],
+    },
+    "football_copa_del_rey": {
+        "display": "Copa del Rey",
+        "silo": "football",
+        "patterns": [r"copa\s*del\s*rey", r"supercopa\s*de\s*espana"],
+    },
+    "football_bundesliga": {
+        "display": "Bundesliga",
+        "silo": "football",
+        "patterns": [r"\bbundesliga\b", r"germany\s*-\s*bundesliga"],
+    },
+    "football_2_bundesliga": {
+        "display": "2. Bundesliga",
+        "silo": "football",
+        "patterns": [r"2\.\s*bundesliga", r"bundesliga\s*2"],
+    },
+    "football_dfb_pokal": {
+        "display": "DFB-Pokal",
+        "silo": "football",
+        "patterns": [r"dfb\s*pokal", r"dfb-pokal"],
+    },
+    "football_ligue_1": {
+        "display": "Ligue 1",
+        "silo": "football",
+        "patterns": [r"ligue\s*1", r"france\s*-\s*ligue\s*1"],
+    },
+    "football_uefa_cl": {
+        "display": "UEFA Champions League",
+        "silo": "football",
+        "patterns": [r"uefa-champions-league", r"champions\s*league", r"uefa\s*champions\s*league", r"\bucl\b"],
+    },
+    "football_uefa_el": {
+        "display": "UEFA Europa League",
+        "silo": "football",
+        "patterns": [r"uefa-europa-league", r"europa\s*league", r"uefa\s*europa\s*league", r"\buel\b"],
+    },
+    "football_uefa_ecl": {
+        "display": "UEFA Conference League",
+        "silo": "football",
+        "patterns": [r"uefa-conference-league", r"conference\s*league", r"uefa\s*conference\s*league", r"\buecl\b"],
+    },
+    "football_uefa_nations": {
+        "display": "UEFA Nations League",
+        "silo": "football",
+        "patterns": [r"nations\s*league", r"uefa\s*nations\s*league"],
+    },
+    "football_copa_libertadores": {
+        "display": "Copa Libertadores",
+        "silo": "football",
+        "patterns": [r"copa\s*libertadores", r"libertadores"],
+    },
+    "football_copa_sudamericana": {
+        "display": "Copa Sudamericana",
+        "silo": "football",
+        "patterns": [r"copa\s*sudamericana", r"sudamericana"],
+    },
+    "football_mls": {
+        "display": "Major League Soccer",
+        "silo": "football",
+        "patterns": [r"\bmls\b", r"major\s*league\s*soccer"],
+    },
+    "football_saudi_pro": {
+        "display": "Saudi Pro League",
+        "silo": "football",
+        "patterns": [r"saudi\s*pro\s*league", r"\broshn\b"],
+    },
+    "football_afc_cl": {
+        "display": "AFC Champions League",
+        "silo": "football",
+        "patterns": [r"afc\s*champions\s*league"],
+    },
+
+    # --------------------------------------------------------------------------
+    # BASKETBALL (basketball)
+    # --------------------------------------------------------------------------
+    "basketball_nba": {
+        "display": "NBA",
+        "silo": "basketball",
+        "patterns": [r"\bnba\b", r"nba-preseason", r"nba\s*preseason"],
+    },
+    "basketball_euroleague": {
+        "display": "EuroLeague",
+        "silo": "basketball",
+        "patterns": [r"euroleague", r"eurolega"],
+    },
+    "basketball_eurocup": {
+        "display": "EuroCup",
+        "silo": "basketball",
+        "patterns": [r"eurocup"],
+    },
+    "basketball_lba_serie_a": {
+        "display": "LBA Serie A",
+        "silo": "basketball",
+        "patterns": [r"\blba\b", r"serie\s*a\s*basket", r"italy\s*-\s*lba", r"lega\s*basket"],
+    },
+    "basketball_ncaa": {
+        "display": "NCAA Basketball",
+        "silo": "basketball",
+        "patterns": [r"ncaa\s*basketball", r"college\s*basketball", r"march\s*madness"],
+    },
+    "basketball_acb": {
+        "display": "Liga ACB",
+        "silo": "basketball",
+        "patterns": [r"liga\s*acb", r"liga\s*endesa"],
+    },
+
+    # --------------------------------------------------------------------------
+    # TENNIS (tennis)
+    # --------------------------------------------------------------------------
+    "tennis_grand_slam": {
+        "display": "Grandi Slam",
+        "silo": "tennis",
+        "patterns": [r"\bwimbledon\b", r"us\s*open", r"roland\s*garros", r"australian\s*open"],
+    },
+    "tennis_atp": {
+        "display": "ATP",
+        "silo": "tennis",
+        "patterns": [r"\batp\b", r"atp\s*1000", r"atp\s*500", r"atp\s*250", r"atp\s*finals"],
+    },
+    "tennis_wta": {
+        "display": "WTA",
+        "silo": "tennis",
+        "patterns": [r"\bwta\b", r"wta\s*1000", r"wta\s*500", r"wta\s*250", r"wta\s*finals"],
+    },
+    "tennis_davis_bjk": {
+        "display": "Coppa Davis & BJK",
+        "silo": "tennis",
+        "patterns": [r"davis\s*cup", r"coppa\s*davis", r"billie\s*jean\s*king", r"\bbjk\s*cup\b", r"laver\s*cup"],
+    },
+    "tennis_challenger": {
+        "display": "Challenger & ITF",
+        "silo": "tennis",
+        "patterns": [r"\bchallenger\b", r"\bitf\b"],
+    },
+
+    # --------------------------------------------------------------------------
+    # MOTORI (motor-sports)
+    # --------------------------------------------------------------------------
+    "motorsport_f1": {
+        "display": "Formula 1",
+        "silo": "motor-sports",
+        "patterns": [r"formula\s*1", r"formula\s*one", r"\bf1\b", r"f1\s*grand\s*prix", r"formula\s*1\s*gp"],
+    },
+    "motorsport_motogp": {
+        "display": "MotoGP",
+        "silo": "motor-sports",
+        "patterns": [r"motogp", r"moto\s*gp", r"\bmoto2\b", r"\bmoto3\b"],
+    },
+    "motorsport_sbk": {
+        "display": "Superbike (WSBK)",
+        "silo": "motor-sports",
+        "patterns": [r"superbike", r"\bwsbk\b", r"\bssp\b", r"supersport"],
+    },
+    "motorsport_nascar": {
+        "display": "NASCAR",
+        "silo": "motor-sports",
+        "patterns": [r"\bnascar\b", r"cup\s*series", r"xfinity\s*series", r"craftsman\s*truck"],
+    },
+    "motorsport_indycar": {
+        "display": "IndyCar",
+        "silo": "motor-sports",
+        "patterns": [r"indycar", r"indy\s*500"],
+    },
+    "motorsport_rally_wrc": {
+        "display": "Rally (WRC)",
+        "silo": "motor-sports",
+        "patterns": [r"\bwrc\b", r"world\s*rally", r"\brally\b"],
+    },
+    "motorsport_wec": {
+        "display": "WEC & Le Mans",
+        "silo": "motor-sports",
+        "patterns": [r"\bwec\b", r"le\s*mans", r"24\s*hours\s*of\s*le\s*mans"],
+    },
+
+    # --------------------------------------------------------------------------
+    # FOOTBALL AMERICANO (american-football)
+    # --------------------------------------------------------------------------
+    "am_football_nfl": {
+        "display": "NFL",
+        "silo": "american-football",
+        "patterns": [r"\bnfl\b", r"redzone", r"red\s*zone", r"super\s*bowl"],
+    },
+    "am_football_ncaa": {
+        "display": "NCAA College Football",
+        "silo": "american-football",
+        "patterns": [r"college\s*football", r"\bcfb\b", r"ncaa\s*football"],
+    },
+    "am_football_cfl": {
+        "display": "CFL",
+        "silo": "american-football",
+        "patterns": [r"\bcfl\b", r"canadian\s*football"],
+    },
+    "am_football_ufl": {
+        "display": "UFL",
+        "silo": "american-football",
+        "patterns": [r"\bufl\b"],
+    },
+
+    # --------------------------------------------------------------------------
+    # BASEBALL (baseball)
+    # --------------------------------------------------------------------------
+    "baseball_mlb": {
+        "display": "MLB",
+        "silo": "baseball",
+        "patterns": [r"\bmlb\b", r"major\s*league\s*baseball", r"world\s*series"],
+    },
+    "baseball_ncaa": {
+        "display": "NCAA College Baseball",
+        "silo": "baseball",
+        "patterns": [r"college\s*baseball", r"college\s*world\s*series"],
+    },
+
+    # --------------------------------------------------------------------------
+    # HOCKEY (hockey)
+    # --------------------------------------------------------------------------
+    "hockey_nhl": {
+        "display": "NHL",
+        "silo": "hockey",
+        "patterns": [r"\bnhl\b", r"stanley\s*cup"],
+    },
+    "hockey_khl": {
+        "display": "KHL",
+        "silo": "hockey",
+        "patterns": [r"\bkhl\b", r"russia\s*khl"],
+    },
+    "hockey_euro": {
+        "display": "Leghe Europee Hockey",
+        "silo": "hockey",
+        "patterns": [r"\bshl\b", r"\bliiga\b", r"\bdel\b"],
+    },
+
+    # --------------------------------------------------------------------------
+    # COMBATTIMENTO (fight)
+    # --------------------------------------------------------------------------
+    "fight_ufc": {
+        "display": "UFC",
+        "silo": "fight",
+        "patterns": [r"\bufc\b", r"dana\s*white"],
+    },
+    "fight_boxing": {
+        "display": "Boxe",
+        "silo": "fight",
+        "patterns": [r"\bboxing\b", r"pugilato", r"title\s*fight"],
+    },
+    "fight_wwe": {
+        "display": "WWE & Wrestling",
+        "silo": "fight",
+        "patterns": [r"\bwwe\b", r"\baew\b", r"raw\b", r"smackdown", r"wrestlemania"],
+    },
+    "fight_mma": {
+        "display": "MMA",
+        "silo": "fight",
+        "patterns": [r"\bmma\b", r"\bbellator\b", r"\bpfl\b", r"one\s*championship"],
+    },
+
+    # --------------------------------------------------------------------------
+    # VOLLEYBALL (volley)
+    # --------------------------------------------------------------------------
+    "volleyball_superlega": {
+        "display": "SuperLega",
+        "silo": "volley",
+        "patterns": [r"superlega", r"serie\s*a1\s*maschile", r"super\s*lega"],
+    },
+    "volleyball_serie_a1_femm": {
+        "display": "Serie A1 Femminile Volley",
+        "silo": "volley",
+        "patterns": [r"serie\s*a1\s*femminile", r"a1\s*femminile\s*volley"],
+    },
+    "volleyball_cev_cl": {
+        "display": "CEV Champions League",
+        "silo": "volley",
+        "patterns": [r"cev\s*champions\s*league", r"volleyball\s*champions\s*league"],
+    },
+
+    # --------------------------------------------------------------------------
+    # ALTRI SPORT (altri_sport)
+    # --------------------------------------------------------------------------
+    "rugby_six_nations": {
+        "display": "Sei Nazioni",
+        "silo": "altri_sport",
+        "patterns": [r"six\s*nations", r"sei\s*nazioni"],
+    },
+    "rugby_top_14": {
+        "display": "Top 14 & Rugby Club",
+        "silo": "altri_sport",
+        "patterns": [r"top\s*14", r"premiership\s*rugby", r"\burc\b", r"united\s*rugby\s*championship"],
+    },
+    "afl_footy": {
+        "display": "AFL (Australian Rules)",
+        "silo": "altri_sport",
+        "patterns": [r"\bafl\b", r"australian\s*rules", r"\bfooty\b"],
+    },
+    "golf_pga": {
+        "display": "PGA Tour",
+        "silo": "altri_sport",
+        "patterns": [r"pga\s*tour", r"\bpga\b", r"masters\s*tournament", r"the\s*open"],
+    },
+    "golf_liv": {
+        "display": "LIV Golf",
+        "silo": "altri_sport",
+        "patterns": [r"liv\s*golf", r"\bliv\b"],
+    },
+    "darts_pdc": {
+        "display": "Freccette (PDC)",
+        "silo": "altri_sport",
+        "patterns": [r"\bpdc\b", r"premier\s*league\s*darts", r"world\s*darts"],
+    },
+    "cycling_grand_tours": {
+        "display": "Grandi Giri Ciclismo",
+        "silo": "altri_sport",
+        "patterns": [r"giro\s*d['’]italia", r"tour\s*de\s*france", r"vuelta\s*a\s*espana"],
+    },
+}
+
+# Precompile all regex patterns for ultra-fast lookup
+_COMPILED_PATTERNS = []
+for _slug, _data in CANONICAL_LEAGUES.items():
+    _regexes = [re.compile(p, re.IGNORECASE) for p in _data["patterns"]]
+    _COMPILED_PATTERNS.append((_slug, _data["silo"], _data["display"], _regexes))
+
+
+def is_redzone_event(title: str) -> bool:
+    """Detects if an event is NFL RedZone."""
+    t = (title or "").lower()
+    return bool(re.search(r"\bred\s*zone\b", t)) or "redzone" in t
+
+
+def detect_canonical_competition(text: str, silo_hint: Optional[str] = None) -> Optional[str]:
+    """
+    Scans a combined string (title, raw category, ID, sources) for a canonical competition.
+    If silo_hint is provided, prioritizes leagues in the same silo.
+    """
+    if not text:
+        return None
+
+    # Normalization: replace underscores and slashes with dashes/spaces
+    t = text.lower().replace("_", "-").replace("/", " ")
+
+    # 1. Match within silo_hint first if provided
+    if silo_hint:
+        for slug, s_silo, display, regexes in _COMPILED_PATTERNS:
+            if s_silo == silo_hint:
+                for rx in regexes:
+                    if rx.search(t):
+                        return slug
+
+    # 2. Match across all leagues
+    for slug, s_silo, display, regexes in _COMPILED_PATTERNS:
+        for rx in regexes:
+            if rx.search(t):
+                return slug
+
+    return None
+
+
+def get_canonical_display_name(slug: Optional[str]) -> Optional[str]:
+    """Returns the human-friendly display name of a canonical competition slug."""
+    if not slug or slug not in CANONICAL_LEAGUES:
+        return None
+    return CANONICAL_LEAGUES[slug]["display"]
+
+
+def get_canonical_silo(slug: Optional[str]) -> Optional[str]:
+    """Returns the sport silo of a canonical competition slug."""
+    if not slug or slug not in CANONICAL_LEAGUES:
+        return None
+    return CANONICAL_LEAGUES[slug]["silo"]
+
+
+def is_competition_conflict(canon1: Optional[str], canon2: Optional[str]) -> bool:
+    """
+    Returns True ONLY if BOTH events have a canonical competition defined,
+    they belong to the SAME sport silo, and they are MUTUALLY EXCLUSIVE.
+    (e.g. Serie A vs Serie B, or ATP vs WTA, or NBA vs Euroleague).
+    """
+    if not canon1 or not canon2:
+        return False
+    if canon1 == canon2:
+        return False
+
+    silo1 = get_canonical_silo(canon1)
+    silo2 = get_canonical_silo(canon2)
+
+    # If both belong to the same sport silo but are different competitions, it's a conflict!
+    return silo1 is not None and silo2 is not None and silo1 == silo2

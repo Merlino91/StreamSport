@@ -1,0 +1,129 @@
+import unittest
+
+from app.services.canonical_competition_service import (
+    CANONICAL_LEAGUES,
+    detect_canonical_competition,
+    get_canonical_display_name,
+    is_competition_conflict,
+    is_redzone_event,
+)
+from app.services.catalog_service import CatalogService
+from app.services.genre_classifier import genre_classifier
+
+
+class TestCanonicalDeduplication(unittest.TestCase):
+
+    def setUp(self):
+        self.cs = CatalogService()
+
+    def test_canonical_competition_detection(self):
+        # Soccer
+        self.assertEqual(detect_canonical_competition("Italy - Serie A : Inter vs Juventus", "football"), "football_serie_a")
+        self.assertEqual(detect_canonical_competition("Spain - La Liga : Real Madrid vs Barcelona", "football"), "football_la_liga")
+        self.assertEqual(detect_canonical_competition("sabah-fk-vs-slavia-prague-uefa-champions-league-1791909900", "football"), "football_uefa_cl")
+        self.assertEqual(detect_canonical_competition("England - Premier League : Arsenal vs Chelsea", "football"), "football_premier_league")
+
+        # Basketball
+        self.assertEqual(detect_canonical_competition("NBA: Los Angeles Lakers vs Golden State Warriors", "basketball"), "basketball_nba")
+        self.assertEqual(detect_canonical_competition("live_nba-preseason_trail-blazers-london-lions", "basketball"), "basketball_nba")
+
+        # Tennis
+        self.assertEqual(detect_canonical_competition("ATP - Singles: Shanghai Sinner vs Alcaraz", "tennis"), "tennis_atp")
+        self.assertEqual(detect_canonical_competition("WTA - Singles: Wuhan Swiatek vs Sabalenka", "tennis"), "tennis_wta")
+
+        # Motori
+        self.assertEqual(detect_canonical_competition("Formula 1 Pirelli Gran Premio d'Italia", "motor-sports"), "motorsport_f1")
+        self.assertEqual(detect_canonical_competition("Grand Prix of Japan (MotoGP)", "motor-sports"), "motorsport_motogp")
+
+    def test_redzone_handling(self):
+        # Detection
+        self.assertTrue(is_redzone_event("NFL RedZone"))
+        self.assertTrue(is_redzone_event("NFL: Red Zone Live"))
+        self.assertFalse(is_redzone_event("Miami Dolphins vs Buffalo Bills"))
+
+        # Split title should never treat RedZone as a 'vs' match
+        clean_title, comp = self.cs.split_title_and_competition("NFL: RedZone Live")
+        self.assertEqual(clean_title, "NFL RedZone")
+        self.assertEqual(comp, "NFL")
+
+        # Genre classification
+        cat, genre = genre_classifier.classify({"title": "NFL RedZone", "_silo": "american-football"})
+        self.assertEqual(cat, "football_americano")
+        self.assertEqual(genre, "NFL")
+
+    def test_competition_conflict(self):
+        # Direct conflicts in same silo
+        self.assertTrue(is_competition_conflict("football_serie_a", "football_serie_b"))
+        self.assertTrue(is_competition_conflict("tennis_atp", "tennis_wta"))
+        self.assertTrue(is_competition_conflict("basketball_nba", "basketball_euroleague"))
+
+        # Matching is NOT a conflict
+        self.assertFalse(is_competition_conflict("football_serie_a", "football_serie_a"))
+
+        # Neutral if either is None
+        self.assertFalse(is_competition_conflict("football_serie_a", None))
+        self.assertFalse(is_competition_conflict(None, "basketball_nba"))
+
+    def test_weighted_deduplication_merge(self):
+        # 1. Matching competition boost
+        primary = [{
+            "id": "streamed-inter-juve",
+            "title": "FC Internazionale vs Juventus",
+            "date": 1791838800000,
+            "_silo": "football",
+            "category": "football",
+            "canonical_competition": "football_serie_a",
+            "sources": [{"source": "streamed", "id": "100"}],
+        }]
+        secondary = [{
+            "id": "dlhd-inter-juve",
+            "title": "Inter vs Juve",
+            "date": 1791838800000,
+            "_silo": "football",
+            "category": "football",
+            "canonical_competition": "football_serie_a",
+            "sources": [{"source": "dlhd", "id": "200"}],
+        }]
+        merged = self.cs.merge_and_deduplicate(primary, secondary)
+        self.assertEqual(len(merged), 1)
+        self.assertEqual(len(merged[0]["sources"]), 2)
+
+        # 2. Conflicting competition penalty (-0.20) prevents false merge on youth match
+        sec_conflicting = [{
+            "id": "dlhd-inter-juve-primavera",
+            "title": "Inter Primavera vs Juventus Primavera",
+            "date": 1791838800000 + 20 * 60 * 1000,  # 20 min offset
+            "_silo": "football",
+            "category": "football",
+            "canonical_competition": "football_primavera",  # Conflicting!
+            "sources": [{"source": "dlhd", "id": "300"}],
+        }]
+        merged_conflict = self.cs.merge_and_deduplicate(primary, sec_conflicting)
+        self.assertEqual(len(merged_conflict), 2, "Conflicting leagues with time offset should not merge!")
+
+        # 3. Soft time penalty (within 45 min merges, > 45 min does not)
+        sec_time_ok = [{
+            "id": "dlhd-inter-juve-time-ok",
+            "title": "FC Internazionale vs Juventus",
+            "date": 1791838800000 + 20 * 60 * 1000,  # +20 min (soft penalty -0.04)
+            "_silo": "football",
+            "category": "football",
+            "sources": [{"source": "dlhd", "id": "400"}],
+        }]
+        merged_time_ok = self.cs.merge_and_deduplicate(primary, sec_time_ok)
+        self.assertEqual(len(merged_time_ok), 1, "20-min offset with matching teams should still merge!")
+
+        sec_time_fail = [{
+            "id": "dlhd-inter-juve-time-fail",
+            "title": "FC Internazionale vs Juventus",
+            "date": 1791838800000 + 50 * 60 * 1000,  # +50 min (>45 min hard cutoff)
+            "_silo": "football",
+            "category": "football",
+            "sources": [{"source": "dlhd", "id": "500"}],
+        }]
+        merged_time_fail = self.cs.merge_and_deduplicate(primary, sec_time_fail)
+        self.assertEqual(len(merged_time_fail), 2, ">45 min should never merge!")
+
+
+if __name__ == "__main__":
+    unittest.main()

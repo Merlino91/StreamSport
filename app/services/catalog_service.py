@@ -30,6 +30,12 @@ from app.services.thesportsdb_service import thesportsdb_service
 from app.services.tvvoo_service import tvvoo_service
 from app.services.italian_epg_service import italian_epg_service
 from app.services.virgilio_service import virgilio_service
+from app.services.canonical_competition_service import (
+    detect_canonical_competition,
+    get_canonical_display_name,
+    is_competition_conflict,
+    is_redzone_event,
+)
 
 
 
@@ -83,6 +89,9 @@ class CatalogService:
         while removing decorative emojis.
         competition_name is stripped of all emojis and prefixes.
         """
+        if is_redzone_event(raw_title):
+            return "NFL RedZone", "NFL"
+
         title = (raw_title or "").strip()
         comp = ""
 
@@ -302,7 +311,14 @@ class CatalogService:
             "vs", "the", "fc", "ac", "cf", "sc", "as", "at", "live", "stream", "bc",
             "pallacanestro", "pallacan", "baloncesto", "basquet", "basket", "calcio", "volley", "pallavolo", "club"
         )
-        words = sorted([w for w in t.split() if w not in EXCLUDED_NOISE_WORDS and len(w) > 1])
+        COMMON_ALIASES = {
+            "internazionale": "inter",
+            "juve": "juventus",
+            "wolves": "wolverhampton",
+            "spurs": "tottenham",
+            "blazers": "trailblazers",
+        }
+        words = sorted([COMMON_ALIASES.get(w, w) for w in t.split() if w not in EXCLUDED_NOISE_WORDS and len(w) > 1])
         return " ".join(words)
 
     def _get_teams_key(self, match: Dict[str, Any]) -> Optional[Any]:
@@ -428,6 +444,28 @@ class CatalogService:
 
         return False
 
+    @classmethod
+    def calc_similarity(cls, tokens1: str, tokens2: str) -> float:
+        """Calculates token-level similarity ratio between 0.0 and 1.0."""
+        if not tokens1 or not tokens2:
+            return 0.0
+        if tokens1 == tokens2:
+            return 1.0
+        w1 = set(tokens1.split())
+        w2 = set(tokens2.split())
+        if w1 == w2:
+            return 1.0
+        if w1.issubset(w2) or w2.issubset(w1):
+            return 0.88
+        seq = SequenceMatcher(None, tokens1, tokens2).ratio()
+        overlap = len(w1 & w2)
+        if overlap:
+            r1 = overlap / len(w1)
+            r2 = overlap / len(w2)
+            token_ratio = (r1 + r2) / 2.0
+            return max(token_ratio, seq)
+        return seq
+
     def merge_and_deduplicate(
         self,
         primary_matches: List[Dict[str, Any]],
@@ -441,8 +479,8 @@ class CatalogService:
             m2_tokens = self._clean_tokens(m2.get("title", ""))
             m2_teams = self._get_teams_key(m2)
             m2_date = m2.get("date") or 0
-            m2_words = set(m2_tokens.split()) if m2_tokens else set()
             m2_silo = self.get_canonical_silo(m2)
+            is_m2_redzone = is_redzone_event(m2.get("title", "")) or is_redzone_event(str(m2_id or ""))
 
             matched_idx = -1
 
@@ -453,34 +491,70 @@ class CatalogService:
                         matched_idx = idx
                         break
 
-            # 1. Similarity and fuzzy matching within the same silo
+            # 1. Similarity and weighted scoring matching within the same silo
             if matched_idx < 0:
                 for idx, existing in enumerate(merged_list):
                     ex_silo = self.get_canonical_silo(existing)
                     if ex_silo != m2_silo:
                         continue
 
-                    ex_teams = self._get_teams_key(existing)
-                    ex_tokens = self._clean_tokens(existing.get("title", ""))
                     ex_date = existing.get("date") or 0
-                    ex_words = set(ex_tokens.split()) if ex_tokens else set()
+                    time_diff_ms = abs(ex_date - m2_date) if ex_date and m2_date else 0
+                    time_diff_min = time_diff_ms / 60000.0
 
-                    # Date Compatibility: Must coincide (same time, or within 45m for broadcast pre-game offsets)
+                    # 1a. Special NFL RedZone matching (coincides within 4h window on same Sunday)
+                    if is_m2_redzone and (is_redzone_event(existing.get("title", "")) or is_redzone_event(str(existing.get("id", "")))):
+                        if ex_silo == "american-football" and time_diff_min <= 240:
+                            matched_idx = idx
+                            break
+
+                    # 1b. Date Compatibility: hard cutoff at 45m
                     if ex_date and m2_date:
-                        if ex_date != m2_date and abs(ex_date - m2_date) > 45 * 60 * 1000:
+                        if time_diff_min > 45:
                             continue
 
-                    # Title & Team Similarity (Fuzzy Symmetric Matching)
-                    is_same = False
+                    # 1c. Base Team / Title Similarity
+                    ex_teams = self._get_teams_key(existing)
+                    ex_tokens = self._clean_tokens(existing.get("title", ""))
+
+                    base_sim = 0.0
                     if m2_teams and ex_teams:
-                        if m2_teams == ex_teams or self._teams_match_fuzzy(m2.get("teams"), existing.get("teams")):
-                            is_same = True
+                        if m2_teams == ex_teams:
+                            base_sim = 1.0
+                        elif self._teams_match_fuzzy(m2.get("teams"), existing.get("teams")):
+                            base_sim = 0.85
+                        else:
+                            base_sim = self.calc_similarity(m2_tokens, ex_tokens)
+                    elif m2_tokens and ex_tokens:
+                        base_sim = self.calc_similarity(m2_tokens, ex_tokens)
 
-                    if not is_same and m2_tokens and ex_tokens:
-                        if self._is_token_match(m2_tokens, ex_tokens):
-                            is_same = True
+                    # Backwards-compatible token match boost
+                    if self._is_token_match(m2_tokens, ex_tokens) and base_sim < 0.75:
+                        base_sim = 0.80
 
-                    if is_same:
+                    if base_sim < 0.45:
+                        continue
+
+                    # 1d. Soft Time Penalty
+                    time_penalty = 0.0
+                    if time_diff_min > 30:
+                        time_penalty = 0.08
+                    elif time_diff_min > 15:
+                        time_penalty = 0.04
+
+                    # 1e. Competition Modifier (+0.08 bonus if matching, -0.20 if in direct conflict, 0.0 neutral if either is None)
+                    c1 = existing.get("canonical_competition")
+                    c2 = m2.get("canonical_competition")
+                    comp_mod = 0.0
+                    if c1 and c2:
+                        if c1 == c2:
+                            comp_mod = 0.08
+                        elif is_competition_conflict(c1, c2):
+                            comp_mod = -0.20
+
+                    final_score = base_sim - time_penalty + comp_mod
+
+                    if final_score >= 0.68:
                         matched_idx = idx
                         break
 
@@ -503,6 +577,8 @@ class CatalogService:
                     existing["poster"] = m2["poster"]
                 if not existing.get("date") and m2.get("date"):
                     existing["date"] = m2["date"]
+                if not existing.get("canonical_competition") and m2.get("canonical_competition"):
+                    existing["canonical_competition"] = m2["canonical_competition"]
                 if not existing.get("competition") and m2.get("competition"):
                     existing["competition"] = m2["competition"]
                 if not existing.get("_competition") and m2.get("_competition"):

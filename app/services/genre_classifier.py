@@ -1,5 +1,6 @@
 import re
 from typing import Any, Dict, Optional, Tuple
+from app.services.canonical_competition_service import is_redzone_event
 
 class GenreClassifier:
     """
@@ -284,11 +285,79 @@ class GenreClassifier:
         """
         Classifies a match dictionary into (catalog_id, genre).
         """
+        title = (match.get("title") or "").strip()
+        title_lower = title.lower()
+
+        # 0. Early NFL RedZone check
+        if is_redzone_event(title_lower) or is_redzone_event(str(match.get("id", ""))):
+            return "football_americano", "NFL"
+
+        # 1. Early Canonical Competition routing
+        canon = match.get("canonical_competition")
+        if canon:
+            canon_map = {
+                "football_serie_a": ("calcio_italiano", "Serie A"),
+                "football_serie_b": ("calcio_italiano", "Serie B"),
+                "football_serie_c": ("calcio_italiano", "Serie C"),
+                "football_coppa_italia": ("calcio_italiano", "Coppa Italia e Supercoppa"),
+                "football_primavera": ("calcio_italiano", "Primavera e Giovanili"),
+                "football_premier_league": ("calcio_estero", "Premier League"),
+                "football_championship": ("calcio_estero", "Altri Campionati Europei"),
+                "football_la_liga": ("calcio_estero", "LaLiga"),
+                "football_segunda": ("calcio_estero", "Altri Campionati Europei"),
+                "football_bundesliga": ("calcio_estero", "Bundesliga"),
+                "football_2_bundesliga": ("calcio_estero", "Altri Campionati Europei"),
+                "football_ligue_1": ("calcio_estero", "Ligue 1"),
+                "football_uefa_cl": ("coppe_europee", "Champions League"),
+                "football_uefa_el": ("coppe_europee", "Europa League"),
+                "football_uefa_ecl": ("coppe_europee", "Conference League"),
+                "football_uefa_nations": ("calcio_internazionale", "Nations League e Qualificazioni"),
+                "football_copa_libertadores": ("calcio_internazionale", "Coppe Sudamericane"),
+                "football_copa_sudamericana": ("calcio_internazionale", "Coppe Sudamericane"),
+                "football_mls": ("calcio_internazionale", "Campionati Americani"),
+                "football_saudi_pro": ("calcio_internazionale", "Altri Campionati Esteri"),
+                "basketball_nba": ("basket", "NBA"),
+                "basketball_euroleague": ("basket", "Eurolega ed Europa"),
+                "basketball_eurocup": ("basket", "Eurolega ed Europa"),
+                "basketball_lba_serie_a": ("basket", "LBA Serie A"),
+                "basketball_ncaa": ("basket", "NCAA College Basketball"),
+                "tennis_grand_slam": ("tennis", "Grandi Slam"),
+                "tennis_atp": ("tennis", "ATP"),
+                "tennis_wta": ("tennis", "WTA"),
+                "tennis_davis_bjk": ("tennis", "Coppa Davis e BJK Cup"),
+                "tennis_challenger": ("tennis", "Challenger e Altri"),
+                "motorsport_f1": ("motori", "Formula 1"),
+                "motorsport_motogp": ("motori", "MotoGP e Superbike"),
+                "motorsport_sbk": ("motori", "MotoGP e Superbike"),
+                "motorsport_nascar": ("motori", "NASCAR e IndyCar"),
+                "motorsport_indycar": ("motori", "NASCAR e IndyCar"),
+                "motorsport_rally_wrc": ("motori", "Rally e Altri Motori"),
+                "am_football_nfl": ("football_americano", "NFL"),
+                "am_football_ncaa": ("football_americano", "NCAA College Football"),
+                "baseball_mlb": ("baseball", "MLB"),
+                "baseball_ncaa": ("baseball", "NCAA College Baseball"),
+                "hockey_nhl": ("hockey", "NHL"),
+                "hockey_khl": ("hockey", "KHL e Leghe Europee"),
+                "fight_ufc": ("combattimento", "UFC"),
+                "fight_boxing": ("combattimento", "Boxe"),
+                "fight_wwe": ("combattimento", "Wrestling e WWE"),
+                "fight_mma": ("combattimento", "MMA"),
+                "volleyball_superlega": ("volley", "SuperLega Maschile"),
+                "volleyball_serie_a1_femm": ("volley", "Serie A1 Femminile"),
+                "rugby_six_nations": ("altri_sport", "Rugby e AFL"),
+                "rugby_top_14": ("altri_sport", "Rugby e AFL"),
+                "afl_footy": ("altri_sport", "Rugby e AFL"),
+                "golf_pga": ("altri_sport", "Golf"),
+                "golf_liv": ("altri_sport", "Golf"),
+                "darts_pdc": ("altri_sport", "Freccette / Darts"),
+                "cycling_grand_tours": ("altri_sport", "Ciclismo"),
+            }
+            if canon in canon_map:
+                return canon_map[canon]
+
         cat = (match.get("category") or "").lower().strip()
         silo = (match.get("_silo") or "").lower().strip()
         comp = (match.get("competition") or match.get("_competition") or "").lower().strip()
-        title = (match.get("title") or "").strip()
-        title_lower = title.lower()
         eval_text = f"{title_lower} {comp}".strip()
 
         teams = match.get("teams") or {}

@@ -3,6 +3,11 @@ import time
 from typing import Any, Dict, List, Optional, Tuple
 from app.config import STREAMED_API_HOST, STREAMED_CACHE_TTL, STREAMED_FALLBACK_HOSTS
 from app.services.doh_client import doh_client
+from app.services.canonical_competition_service import (
+    detect_canonical_competition,
+    get_canonical_display_name,
+    is_redzone_event,
+)
 
 logger = logging.getLogger("easysports.streamed")
 
@@ -89,6 +94,26 @@ class StreamedAPI:
                                 m["_silo"] = silo
                                 if not m.get("category"):
                                     m["category"] = sport
+
+                                # Standardize RedZone & detect canonical competition
+                                title = m.get("title") or ""
+                                mid_str = str(mid or "")
+                                if is_redzone_event(title) or is_redzone_event(mid_str):
+                                    m["title"] = "NFL RedZone"
+                                    m["teams"] = None
+                                    m["canonical_competition"] = "am_football_nfl"
+                                    m["competition"] = "NFL"
+                                    m["_competition"] = "NFL"
+                                else:
+                                    sources_text = " ".join(str(s.get("id", "")) for s in m.get("sources", []) if isinstance(s, dict))
+                                    full_text = f"{m.get('category', '')} {mid_str} {title} {sources_text}"
+                                    canon = detect_canonical_competition(full_text, silo_hint=silo)
+                                    if canon:
+                                        m["canonical_competition"] = canon
+                                        disp = get_canonical_display_name(canon)
+                                        m["competition"] = disp
+                                        m["_competition"] = disp
+
                                 all_items.append(m)
 
                 if all_items:
@@ -103,7 +128,25 @@ class StreamedAPI:
                 if isinstance(fallback_data, list) and len(fallback_data) > 0:
                     for m in fallback_data:
                         cat = (m.get("category") or "").lower()
-                        m["_silo"] = STREAMED_SPORTS_MAP.get(cat, "altri_sport")
+                        silo = STREAMED_SPORTS_MAP.get(cat, "altri_sport")
+                        m["_silo"] = silo
+                        title = m.get("title") or ""
+                        mid_str = str(m.get("id") or "")
+                        if is_redzone_event(title) or is_redzone_event(mid_str):
+                            m["title"] = "NFL RedZone"
+                            m["teams"] = None
+                            m["canonical_competition"] = "am_football_nfl"
+                            m["competition"] = "NFL"
+                            m["_competition"] = "NFL"
+                        else:
+                            sources_text = " ".join(str(s.get("id", "")) for s in m.get("sources", []) if isinstance(s, dict))
+                            full_text = f"{cat} {mid_str} {title} {sources_text}"
+                            canon = detect_canonical_competition(full_text, silo_hint=silo)
+                            if canon:
+                                m["canonical_competition"] = canon
+                                disp = get_canonical_display_name(canon)
+                                m["competition"] = disp
+                                m["_competition"] = disp
                     self._matches_cache = fallback_data
                     self._cache_timestamp = now
                     self._base_host = host

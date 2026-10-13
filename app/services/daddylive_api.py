@@ -10,6 +10,11 @@ from typing import Any, Dict, List, Optional, Tuple
 from zoneinfo import ZoneInfo
 
 import hashlib
+from app.services.canonical_competition_service import (
+    detect_canonical_competition,
+    get_canonical_display_name,
+    is_redzone_event,
+)
 
 logger = logging.getLogger("streamsport.daddylive")
 
@@ -154,6 +159,9 @@ class DaddyLiveAPI:
     def _clean_title(self, raw_title: str) -> str:
         # Unescape HTML entities (&amp; -> &)
         t = html.unescape(raw_title or "")
+
+        if is_redzone_event(t):
+            return "NFL RedZone"
 
         # 1. Strip time and live markers
         t = re.sub(r"^\s*🔴\s*Inizio\s*:\s*\d{1,2}:\d{2}\s*[-:]?\s*", "", t, flags=re.IGNORECASE)
@@ -353,21 +361,31 @@ class DaddyLiveAPI:
                     else:
                         date_ms = self._parse_datetime(day_str, time_str)
 
-                    # Extract teams if 'vs' in title
+                    # Extract teams if 'vs' in title (never for RedZone)
+                    is_rz = is_redzone_event(raw_title) or is_redzone_event(clean_title)
                     teams = None
-                    if " vs " in clean_title:
-                        title_for_teams = re.sub(r"\s*\([^)]*\)$", "", clean_title)
-                        parts = title_for_teams.split(" vs ", 1)
-                        home_raw = re.sub(r"[\U0001F1E6-\U0001F1FF]", "", parts[0]).rsplit(":", 1)[-1].strip()
-                        away_raw = re.sub(r"[\U0001F1E6-\U0001F1FF]", "", parts[1]).split("|", 1)[0].strip()
-                        teams = {
-                            "home": {"name": home_raw},
-                            "away": {"name": away_raw}
-                        }
-                    silo_info = self.map_daddylive_category_to_silo(cat_raw, clean_title)
-                    if not silo_info:
-                        continue
-                    silo_id, category = silo_info
+                    if is_rz:
+                        clean_title = "NFL RedZone"
+                        silo_id = "american-football"
+                        category = "american-football"
+                        canon = "am_football_nfl"
+                        comp_disp = "NFL"
+                    else:
+                        if " vs " in clean_title:
+                            title_for_teams = re.sub(r"\s*\([^)]*\)$", "", clean_title)
+                            parts = title_for_teams.split(" vs ", 1)
+                            home_raw = re.sub(r"[\U0001F1E6-\U0001F1FF]", "", parts[0]).rsplit(":", 1)[-1].strip()
+                            away_raw = re.sub(r"[\U0001F1E6-\U0001F1FF]", "", parts[1]).split("|", 1)[0].strip()
+                            teams = {
+                                "home": {"name": home_raw},
+                                "away": {"name": away_raw}
+                            }
+                        silo_info = self.map_daddylive_category_to_silo(cat_raw, clean_title)
+                        if not silo_info:
+                            continue
+                        silo_id, category = silo_info
+                        canon = detect_canonical_competition(f"{cat_raw} : {raw_title}", silo_hint=silo_id)
+                        comp_disp = get_canonical_display_name(canon) or cat_raw
 
                     slug = re.sub(r"[^a-z0-9]+", "-", clean_title.lower()).strip("-")[:60]
                     match_id = f"dlhd-{slug}-{str(date_ms)[-6:]}"
@@ -376,8 +394,9 @@ class DaddyLiveAPI:
                         "id": match_id,
                         "title": clean_title,
                         "category": category,
-                        "competition": cat_raw,
-                        "_competition": cat_raw,
+                        "canonical_competition": canon,
+                        "competition": comp_disp,
+                        "_competition": comp_disp,
                         "_silo": silo_id,
                         "date": date_ms,
                         "poster": None,
