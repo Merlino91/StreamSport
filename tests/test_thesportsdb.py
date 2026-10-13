@@ -657,7 +657,7 @@ class TheSportsDBTestCase(unittest.IsolatedAsyncioTestCase):
             mock_search.assert_not_called()
 
     def test_live_window_soccer_youth(self):
-        """Verifies that soccer youth matches (even with category='other') receive 170m live window instead of 240m."""
+        """Verifies that all soccer matches (youth or Serie A) receive exactly 160m based on football silo."""
         from app.services.catalog_service import catalog_service
         youth_match = {
             "id": "dlhd-villarreal-u19-vs-napoli-u19-uefa-youth-league-000000",
@@ -666,9 +666,9 @@ class TheSportsDBTestCase(unittest.IsolatedAsyncioTestCase):
             "date": 1791900000000,
         }
         window = catalog_service.get_live_window_minutes(youth_match)
-        self.assertEqual(window, 170)
+        self.assertEqual(window, 160)
 
-        # Standard Serie A match -> 150 min
+        # Standard Serie A match -> 160 min
         serie_a_match = {
             "id": "streamed-juve-inter",
             "title": "Juventus vs Inter",
@@ -677,7 +677,7 @@ class TheSportsDBTestCase(unittest.IsolatedAsyncioTestCase):
             "date": int(time.time() * 1000),
         }
         window_sa = catalog_service.get_live_window_minutes(serie_a_match)
-        self.assertEqual(window_sa, 150)
+        self.assertEqual(window_sa, 160)
 
 
 if __name__ == "__main__":

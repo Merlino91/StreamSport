@@ -136,82 +136,59 @@ class CatalogService:
 
         return clean_title, clean_comp
 
-    @staticmethod
-    def get_live_window_minutes(match: Dict[str, Any]) -> int:
+    @classmethod
+    def get_live_window_minutes(cls, match: Dict[str, Any]) -> int:
         """
         Returns the duration in minutes an event remains 'LIVE ORA' after its kickoff/start time.
-        Tailored to each sport's real-world duration.
+        Strictly determined by the canonical SPORT SILO of the event.
+        No complicated tournament or league checks needed: every sport has its standard duration.
         """
-        cat = (match.get("_catalog") or match.get("category") or "").lower()
-        genre = (match.get("_genre") or "").lower()
-        silo = (match.get("_silo") or "").lower()
-        comp = (match.get("competition") or match.get("_competition") or match.get("canonical_competition") or "").lower()
-        title = (match.get("title") or "").lower()
+        silo = cls.get_canonical_silo(match)
 
-        # If catalog is unassigned or generic, run classifier heuristic to determine sport
-        if not match.get("_catalog") or cat in ("other", "altri_sport", ""):
-            try:
-                from app.services.genre_classifier import genre_classifier
-                c_cat, c_gen = genre_classifier.classify(match)
-                if c_cat and c_cat != "altri_sport":
-                    cat = c_cat.lower()
-                    genre = c_gen.lower()
-            except Exception:
-                pass
+        # 1. Calcio (Soccer): 160 minutes (~2h 40m covers 90m + halftime + stoppage + extra-time/penalties)
+        if silo == "football":
+            return 160
 
-        # 1. Tennis: matches up to 5 hours (especially Grand Slams)
-        if "tennis" in cat or "tennis" in genre or "tennis" in silo or "atp" in comp or "wta" in comp:
-            return 300  # 5 hours
+        # 2. Basket (Basketball): 150 minutes (~2h 30m covers 4 quarters + overtime)
+        if silo == "basketball":
+            return 150
 
-        # 2. Football Americano (NFL / NCAA / CFL / UFL) - must precede regular football/soccer!
-        if any(k in cat for k in ("american-football", "football_americano", "nfl", "cfl", "ufl")) or "nfl" in genre or silo == "american-football":
-            return 230  # 3h 50m
+        # 3. Tennis: 300 minutes (up to 5 hours for Grand Slam / best-of-5 marathons)
+        if silo == "tennis":
+            return 300
 
-        # 3. Calcio / Football (Soccer): 150m for regular league matches, 170m for knockout cup competitions
-        if (
-            any(k in cat for k in ("football", "soccer", "calcio"))
-            or "calcio" in genre
-            or silo in ("football", "soccer")
-            or any(k in comp for k in ("uefa", "fifa", "serie a", "serie b", "serie c", "champions", "europa league", "conference league", "youth league", "premier league", "la liga", "bundesliga", "ligue 1", "coppa italia", "fa cup"))
-            or any(k in title for k in ("u19", "u20", "u21", "under 19", "under 20", "under 21", "calcio", "football club"))
-        ):
-            if any(k in title or k in comp for k in ("cup", "coppa", "champions", "europa", "conference", "trophy", "pokal", "del rey", "supercup", "supercoppa", "youth league", "playoff", "spareggio")):
-                return 170  # ~2h 50m
-            return 150  # 2h 30m
-
-        # 4. Basket: 150m (Eurolega / Serie A / NBA)
-        if "basket" in cat or "basket" in genre or silo == "basketball" or any(k in comp for k in ("nba", "euroleague", "eurolega", "lba", "fiba")):
-            return 150  # 2h 30m
-
-        # 5. Motori: sprints/practice/qualifying vs full races
-        if any(k in cat for k in ("motor", "racing", "motori")) or "motori" in genre or silo == "motor-sports":
+        # 4. Motori (Motorsport): 80m for practice/qualifying/sprints, 160m for Grand Prix / main races
+        if silo == "motor-sports":
+            title = (match.get("title") or "").lower()
             if any(k in title for k in ("practice", "fp1", "fp2", "fp3", "qualif", "sprint", "warm up", "warm-up")):
-                return 80  # 1h 20m
-            if any(k in title for k in ("nascar", "indycar", "wec", "endurance", "24h")):
-                return 210  # 3h 30m
-            return 160  # ~2h 40m for F1 / MotoGP Grand Prix
+                return 80
+            return 160
 
-        # 6. Baseball (MLB)
-        if "baseball" in cat or "baseball" in genre or silo == "baseball" or "mlb" in comp:
-            return 200  # 3h 20m
+        # 5. Football Americano (NFL / College): 230 minutes (~3h 50m)
+        if silo == "american-football":
+            return 230
 
-        # 7. Hockey (NHL)
-        if "hockey" in cat or "hockey" in genre or silo == "hockey" or "nhl" in comp:
-            return 170  # 2h 50m
+        # 6. Baseball (MLB): 200 minutes (~3h 20m)
+        if silo == "baseball":
+            return 200
 
-        # 8. Sport da combattimento (UFC / Boxe / MMA)
-        if any(k in cat for k in ("fight", "combattimento", "mma", "ufc", "boxing")) or silo == "fight":
-            return 240  # 4 hours (covers 5-fight main cards)
+        # 7. Hockey (NHL): 170 minutes (~2h 50m)
+        if silo == "hockey":
+            return 170
 
-        # 9. Volley / Pallavolo
-        if any(k in cat for k in ("volley", "pallavolo")) or silo == "volley":
-            return 150  # 2h 30m
+        # 8. Sport da combattimento (UFC / Boxe / MMA): 240 minutes (main card ~4h)
+        if silo == "fight":
+            return 240
 
-        # 10. Rugby
-        if "rugby" in cat or "rugby" in genre or silo == "rugby":
-            return 140  # 2h 20m
+        # 9. Volley / Pallavolo: 150 minutes (~2h 30m up to 5 sets)
+        if silo == "volley":
+            return 150
 
-        # Fallback for uncategorized or any other sport: 180 minutes (3 hours max)
+        # 10. Rugby: 140 minutes (~2h 20m)
+        if silo == "rugby":
+            return 140
+
+        # 11. Altri Sport (fallback generico): 180 minutes (3 hours max)
         return 180
 
     def build_meta_item(
@@ -358,12 +335,26 @@ class CatalogService:
                 return frozenset([h_words, a_words])
         return None
 
-    @staticmethod
-    def get_canonical_silo(m: Dict[str, Any]) -> str:
+    @classmethod
+    def get_canonical_silo(cls, m: Dict[str, Any]) -> str:
         """
         Determines the canonical sport silo for a match, reconciling
-        inconsistencies between _silo tags and category strings.
+        inconsistencies between _catalog, _silo tags, category strings, and classifier.
         """
+        # 1. Direct resolution from certified _catalog
+        cat = (m.get("_catalog") or "").lower().strip()
+        if cat in ("calcio_italiano", "calcio_estero"):
+            return "football"
+        if cat == "basket":
+            return "basketball"
+        if cat == "tennis":
+            return "tennis"
+        if cat == "motori":
+            return "motor-sports"
+        if cat == "football_americano":
+            return "american-football"
+
+        # 2. Direct resolution from _silo tag
         s = (m.get("_silo") or "").lower().strip()
         if s:
             if s in ("soccer", "football"): return "football"
@@ -372,16 +363,36 @@ class CatalogService:
             if s in ("motor-sports", "motorsport", "motori"): return "motor-sports"
             if s in ("fight", "combattimento", "boxe", "boxing", "mma", "ufc"): return "fight"
             return s
-        cat = (m.get("category") or "").lower().strip()
-        if cat in ("soccer", "football"): return "football"
-        if cat in ("basket", "basketball"): return "basketball"
-        if cat in ("volleyball", "volley"): return "volley"
-        if cat in ("motor-sports", "motorsport", "motori"): return "motor-sports"
-        if cat in ("fight", "combattimento", "boxe", "boxing", "mma", "ufc"): return "fight"
-        if cat in ("baseball",): return "baseball"
-        if cat in ("hockey",): return "hockey"
-        if cat in ("american-football", "nfl", "cfl"): return "american-football"
-        if cat in ("tennis",): return "tennis"
+
+        # 3. Direct resolution from provider category string
+        c = (m.get("category") or "").lower().strip()
+        if c in ("soccer", "football"): return "football"
+        if c in ("basket", "basketball"): return "basketball"
+        if c in ("volleyball", "volley"): return "volley"
+        if c in ("motor-sports", "motorsport", "motori"): return "motor-sports"
+        if c in ("fight", "combattimento", "boxe", "boxing", "mma", "ufc"): return "fight"
+        if c in ("baseball",): return "baseball"
+        if c in ("hockey",): return "hockey"
+        if c in ("american-football", "nfl", "cfl"): return "american-football"
+        if c in ("tennis",): return "tennis"
+
+        # 4. Fallback: inspect via genre classifier heuristic
+        try:
+            from app.services.genre_classifier import genre_classifier
+            cl_cat, _ = genre_classifier.classify(m)
+            if cl_cat in ("calcio_italiano", "calcio_estero"):
+                return "football"
+            if cl_cat == "basket":
+                return "basketball"
+            if cl_cat == "tennis":
+                return "tennis"
+            if cl_cat == "motori":
+                return "motor-sports"
+            if cl_cat == "football_americano":
+                return "american-football"
+        except Exception:
+            pass
+
         return "altri_sport"
 
     @classmethod
