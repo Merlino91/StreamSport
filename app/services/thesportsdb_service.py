@@ -1241,8 +1241,9 @@ class TheSportsDBService:
                 if self._calendar_cache:
                     clean_title_tokens = set(re.sub(r'[^a-z0-9]+', ' ', title.lower()).split())
                     for cev in self._calendar_cache:
+                        cev_id = str(cev.get("id") or "")
                         cev_title = cev.get("title", "").strip().lower()
-                        if cev_title == title.lower():
+                        if (ev_id and cev_id == ev_id) or cev_title == title.lower():
                             silo = cev.get("_silo", "altri_sport")
                             comp = cev.get("competition", "")
                             if not thumb and cev.get("thumb"):
@@ -1262,16 +1263,22 @@ class TheSportsDBService:
                 # Keyword fallback for silo if not in calendar
                 if silo == "altri_sport":
                     t_low = title.lower()
-                    if any(w in t_low for w in ("basket", "baloncesto", "olimpia", "virtus", "partizan", "barcelona basket", "real madrid basket", "euroleague")):
+                    from app.services.genre_classifier import genre_classifier
+                    if any(w in t_low for w in ("basket", "baloncesto", "olimpia", "virtus", "partizan", "barcelona basket", "real madrid basket", "euroleague")) or any(team in t_low for team in genre_classifier.NBA_TEAMS):
                         silo = "basketball"
                     elif any(w in t_low for w in ("fc ", "united", "inter", "milan", "juventus", "calcio", "madrid", "harrogate", "aldershot", "gateshead", "spain vs croatia", "england", "scotland", "national league")):
                         silo = "football"
-                    elif any(w in t_low for w in ("nfl", "bears", "eagles", "patriots", "chiefs")):
+                    elif any(w in t_low for w in ("nfl", "cfl", "super bowl", "redzone")) or any(team in t_low for team in genre_classifier.NFL_TEAMS):
                         silo = "american-football"
-                    elif any(w in t_low for w in ("braves", "phillies", "astros", "white sox", "yankees", "red sox", "mlb")):
+                    elif any(w in t_low for w in ("braves", "phillies", "astros", "white sox", "yankees", "red sox", "mlb")) or any(team in t_low for team in genre_classifier.MLB_TEAMS):
                         silo = "baseball"
-                    elif any(w in t_low for w in ("hurricanes", "panthers", "nhl", "rangers", "bruins")):
+                    elif any(w in t_low for w in ("hurricanes", "panthers", "nhl", "rangers", "bruins")) or any(team in t_low for team in genre_classifier.NHL_TEAMS):
                         silo = "hockey"
+
+                from app.services.canonical_competition_service import detect_canonical_competition, get_canonical_display_name
+                canon = detect_canonical_competition(title, silo_hint=silo)
+                if canon:
+                    comp = get_canonical_display_name(canon) or comp
 
                 slug_title = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")
                 match_id = f"tsdb_tv_{ev_id or slug_title}_{int(date_ms / 1000)}"
@@ -1280,6 +1287,7 @@ class TheSportsDBService:
                     "id": match_id,
                     "title": title,
                     "category": silo,
+                    "canonical_competition": canon,
                     "_silo": silo,
                     "competition": comp,
                     "_competition": comp,

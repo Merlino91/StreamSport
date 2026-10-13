@@ -117,23 +117,30 @@ class DaddyLiveAPI:
         except Exception:
             h, m = 0, 0
 
+        # Broadcast day runs from 06:00 to 05:59 next day.
+        # Events scheduled at 00:00 - 05:59 belong to the following calendar morning!
+        day_offset = 1 if h < 6 else 0
+        base_date = datetime.date(year, month, daynum)
+        if day_offset:
+            base_date += datetime.timedelta(days=day_offset)
+
         try:
             import pytz
             rome_tz = pytz.timezone("Europe/Rome")
-            naive_dt = datetime.datetime(year, month, daynum, h, m)
+            naive_dt = datetime.datetime(base_date.year, base_date.month, base_date.day, h, m)
             dt = rome_tz.localize(naive_dt)
             return int(dt.timestamp() * 1000)
         except Exception:
             try:
                 from zoneinfo import ZoneInfo
                 rome_tz = ZoneInfo("Europe/Rome")
-                dt = datetime.datetime(year, month, daynum, h, m, tzinfo=rome_tz)
+                dt = datetime.datetime(base_date.year, base_date.month, base_date.day, h, m, tzinfo=rome_tz)
                 return int(dt.timestamp() * 1000)
             except Exception:
                 # Manual Europe/Rome offset fallback (CEST UTC+2 in summer, CET UTC+1 in winter)
-                offset_hours = 2 if 4 <= month <= 10 else 1
+                offset_hours = 2 if 4 <= base_date.month <= 10 else 1
                 tz_offset = datetime.timezone(datetime.timedelta(hours=offset_hours))
-                dt = datetime.datetime(year, month, daynum, h, m, tzinfo=tz_offset)
+                dt = datetime.datetime(base_date.year, base_date.month, base_date.day, h, m, tzinfo=tz_offset)
                 return int(dt.timestamp() * 1000)
 
     def _parse_upcoming_date(self, event_title: str) -> int:
