@@ -748,7 +748,7 @@ class CatalogService:
                     daddylive_api.get_matches(force=True),
                     espn_service.get_official_events(),
                     ocblacktop_service.get_official_sessions(),
-                    thesportsdb_service.fetch_multi_day_calendar(days_ahead=5, days_behind=1),
+                    thesportsdb_service.fetch_multi_day_calendar(days_ahead=2, days_behind=1),
                     italian_epg_service.get_matches(),
                     virgilio_service.get_matches(),
                     thesportsdb_service.fetch_browse_tv_matches(),
@@ -827,9 +827,12 @@ class CatalogService:
                 # If ENABLE_REPLAYS=True, purge only non-eligible replays (retain Serie A, F1, NBA, etc. for 72h).
                 now_ms = time.time() * 1000
                 ids_to_purge = []
+                max_future_ms = now_ms + (3 * 24 * 3600 * 1000)
                 filtered_matches = []
                 for m in all_matches:
                     d = m.get("date") or 0
+                    if d > 0 and d > max_future_ms:
+                        continue
                     live_window = self.get_live_window_minutes(m)
                     is_concluded = (d > 0) and ((d - now_ms) / 60000 < -live_window)
                     if is_concluded:

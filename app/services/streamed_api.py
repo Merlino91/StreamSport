@@ -86,6 +86,9 @@ class StreamedAPI:
                         silo = STREAMED_SPORTS_MAP[sport]
                         for m in res:
                             if isinstance(m, dict):
+                                m_date = m.get("date") or 0
+                                if m_date and m_date > (now * 1000 + 3 * 24 * 3600 * 1000):
+                                    continue
                                 mid = m.get("id")
                                 if mid and mid in seen_ids:
                                     continue
@@ -127,6 +130,9 @@ class StreamedAPI:
                 fallback_data = await doh_client.get_json(f"https://{host}/api/matches/all", host_header=host)
                 if isinstance(fallback_data, list) and len(fallback_data) > 0:
                     for m in fallback_data:
+                        m_date = m.get("date") or 0
+                        if m_date and m_date > (now * 1000 + 3 * 24 * 3600 * 1000):
+                            continue
                         cat = (m.get("category") or "").lower()
                         silo = STREAMED_SPORTS_MAP.get(cat, "altri_sport")
                         m["_silo"] = silo

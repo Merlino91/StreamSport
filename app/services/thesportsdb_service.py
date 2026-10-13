@@ -245,7 +245,7 @@ class TheSportsDBService:
 
         return events
 
-    async def fetch_multi_day_calendar(self, days_ahead: int = 3, days_behind: int = 1) -> List[Dict[str, Any]]:
+    async def fetch_multi_day_calendar(self, days_ahead: int = 2, days_behind: int = 1) -> List[Dict[str, Any]]:
         """
         Fetches the official TheSportsDB calendar for recent and upcoming days (default: yesterday to +3 days ahead).
         Indexes events by Silo for instant zero-latency match enrichment across full race weekends.
@@ -842,9 +842,12 @@ class TheSportsDBService:
         performs a polite, one-off web search on TheSportsDB.
         Caches both 'found' and 'not_found' in SQLite so each match is only queried once.
         """
+        now_ms = int(time.time() * 1000)
+        max_future_ms = now_ms + (3 * 24 * 3600 * 1000)
         orphans = [
             m for m in matches
             if (not m.get("poster") or "nostream" in m.get("poster", "") or not str(m.get("poster")).startswith("http"))
+            and (not m.get("date") or m.get("date") <= max_future_ms)
         ]
         if not orphans:
             return
@@ -896,8 +899,8 @@ class TheSportsDBService:
         async def _enrich_task():
             self._is_enriching = True
             try:
-                # 1. Fetch 6-day calendar (yesterday + 5 days ahead) every 12 hours
-                await self.fetch_multi_day_calendar(days_ahead=5, days_behind=1)
+                # 1. Fetch 3-day calendar (yesterday + 2 days ahead = 3 days) every 12 hours
+                await self.fetch_multi_day_calendar(days_ahead=2, days_behind=1)
                 # 2. Match and enrich active matches
                 n = self.enrich_matches(matches)
                 if n > 0:

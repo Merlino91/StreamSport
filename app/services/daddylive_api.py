@@ -361,6 +361,11 @@ class DaddyLiveAPI:
                     else:
                         date_ms = self._parse_datetime(day_str, time_str)
 
+                    # Discard events scheduled more than 3 days ahead
+                    now_ms = int(time.time() * 1000)
+                    if date_ms and date_ms > (now_ms + 3 * 24 * 3600 * 1000):
+                        continue
+
                     # Extract teams if 'vs' in title (never for RedZone)
                     is_rz = is_redzone_event(raw_title) or is_redzone_event(clean_title)
                     teams = None
