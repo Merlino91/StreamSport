@@ -200,10 +200,13 @@ class DaddyLiveAPI:
 
     DADDYLIVE_EXCLUDED_CATEGORIES = (
         "big brother", "tv show", "reality", "movies", "horse racing", "upcoming events",
-        "college football",
-        "college soccer", "women's college soccer",
-        "women's college volleyball", "women's college ice hockey",
-        "minor league baseball"
+        "college football", "ncaaf",
+        "college soccer", "men's college soccer", "women's college soccer",
+        "college volleyball", "women's college volleyball",
+        "college ice hockey", "women's college ice hockey",
+        "minor league baseball",
+        "usl championship", "usl league one", "usl",
+        "ahl ice hockey", "ahl",
     )
 
     @classmethod
@@ -331,7 +334,7 @@ class DaddyLiveAPI:
                     continue
 
                 cat_lower = cat_raw.lower()
-                if any(k in cat_lower for k in ("big brother", "tv show", "reality", "movies")):
+                if any(k in cat_lower for k in self.DADDYLIVE_EXCLUDED_CATEGORIES):
                     continue
 
                 is_upcoming = "upcoming" in cat_lower
@@ -340,6 +343,19 @@ class DaddyLiveAPI:
                     raw_title = ev.get("event") or ""
                     if not raw_title:
                         continue
+
+                    # Exclude US college / NCAA sports even if placed in generic categories
+                    if re.search(r"\b(college\s*(?:soccer|volleyball|ice\s*hockey|football|baseball)|ncaaf?)\b", raw_title.lower()):
+                        continue
+
+                    # UEFA Youth League: accept ONLY Italian youth teams (or matches involving Italian teams)
+                    if "youth league" in cat_lower or "youth league" in raw_title.lower():
+                        is_italian_youth = (
+                            "🇮🇹" in raw_title
+                            or bool(re.search(r"\b(italy|italia|milan|inter|juventus|roma|atalanta|bologna|lazio|fiorentina|torino|empoli|lecce|napoli|verona|sassuolo|genoa|monza|cagliari|sampdoria)\b", raw_title.lower()))
+                        )
+                        if not is_italian_youth:
+                            continue
 
                     # Clean event title
                     clean_title = self._clean_title(raw_title)
