@@ -395,6 +395,11 @@ class CatalogService:
             if s in ("fight", "combattimento", "boxe", "boxing", "mma", "ufc"): return "fight"
             return s
 
+        # 2b. Guard for upstream mislabeled niche sports
+        t_low = (m.get("title") or "").lower()
+        if any(w in t_low for w in ("handball", "pallamano", "ehf", "🤾", "snooker", "billiards")):
+            return "altri_sport"
+
         # 3. Direct resolution from provider category string
         c = (m.get("category") or "").lower().strip()
         if c in ("soccer", "football"): return "football"
@@ -714,18 +719,23 @@ class CatalogService:
         for acr, full in self.COMMON_TEAM_ACRONYMS.items():
             t = re.sub(rf"\b{acr}\b", full, t)
         words = set(re.sub(r"[^a-z0-9]+", " ", t).split())
-        stopwords = {"vs", "v", "fc", "ac", "cf", "sc", "as", "club", "u19", "u20", "u21", "u23", "at", "the", "calcio", "basket"}
+        stopwords = {
+            "vs", "v", "fc", "ac", "cf", "sc", "as", "club", "u19", "u20", "u21", "u23", "at", "the",
+            "calcio", "basket", "champions", "league", "cup", "coppa", "supercup", "supercoppa",
+            "division", "serie", "liga", "torneo", "tournament", "simulcast", "highlight", "highlights",
+            "show", "direct", "live", "conference", "europa", "uefa", "fifa", "concacaf", "conmebol",
+            "afc", "caf", "ehf", "chl"
+        }
         return {w for w in words if w not in stopwords and len(w) > 1}
 
     def are_post_validation_duplicates(self, m1: Dict[str, Any], m2: Dict[str, Any]) -> bool:
         """
         Determines whether two matches represent the exact same real-world sporting event
         based on post-validation signals:
-        1. Identical TheSportsDB official 16:9 poster URL (within 90 min).
+        1. Identical TheSportsDB official 16:9 poster URL (within 90 min) AND at least 1 matching team token.
         2. Identical normalized title (within 45 min).
-        3. Proximity (within 45 min) + same certified competition + team tokens overlap
-           with acronym resolution (e.g. LAFC vs Austin FC and Los Angeles FC vs Austin FC).
-        4. Shared linear TV channel on the same date.
+        3. Proximity (within 45 min) + team tokens overlap with acronym resolution (e.g. LAFC vs Austin FC and Los Angeles FC vs Austin FC).
+        Guards: Youth vs Senior matches NEVER merge, and no merge is allowed without team overlap.
         """
         d1 = m1.get("date") or 0
         d2 = m2.get("date") or 0
@@ -736,13 +746,22 @@ class CatalogService:
         if time_diff > 90 * 60 * 1000:
             return False
 
-        # Signal 1: Identical official poster URL
+        # Guard: Youth matches must NEVER merge with Senior matches
+        y1 = bool(re.search(r"\b(u-?1[5-9]|u-?2[01]|under\s*1[5-9]|under\s*2[01]|primavera|youth)\b", (m1.get("title") or "") + " " + (m1.get("competition") or ""), re.IGNORECASE))
+        y2 = bool(re.search(r"\b(u-?1[5-9]|u-?2[01]|under\s*1[5-9]|under\s*2[01]|primavera|youth)\b", (m2.get("title") or "") + " " + (m2.get("competition") or ""), re.IGNORECASE))
+        if y1 != y2:
+            return False
+
+        # Signal 1: Identical official poster URL (within 90 min) with team token confirmation
         p1 = str(m1.get("poster") or "")
         p2 = str(m2.get("poster") or "")
         if p1 and p2 and p1 == p2 and p1.startswith("http") and "nostream" not in p1 and "no_thumb" not in p1:
-            return True
+            w1 = self._clean_tokens_expanded(m1.get("title", ""))
+            w2 = self._clean_tokens_expanded(m2.get("title", ""))
+            if w1 and w2 and (w1 & w2):
+                return True
 
-        # Signal 2: Identical normalized title
+        # Signal 2: Identical normalized title (within 45 min)
         t1 = (m1.get("title") or "").strip().lower()
         t2 = (m2.get("title") or "").strip().lower()
         if t1 and t2 and t1 == t2 and time_diff <= 45 * 60 * 1000:
@@ -768,12 +787,6 @@ class CatalogService:
                         for acr, full in self.COMMON_TEAM_ACRONYMS.items():
                             if (acr in raw_t1 and full in raw_t2) or (acr in raw_t2 and full in raw_t1):
                                 return True
-
-        # Signal 4: Shared linear TV channel on exact match date
-        tvs1 = set(m1.get("_diretta_tv_channels") or [])
-        tvs2 = set(m2.get("_diretta_tv_channels") or [])
-        if tvs1 and tvs2 and (tvs1 & tvs2) and time_diff <= 30 * 60 * 1000:
-            return True
 
         return False
 
@@ -1026,6 +1039,16 @@ class CatalogService:
 
                 # 2. Pull all active matches from DB to retain existing enriched posters
                 all_db_matches = [m for m in db_service.get_active_matches() if self.is_real_match(m)]
+                # Transfer existing DB posters to fresh matches if missing
+                db_posters = {m["id"]: m["poster"] for m in all_db_matches if m.get("id") and m.get("poster")}
+                for m in combined_fresh:
+                    m_id = m.get("id")
+                    if m_id and m_id in db_posters and not m.get("poster"):
+                        m["poster"] = db_posters[m_id]
+
+                # Exclude fresh IDs from all_db_matches to eliminate stale duplicate records across different silos
+                fresh_ids = {m.get("id") for m in combined_fresh if m.get("id")}
+                all_db_matches = [m for m in all_db_matches if m.get("id") not in fresh_ids]
                 all_matches = self.merge_and_deduplicate_by_silos(combined_fresh, all_db_matches) if all_db_matches else combined_fresh
 
                 # Purge palpably conflicting Italian TV channels (e.g. DaddyLive hallucinated channels)

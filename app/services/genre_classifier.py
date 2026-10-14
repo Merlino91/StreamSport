@@ -295,10 +295,34 @@ class GenreClassifier:
         # 1. Early Canonical Competition routing
         canon = match.get("canonical_competition")
         if canon:
+            # Silo boundary guard: a canonical slug from another sport must NEVER hijack an event from a dedicated sport silo
+            from app.services.canonical_competition_service import get_canonical_silo
+            canon_silo = get_canonical_silo(canon)
+            event_silo = (match.get("_silo") or match.get("category") or "").lower().strip()
+            if event_silo in ("soccer",): event_silo = "football"
+            if event_silo in ("basket",): event_silo = "basketball"
+            if event_silo in ("motorsport", "motori"): event_silo = "motor-sports"
+            if event_silo in ("volley",): event_silo = "volleyball"
+            if event_silo in ("combattimento", "boxe", "mma"): event_silo = "fight"
+            DEDICATED_SILOS = {"hockey", "basketball", "tennis", "motor-sports", "volleyball", "baseball", "fight", "american-football"}
+            if event_silo in DEDICATED_SILOS and canon_silo and canon_silo != event_silo:
+                canon = None
+
+        if canon:
             # Country-specific guard for homonym league names (Serie A, Serie B, Serie C)
             if canon in ("football_serie_a", "football_serie_b", "football_serie_c"):
                 raw_eval = f"{title_lower} {(match.get('competition') or '').lower()}"
                 if any(x in raw_eval for x in ("brazil", "brasil", "ecuador", "colombia", "chile", "peru", "argentina", "mexico", "usa", "🇧🇷", "🇪🇨")):
+                    return "calcio_estero", "Americhe e Leghe Extra-UE"
+
+            if canon == "football_la_liga":
+                raw_eval = f"{title_lower} {(match.get('competition') or '').lower()}"
+                if any(x in raw_eval for x in ("chile", "argentina", "uruguay", "nicaragua", "peru", "colombia", "mexico")):
+                    return "calcio_estero", "Americhe e Leghe Extra-UE"
+
+            if canon == "football_premier_league":
+                raw_eval = f"{title_lower} {(match.get('competition') or '').lower()}"
+                if any(x in raw_eval for x in ("canada", "canadian", "egitto", "egypt", "armenia", "iraq", "jamaica", "giamaica", "kuwait", "bahrain", "bangladesh", "azerbaijan", "antigua", "ethiopia", "etiopia", "eswatini")):
                     return "calcio_estero", "Americhe e Leghe Extra-UE"
 
             canon_map = {
@@ -312,6 +336,9 @@ class GenreClassifier:
                 "football_la_liga": ("calcio_estero", "La Liga"),
                 "football_segunda": ("calcio_estero", "Altri Campionati Europei"),
                 "football_bundesliga": ("calcio_estero", "Bundesliga e Ligue 1"),
+                "football_austrian_bundesliga": ("calcio_estero", "Altri Campionati Europei"),
+                "football_danish_superliga": ("calcio_estero", "Altri Campionati Europei"),
+                "football_swiss_super_league": ("calcio_estero", "Altri Campionati Europei"),
                 "football_2_bundesliga": ("calcio_estero", "Altri Campionati Europei"),
                 "football_ligue_1": ("calcio_estero", "Bundesliga e Ligue 1"),
                 "football_uefa_youth_league": ("calcio_estero", "Europei Under 21 e Nazionali Giovanili"),
@@ -356,6 +383,8 @@ class GenreClassifier:
                 "basketball_eurocup": ("basket", "Eurolega ed Eurocup"),
                 "basketball_lba_serie_a": ("basket", "LBA Serie A"),
                 "basketball_ncaa": ("basket", "NCAA e College Basket"),
+                "basketball_acb": ("basket", "Campionati Esteri ed NBL"),
+                "basketball_bcl": ("basket", "FIBA e Tornei Nazionali"),
                 "tennis_grand_slam": ("tennis", "Grandi Slam"),
                 "tennis_atp": ("tennis", "ATP"),
                 "tennis_wta": ("tennis", "WTA"),
@@ -371,6 +400,7 @@ class GenreClassifier:
                 "am_football_ncaa": ("football_americano", "NCAA College Football"),
                 "baseball_mlb": ("baseball", "MLB"),
                 "baseball_ncaa": ("baseball", "NCAA College Baseball"),
+                "hockey_chl": ("hockey", "KHL e Leghe Europee"),
                 "hockey_nhl": ("hockey", "NHL"),
                 "hockey_khl": ("hockey", "KHL e Leghe Europee"),
                 "fight_ufc": ("combattimento", "UFC"),
@@ -386,6 +416,7 @@ class GenreClassifier:
                 "golf_liv": ("altri_sport", "Golf"),
                 "darts_pdc": ("altri_sport", "Freccette / Darts"),
                 "cycling_grand_tours": ("altri_sport", "Ciclismo"),
+                "handball_ehf_cl": ("altri_sport", "Pallamano"),
             }
             if canon in canon_map:
                 return canon_map[canon]
@@ -416,6 +447,10 @@ class GenreClassifier:
         # Guard: Cue sports (Snooker, Q Tour, Billiards) often mislabeled upstream
         if re.search(r"\b(snooker|q\s*tour|billiards|biliardo)\b", title_lower):
             return "altri_sport", "Biliardo, Padel e Altri"
+
+        # Guard: Handball / Pallamano mislabeled upstream as soccer/football
+        if re.search(r"\b(handball|pallamano|ehf)\b", title_lower) or "ehf" in comp or "🤾" in title_lower:
+            return "altri_sport", "Pallamano"
 
         # ------------------------------------------------------------------
         # 1. TENNIS (Dedicated Catalog: 'tennis')

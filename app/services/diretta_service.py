@@ -75,7 +75,11 @@ class DirettaService:
     }
 
     OTT_EXCLUDE: Tuple[str, ...] = (
-        "amazon prime video", "como tv", "now tv", "srf play", "discovery+"
+        "now tv", "sky go", "amazon prime", "prime video", "como tv",
+        "srf play", "discovery+", "raiplay", "mediaset infinity", "infinity+",
+        "timvision", "diretta gol", "diretta goal", "mosaico", "zona gol",
+        "onefootball", "fifa+", "uefa.tv", "red bull tv", "youtube", "twitch",
+        "apple tv", "mls season pass", "nba global league pass", "nhl.tv", "fiba tv", "euroleague tv", "mlb.tv"
     )
 
     def __init__(self):
@@ -125,7 +129,7 @@ class DirettaService:
                 time_epoch = fields.get("AD")
                 date_ms = int(time_epoch) * 1000 if time_epoch and time_epoch.isdigit() else 0
 
-                # Extract official broadcast channels from AL field
+                # Extract official broadcast channels from AL field, strictly filtering OTT and mosaico streams
                 tv_channels: List[str] = []
                 al_raw = fields.get("AL")
                 if al_raw:
@@ -133,17 +137,16 @@ class DirettaService:
                         al_data = json.loads(al_raw)
                         for tv in al_data.get("1", []):
                             bn = tv.get("BN", "").strip()
-                            if bn:
+                            if bn and not any(ott in bn.lower() for ott in self.OTT_EXCLUDE):
                                 tv_channels.append(bn)
                     except Exception:
                         pass
 
                 if home and away:
-                    # Clean continental vs national tournament name
-                    if current_country.upper() in self.CONTINENTAL_AREAS or not current_country:
-                        comp_name = current_league
-                    else:
+                    if current_country and current_league:
                         comp_name = f"{current_country}: {current_league}".strip(": ")
+                    else:
+                        comp_name = current_league or current_country or "Live Sports"
 
                     matches.append({
                         "id": f"diretta-{m_id}",

@@ -114,12 +114,25 @@ CANONICAL_LEAGUES = {
     "football_premier_league": {
         "display": "Premier League",
         "silo": "football",
-        "patterns": [r"premier\s*league", r"england\s*-\s*premier\s*league"],
+        "patterns": [
+            r"england\s*-\s*premier\s*league\b(?!\s*2\b)(?!\s*cup)(?!\s*u\d+)",
+            r"inghilterra:\s*premier\s*league\b(?!\s*2\b)(?!\s*cup)(?!\s*u\d+)",
+            r"(?<!northern\s)(?<!southern\s)english\s*premier\s*league\b(?!\s*2\b)(?!\s*cup)(?!\s*u\d+)",
+            r"\bepl\b",
+            r"premier-league\b",
+            r"^(?:🏆\s*)?premier\s*league(?:\s*-\s*(?!2\b|cup|u\d+).*)?$",
+            r"\((?:🏆\s*)?premier\s*league\)",
+        ],
     },
     "football_championship": {
         "display": "Championship",
         "silo": "football",
-        "patterns": [r"\bchampionship\b", r"england\s*-\s*championship"],
+        "patterns": [
+            r"england\s*-\s*championship",
+            r"inghilterra:\s*championship",
+            r"efl\s*championship",
+            r"(?<!scottish\s)(?<!scotland\s)(?<!scozia\s)(?<!ireland\s)(?<!northern\s)(?<!usl\s)(?<!women\s)\bchampionship\b(?!\s*scotland)(?!\s*ireland)",
+        ],
     },
     "football_fa_cup": {
         "display": "FA Cup",
@@ -129,12 +142,26 @@ CANONICAL_LEAGUES = {
     "football_la_liga": {
         "display": "LaLiga",
         "silo": "football",
-        "patterns": [r"\bla\s*liga\b", r"spain\s*-\s*la\s*liga", r"spain\s*-\s*liga", r"primera\s*division"],
+        "patterns": [
+            r"spain\s*-\s*la\s*liga\b(?!\s*2\b)",
+            r"spagna:\s*la\s*liga\b(?!\s*2\b)",
+            r"spagna:\s*laliga\b(?!\s*2\b)",
+            r"spanish\s*la\s*liga\b(?!\s*2\b)",
+            r"(?<!copa de )(?<!chilean )(?<!argentina )(?<!uruguay )(?<!nicaragua )\bla\s*liga\b(?!\s*2\b)(?!\s*hypermotion)",
+            r"(?:spain|spagna)\s*-\s*primera\s*division",
+        ],
     },
     "football_segunda": {
         "display": "Segunda División",
         "silo": "football",
-        "patterns": [r"segunda\s*division", r"spain\s*-\s*segunda", r"\bla\s*liga\s*2\b"],
+        "patterns": [
+            r"segunda\s*division",
+            r"spain\s*-\s*segunda",
+            r"spagna:\s*laliga2",
+            r"spagna:\s*la\s*liga\s*2",
+            r"\bla\s*liga\s*2\b",
+            r"\bla\s*liga\s*hypermotion\b",
+        ],
     },
     "football_copa_del_rey": {
         "display": "Copa del Rey",
@@ -144,7 +171,21 @@ CANONICAL_LEAGUES = {
     "football_bundesliga": {
         "display": "Bundesliga",
         "silo": "football",
-        "patterns": [r"\bbundesliga\b", r"germany\s*-\s*bundesliga"],
+        "patterns": [
+            r"germany\s*-\s*bundesliga\b(?!\s*2\b)",
+            r"germania:\s*bundesliga\b(?!\s*2\b)(?!\s*-\s*femminile)",
+            r"german\s*bundesliga\b(?!\s*2\b)",
+            r"(?<!austria\s)(?<!austrian\s)(?<!austria:\s)(?<!handball\s)(?<!handball-)(?<!women\s)(?<!femminile\s)\bbundesliga\b(?!\s*austria)(?!\s*2\b)(?!\s*-\s*femminile)",
+        ],
+    },
+    "football_austrian_bundesliga": {
+        "display": "Austrian Bundesliga",
+        "silo": "football",
+        "patterns": [
+            r"austria:\s*bundesliga",
+            r"austria\s*-\s*bundesliga",
+            r"austrian\s*bundesliga",
+        ],
     },
     "football_2_bundesliga": {
         "display": "2. Bundesliga",
@@ -184,7 +225,12 @@ CANONICAL_LEAGUES = {
     "football_uefa_cl": {
         "display": "UEFA Champions League",
         "silo": "football",
-        "patterns": [r"uefa-champions-league", r"champions\s*league", r"uefa\s*champions\s*league", r"\bucl\b"],
+        "patterns": [
+            r"uefa-champions-league",
+            r"uefa\s*champions\s*league",
+            r"\bucl\b",
+            r"(?<!afc\s)(?<!caf\s)(?<!ehf\s)(?<!hockey\s)champions\s*league"
+        ],
     },
     "football_uefa_el": {
         "display": "UEFA Europa League",
@@ -224,7 +270,31 @@ CANONICAL_LEAGUES = {
     "football_super_lig": {
         "display": "Süper Lig",
         "silo": "football",
-        "patterns": [r"s[uü]per\s*lig", r"turkey\s*-\s*super\s*lig", r"turkish\s*super\s*lig"],
+        "patterns": [
+            r"turkey\s*-\s*super\s*lig\b",
+            r"turchia:\s*super\s*lig\b",
+            r"turkish\s*super\s*lig\b",
+            r"\bs[uü]per\s*lig\b",
+        ],
+    },
+    "football_danish_superliga": {
+        "display": "Danish Superliga",
+        "silo": "football",
+        "patterns": [
+            r"danimarca:\s*superliga",
+            r"denmark\s*-\s*superliga",
+            r"danish\s*superliga",
+            r"\bsuperligaen\b",
+        ],
+    },
+    "football_swiss_super_league": {
+        "display": "Swiss Super League",
+        "silo": "football",
+        "patterns": [
+            r"svizzera:\s*super\s*league",
+            r"switzerland\s*-\s*super\s*league",
+            r"swiss\s*super\s*league",
+        ],
     },
     "football_belgian_pro": {
         "display": "Belgian Pro League",
@@ -274,7 +344,7 @@ CANONICAL_LEAGUES = {
     "football_afc_cl": {
         "display": "AFC Champions League",
         "silo": "football",
-        "patterns": [r"afc\s*champions\s*league"],
+        "patterns": [r"afc\s*champions", r"afc\s*champions\s*league"],
     },
     "football_world_cup_qual": {
         "display": "Qualificazioni Mondiali",
@@ -353,7 +423,12 @@ CANONICAL_LEAGUES = {
     "basketball_acb": {
         "display": "Liga ACB",
         "silo": "basketball",
-        "patterns": [r"liga\s*acb", r"liga\s*endesa"],
+        "patterns": [r"liga\s*acb", r"liga\s*endesa", r"spagna:\s*acb"],
+    },
+    "basketball_bcl": {
+        "display": "Basketball Champions League",
+        "silo": "basketball",
+        "patterns": [r"basketball\s*champions\s*league", r"\bbcl\b"],
     },
 
     # --------------------------------------------------------------------------
@@ -465,6 +540,11 @@ CANONICAL_LEAGUES = {
     # --------------------------------------------------------------------------
     # HOCKEY (hockey)
     # --------------------------------------------------------------------------
+    "hockey_chl": {
+        "display": "Champions Hockey League",
+        "silo": "hockey",
+        "patterns": [r"champions\s*hockey\s*league", r"\bchl\b", r"champions\s*league"],
+    },
     "hockey_nhl": {
         "display": "NHL",
         "silo": "hockey",
@@ -562,6 +642,11 @@ CANONICAL_LEAGUES = {
         "silo": "altri_sport",
         "patterns": [r"giro\s*d['’]italia", r"tour\s*de\s*france", r"vuelta\s*a\s*espana"],
     },
+    "handball_ehf_cl": {
+        "display": "EHF Champions League",
+        "silo": "altri_sport",
+        "patterns": [r"ehf\s*champions\s*league", r"\behf\b"],
+    },
 }
 
 # Precompile all regex patterns for ultra-fast lookup
@@ -588,15 +673,27 @@ def detect_canonical_competition(text: str, silo_hint: Optional[str] = None) -> 
     # Normalization: replace underscores and slashes with dashes/spaces
     t = text.lower().replace("_", "-").replace("/", " ")
 
-    # 1. Match within silo_hint first if provided
+    # 1. Match within silo_hint if provided
     if silo_hint:
+        norm_silo = silo_hint.lower().strip()
+        if norm_silo in ("soccer",): norm_silo = "football"
+        if norm_silo in ("basket",): norm_silo = "basketball"
+        if norm_silo in ("motorsport", "motori"): norm_silo = "motor-sports"
+        if norm_silo in ("volley",): norm_silo = "volleyball"
+        if norm_silo in ("combattimento", "boxe", "mma"): norm_silo = "fight"
+
         for slug, s_silo, display, regexes in _COMPILED_PATTERNS:
-            if s_silo == silo_hint:
+            if s_silo == norm_silo:
                 for rx in regexes:
                     if rx.search(t):
                         return slug
 
-    # 2. Match across all leagues
+        # Strict Silo Boundary: if an event belongs to a known sport silo,
+        # it must NEVER cross-match into a completely different sport (e.g. hockey -> football).
+        if norm_silo not in ("all", "other", "altri_sport", "unknown", ""):
+            return None
+
+    # 2. Match across all leagues ONLY if no specific sport silo was known
     for slug, s_silo, display, regexes in _COMPILED_PATTERNS:
         for rx in regexes:
             if rx.search(t):
