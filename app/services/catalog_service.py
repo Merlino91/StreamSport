@@ -29,6 +29,7 @@ from app.services.thesportsdb_service import thesportsdb_service
 from app.services.tvvoo_service import tvvoo_service
 from app.services.italian_epg_service import italian_epg_service
 from app.services.virgilio_service import virgilio_service
+from app.services.diretta_service import diretta_service
 from app.services.canonical_competition_service import (
     detect_canonical_competition,
     get_canonical_display_name,
@@ -781,6 +782,7 @@ class CatalogService:
                     italian_epg_service.get_matches(),
                     virgilio_service.get_matches(),
                     thesportsdb_service.fetch_browse_tv_matches(),
+                    diretta_service.get_events(),
                 ]
                 results = await asyncio.gather(*tasks, return_exceptions=True)
                 streamed_raw = results[0] if isinstance(results[0], list) else []
@@ -790,6 +792,7 @@ class CatalogService:
                 epg_raw = results[5] if isinstance(results[5], list) else []
                 virgilio_raw = results[6] if isinstance(results[6], list) else []
                 tsdb_tv_raw = results[7] if isinstance(results[7], list) else []
+                diretta_events = results[8] if isinstance(results[8], list) else []
 
                 streamed_matches = [m for m in streamed_raw if self.is_real_match(m)]
                 daddylive_matches = [m for m in daddylive_raw if self.is_real_match(m)]
@@ -827,9 +830,16 @@ class CatalogService:
                 # (Awards official 16:9 poster, competition name, and canonical teams)
                 thesportsdb_service.reconcile_matches(all_matches)
 
-                # 4b. LEVEL 2: Reconcile against official ESPN registry (names, exact UTC time, official catalog/genre)
-                if espn_events:
-                    espn_service.reconcile_matches(all_matches, espn_events, self._clean_tokens, self._get_teams_key)
+                # 4b. LEVEL 2: Downstream Validation (Diretta.it Primary, ESPN as Emergency Fallback)
+                diretta_matched = 0
+                if diretta_service.is_healthy:
+                    diretta_matched = diretta_service.reconcile_matches(all_matches)
+                else:
+                    logger.warning(
+                        "Diretta.it non raggiungibile o non operativo: scatta il fallback di emergenza su ESPN Scoreboard."
+                    )
+                    if espn_events:
+                        espn_service.reconcile_matches(all_matches, espn_events, self._clean_tokens, self._get_teams_key)
 
                 # 4c. Reconcile motorsport events against official Orange Cat Blacktop session registry
                 if ocb_sessions:
