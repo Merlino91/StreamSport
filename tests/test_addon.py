@@ -288,8 +288,8 @@ class StreamSportTestCase(unittest.TestCase):
         item1 = catalog_service.build_meta_item(m1, "Serie A")
         # Name should be competitors only, flag emojis next to teams preserved
         self.assertEqual(item1["name"], "🇮🇹 Inter vs 🇮🇹 Milan")
-        # Description: Status first, then competition without emoji, then competitors
-        self.assertTrue(item1["description"].startswith("🔴 LIVE ORA • Italy - Serie A • 🇮🇹 Inter vs 🇮🇹 Milan"))
+        # Description: Status first, then certified competition with trophy, then competitors
+        self.assertTrue(item1["description"].startswith("🔴 LIVE ORA • 🏆 Italy - Serie A • 🇮🇹 Inter vs 🇮🇹 Milan"))
         # Redundant date not in description
         self.assertNotIn("2026", item1["description"])
         # releaseInfo preserves formatted date
@@ -315,7 +315,7 @@ class StreamSportTestCase(unittest.TestCase):
         }
         item3 = catalog_service.build_meta_item(m3, "Champions League")
         self.assertEqual(item3["name"], "Arsenal vs Chelsea")
-        self.assertTrue(item3["description"].startswith("🏁 Conclusa • Replay e Sintesi • UEFA Champions League • Arsenal vs Chelsea"))
+        self.assertTrue(item3["description"].startswith("🏁 Conclusa • Replay e Sintesi • 🏆 UEFA Champions League • Arsenal vs Chelsea"))
 
     def test_espn_reconciliation(self):
         from app.services.espn_service import espn_service
@@ -575,11 +575,10 @@ class StreamSportTestCase(unittest.TestCase):
         # 1. Sport-specific dynamic live windows
         # Tennis: 300 minutes (5 hours)
         self.assertEqual(CatalogService.get_live_window_minutes({"category": "tennis", "title": "Sinner vs Alcaraz"}), 300)
-        # Football regular: 150 minutes
-        self.assertEqual(CatalogService.get_live_window_minutes({"category": "football", "title": "Inter vs Milan"}), 150)
-        # Football cup: 170 minutes
-        self.assertEqual(CatalogService.get_live_window_minutes({"category": "football", "title": "Real Madrid vs Man City (Champions League)"}), 170)
-        self.assertEqual(CatalogService.get_live_window_minutes({"category": "football", "title": "Juventus vs Lazio (Coppa Italia)"}), 170)
+        # Football: canonical 160 minutes
+        self.assertEqual(CatalogService.get_live_window_minutes({"category": "football", "title": "Inter vs Milan"}), 160)
+        self.assertEqual(CatalogService.get_live_window_minutes({"category": "football", "title": "Real Madrid vs Man City (Champions League)"}), 160)
+        self.assertEqual(CatalogService.get_live_window_minutes({"category": "football", "title": "Juventus vs Lazio (Coppa Italia)"}), 160)
         # Basket: 150 minutes
         self.assertEqual(CatalogService.get_live_window_minutes({"category": "basketball", "title": "Olimpia Milano vs Virtus Bologna"}), 150)
         # Motori GP: 160 minutes
@@ -594,8 +593,8 @@ class StreamSportTestCase(unittest.TestCase):
         self.assertEqual(CatalogService.get_live_window_minutes({"category": "hockey", "title": "New York Rangers vs Boston Bruins"}), 170)
         # UFC: 240 minutes
         self.assertEqual(CatalogService.get_live_window_minutes({"category": "fight", "title": "UFC 310: Jones vs Miocic"}), 240)
-        # Unrecognized / uncategorized fallback: exactly 240 minutes (4 hours)
-        self.assertEqual(CatalogService.get_live_window_minutes({"category": "unknown_sport_xyz", "title": "Team X vs Team Y"}), 240)
+        # Unrecognized / uncategorized fallback: exactly 180 minutes (3 hours max)
+        self.assertEqual(CatalogService.get_live_window_minutes({"category": "unknown_sport_xyz", "title": "Team X vs Team Y"}), 180)
 
         # 2. Concluded streams behavior when ENABLE_REPLAYS=False
         past_date_ms = (time.time() - (4 * 3600)) * 1000  # 4 hours ago

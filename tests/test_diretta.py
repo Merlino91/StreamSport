@@ -194,5 +194,63 @@ class TestCatalogServiceValidationFallback(unittest.TestCase):
         mock_espn.reconcile_matches.assert_called_once()
 
 
+class TestPostValidationDeduplication(unittest.TestCase):
+    def test_deduplicate_lafc_austin_fc_with_acronym_and_sources(self):
+        from app.services.catalog_service import catalog_service
+
+        match_streamed = {
+            "id": "streamed-101",
+            "title": "LAFC vs Austin FC",
+            "date": 1792031400000,
+            "category": "football",
+            "_silo": "football",
+            "competition": "Major League Soccer",
+            "canonical_competition": "usa.1",
+            "popular": True,
+            "poster": "https://images.thesportsdb.com/events/101.jpg",
+            "_tsdb_matched": True,
+            "sources": [{"id": "s1", "name": "Streamed HD", "url": "https://streamed.xyz/1"}],
+        }
+
+        match_daddylive = {
+            "id": "dlhd-202",
+            "title": "Los Angeles FC vs Austin FC",
+            "date": 1792031400000,
+            "category": "football",
+            "_silo": "football",
+            "competition": "Major League Soccer",
+            "canonical_competition": "usa.1",
+            "popular": False,
+            "poster": "https://images.thesportsdb.com/events/101.jpg",
+            "_diretta_matched": True,
+            "_diretta_tv_channels": ["Sky Sport Uno"],
+            "sources": [{"id": "s2", "name": "DaddyLive", "url": "https://daddylive.sx/2"}],
+        }
+
+        # 1. Direct duplicate detection test
+        is_dup = catalog_service.are_post_validation_duplicates(match_streamed, match_daddylive)
+        self.assertTrue(is_dup)
+
+        # 2. End-to-end deduplicate_post_validation
+        deduped = catalog_service.deduplicate_post_validation([match_streamed, match_daddylive])
+        self.assertEqual(len(deduped), 1)
+
+        merged = deduped[0]
+        # Streams combined from both sources without loss
+        self.assertEqual(len(merged["sources"]), 2)
+        urls = [s["url"] for s in merged["sources"]]
+        self.assertIn("https://streamed.xyz/1", urls)
+        self.assertIn("https://daddylive.sx/2", urls)
+
+        # Poster preserved
+        self.assertEqual(merged["poster"], "https://images.thesportsdb.com/events/101.jpg")
+
+        # 3. Test build_meta_item presentation: certified trophy badge, no TV channels in description
+        meta = catalog_service.build_meta_item(merged, "Americhe e Leghe Extra-UE")
+        self.assertIn("🏆 Major League Soccer", meta["description"])
+        self.assertNotIn("Sky Sport Uno", meta["description"])
+        self.assertIn("⭐ In Evidenza", meta["description"])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1,6 +1,7 @@
 import asyncio
 import datetime
 import html
+import json
 import logging
 import re
 import time
@@ -9,6 +10,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 import httpx
 
 from app.services.canonical_competition_service import detect_canonical_competition, get_canonical_display_name
+from app.services.tvvoo_service import tvvoo_service
 
 logger = logging.getLogger("streamsport.diretta")
 
@@ -39,6 +41,13 @@ class DirettaService:
 
     # Normalized aliases for common club names across Italian & international sources
     TEAM_ALIASES = {
+        r"\bla fc\b": "lafc",
+        r"\blos angeles fc\b": "lafc",
+        r"\bnew york city\b": "nycfc",
+        r"\bny city\b": "nycfc",
+        r"\bred bulls\b": "rbny",
+        r"\bred bull salzburg\b": "salzburg",
+        r"\brb leipzig\b": "leipzig",
         r"\binternazionale\b": "inter",
         r"\bparis saint germain\b": "psg",
         r"\bparis sg\b": "psg",
@@ -51,12 +60,23 @@ class DirettaService:
         r"\batletico madrid\b": "atletico",
         r"\bolympiakos\b": "olympiacos",
         r"\bsporting lisbona\b": "sporting",
+        r"\bsporting cp\b": "sporting",
         r"\bstella rossa\b": "red star",
+        r"\bwolverhampton\b": "wolves",
+        r"\btottenham\b": "spurs",
     }
 
     GENERIC_TERMS: Set[str] = {
         "fc", "ac", "cf", "sc", "as", "the", "club", "calcio", "basket", "u19", "u20", "u21", "u23", "vs", "at"
     }
+
+    CONTINENTAL_AREAS: Set[str] = {
+        "EUROPA", "MONDO", "ASIA", "SUD AMERICA", "NORD E CENTRO AMERICA", "AFRICA"
+    }
+
+    OTT_EXCLUDE: Tuple[str, ...] = (
+        "amazon prime video", "como tv", "now tv", "srf play", "discovery+"
+    )
 
     def __init__(self):
         self._cached_events: List[Dict[str, Any]] = []
@@ -88,8 +108,13 @@ class DirettaService:
 
             # League header block: starts with ZA (League name), ZY (Country name)
             if "ZA" in fields:
-                current_league = fields.get("ZA", "").strip()
+                raw_za = fields.get("ZA", "").strip()
                 current_country = fields.get("ZY", "").strip()
+                # Clean redundant country prefix (e.g. "ITALIA: Serie A" -> "Serie A")
+                if current_country and raw_za.upper().startswith(f"{current_country.upper()}:"):
+                    current_league = raw_za[len(current_country) + 1:].strip()
+                else:
+                    current_league = raw_za
                 continue
 
             # Match block: starts with AA (Match ID)
@@ -100,8 +125,26 @@ class DirettaService:
                 time_epoch = fields.get("AD")
                 date_ms = int(time_epoch) * 1000 if time_epoch and time_epoch.isdigit() else 0
 
+                # Extract official broadcast channels from AL field
+                tv_channels: List[str] = []
+                al_raw = fields.get("AL")
+                if al_raw:
+                    try:
+                        al_data = json.loads(al_raw)
+                        for tv in al_data.get("1", []):
+                            bn = tv.get("BN", "").strip()
+                            if bn:
+                                tv_channels.append(bn)
+                    except Exception:
+                        pass
+
                 if home and away:
-                    comp_name = f"{current_country}: {current_league}".strip(": ") if current_country else current_league
+                    # Clean continental vs national tournament name
+                    if current_country.upper() in self.CONTINENTAL_AREAS or not current_country:
+                        comp_name = current_league
+                    else:
+                        comp_name = f"{current_country}: {current_league}".strip(": ")
+
                     matches.append({
                         "id": f"diretta-{m_id}",
                         "_silo": silo_name,
@@ -113,6 +156,7 @@ class DirettaService:
                         "away": away.strip(),
                         "title": f"{home.strip()} vs {away.strip()}",
                         "date": date_ms,
+                        "tv_channels": tv_channels,
                     })
         return matches
 
@@ -277,8 +321,14 @@ class DirettaService:
                     m["date"] = best_cand["date"]
 
                 # Adopt official Italian competition if missing or generic
+                GENERIC_COMPETITIONS = {
+                    "", "other", "unknown", "altri sport", "live sports", "football", "soccer",
+                    "calcio", "basket", "tennis", "undefined",
+                    "americhe e leghe extra-ue", "altre leghe europee", "altri campionati europei",
+                    "calcio internazionale", "partite amichevoli", "campionati minori"
+                }
                 current_comp = (m.get("competition") or "").lower().strip()
-                if not current_comp or current_comp in ("other", "unknown", "altri sport", "live sports"):
+                if not current_comp or current_comp in GENERIC_COMPETITIONS:
                     m["competition"] = best_cand["competition"]
                     m["_competition"] = best_cand["competition"]
 
@@ -290,6 +340,24 @@ class DirettaService:
                     if canon:
                         m["canonical_competition"] = canon
                         m["_canonical_competition"] = canon
+
+                # Attach recognized TV channels & enrich with TvVoo streams
+                cand_tvs = best_cand.get("tv_channels", [])
+                if cand_tvs:
+                    m["_diretta_tv_channels"] = cand_tvs
+                    existing_urls = {
+                        s.get("url") for s in m.get("sources", [])
+                        if isinstance(s, dict) and s.get("url")
+                    }
+                    for ch in cand_tvs:
+                        if any(ott in ch.lower() for ott in self.OTT_EXCLUDE):
+                            continue
+                        tv_streams = tvvoo_service.get_channel_streams(channel_name=ch, country="Italy")
+                        if tv_streams:
+                            for st in tv_streams:
+                                if st.get("url") and st["url"] not in existing_urls:
+                                    existing_urls.add(st["url"])
+                                    m.setdefault("sources", []).append(st)
 
         if reconciled_count > 0:
             logger.info("Diretta.it Convalidatore: convalidati e normalizzati %d match con successo.", reconciled_count)

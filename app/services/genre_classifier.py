@@ -473,6 +473,8 @@ class GenreClassifier:
             or "euroleague" in title_lower
             or "wnba" in title_lower
             or "nbl" in title_lower
+            or any(t in title_lower for t in self.NBL_TEAMS)
+            or any(t in title_lower for t in self.LBA_BASKET_TEAMS)
         ) and not is_football_context:
             # A) WNBA & Basket Femminile
             is_wnba_title = bool(re.search(r"\b(wnba)\b", title_lower)) or any(t in title_lower for t in self.WNBA_TEAMS)
@@ -632,7 +634,8 @@ class GenreClassifier:
         # ------------------------------------------------------------------
         # 10. CALCIO (FOOTBALL / SOCCER)
         # ------------------------------------------------------------------
-        if cat in ("football", "soccer") or silo == "football" or "vs" in title_lower or any(k in title_lower for k in ("fc ", "cf ", "sc ", "ac ", "league", "copa", "cup")):
+        is_explicit_other_cat = bool(cat and cat not in ("", "other", "unknown", "altri sport", "live sports", "football", "soccer"))
+        if not is_explicit_other_cat and (cat in ("football", "soccer") or silo == "football" or "vs" in title_lower or any(k in title_lower for k in ("fc ", "cf ", "sc ", "ac ", "league", "copa", "cup"))):
             has_extra_eu_flag = any(flag in eval_text for flag in ("🇧🇷", "🇦🇷", "🇨🇴", "🇺🇾", "🇵🇾", "🇨🇱", "🇵🇪", "🇪🇨", "🇲🇽", "🇺🇸", "🇸🇦", "🇯🇵", "🇰🇷", "🇦🇺"))
             is_extra_eu = bool(self._EXTRA_EU_CONFED_REGEX.search(eval_text) or self._EXTRA_EU_LEAGUES_REGEX.search(eval_text) or has_extra_eu_flag)
             is_foreign = bool(self._FOREIGN_LEAGUE_REGEX.search(eval_text)) or is_extra_eu or "inter miami" in title_lower

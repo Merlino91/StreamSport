@@ -6,7 +6,7 @@ import re
 import time
 import unicodedata
 import urllib.parse
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from app.config import (
     CATALOG_ID,
@@ -256,10 +256,40 @@ class CatalogService:
                 m_str = months_it.get(dt.month, dt.strftime("%b").upper())
                 banner_time = f"{dt.strftime('%d')} {m_str} • {dt.strftime('%H:%M')}"
 
-        # Description structure: Status first -> Competition without emoji -> Competitors
+        # Extract certified competition name
+        GENERIC_GENRES = {
+            "", "other", "unknown", "altri sport", "live sports", "football", "soccer",
+            "calcio", "basket", "tennis", "undefined",
+            "americhe e leghe extra-ue", "altre leghe europee", "altri campionati europei",
+            "calcio internazionale", "partite amichevoli", "campionati minori"
+        }
+
+        comp_badge = ""
+        # 1. Canonical competition first (official display name)
+        canon = match.get("canonical_competition") or match.get("_canonical_competition")
+        if canon:
+            comp_display = get_canonical_display_name(canon)
+            if comp_display:
+                comp_badge = f"🏆 {comp_display}"
+
+        # 2. Specific competition from Diretta / TheSportsDB
+        if not comp_badge:
+            raw_comp = match.get("competition") or match.get("_competition") or comp_name or ""
+            c_clean = re.sub(r"[\U00010000-\U0010ffff]", "", raw_comp).strip(": -")
+            if c_clean and c_clean.lower() not in GENERIC_GENRES:
+                comp_badge = f"🏆 {c_clean}"
+
+        # 3. Fallback to genre only if no specific competition was identified
+        if not comp_badge:
+            if genre and genre.lower() not in ("altri sport", "other", "unknown", "live sports"):
+                comp_badge = genre
+            elif comp_name:
+                comp_badge = comp_name
+
+        # Description structure: Status first -> Certified Competition with trophy -> Competitors -> Popular
         desc_parts.append(status_text)
-        if comp_name:
-            desc_parts.append(comp_name)
+        if comp_badge:
+            desc_parts.append(comp_badge)
         if clean_title:
             desc_parts.append(clean_title)
 
@@ -654,6 +684,193 @@ class CatalogService:
 
         return all_merged
 
+    COMMON_TEAM_ACRONYMS: Dict[str, str] = {
+        "lafc": "los angeles fc",
+        "lag": "la galaxy",
+        "nycfc": "new york city fc",
+        "rbny": "new york red bulls",
+        "psg": "paris saint germain",
+        "man utd": "manchester united",
+        "mufc": "manchester united",
+        "man city": "manchester city",
+        "mcfc": "manchester city",
+        "wolves": "wolverhampton",
+        "spurs": "tottenham",
+        "inter": "internazionale",
+        "juve": "juventus",
+        "atleti": "atletico madrid",
+        "atletico": "atletico madrid",
+        "bvb": "borussia dortmund",
+        "dortmund": "borussia dortmund",
+        "bayern": "bayern monaco",
+        "barca": "barcelona",
+        "sporting": "sporting lisbona",
+    }
+
+    def _clean_tokens_expanded(self, text: str) -> Set[str]:
+        t = (text or "").lower()
+        t = unicodedata.normalize("NFKD", t).encode("ascii", "ignore").decode("utf-8")
+        t = re.sub(r"[\U0001F1E6-\U0001F1FF]{2}", "", t)
+        for acr, full in self.COMMON_TEAM_ACRONYMS.items():
+            t = re.sub(rf"\b{acr}\b", full, t)
+        words = set(re.sub(r"[^a-z0-9]+", " ", t).split())
+        stopwords = {"vs", "v", "fc", "ac", "cf", "sc", "as", "club", "u19", "u20", "u21", "u23", "at", "the", "calcio", "basket"}
+        return {w for w in words if w not in stopwords and len(w) > 1}
+
+    def are_post_validation_duplicates(self, m1: Dict[str, Any], m2: Dict[str, Any]) -> bool:
+        """
+        Determines whether two matches represent the exact same real-world sporting event
+        based on post-validation signals:
+        1. Identical TheSportsDB official 16:9 poster URL (within 90 min).
+        2. Identical normalized title (within 45 min).
+        3. Proximity (within 45 min) + same certified competition + team tokens overlap
+           with acronym resolution (e.g. LAFC vs Austin FC and Los Angeles FC vs Austin FC).
+        4. Shared linear TV channel on the same date.
+        """
+        d1 = m1.get("date") or 0
+        d2 = m2.get("date") or 0
+        if not d1 or not d2:
+            return False
+
+        time_diff = abs(d1 - d2)
+        if time_diff > 90 * 60 * 1000:
+            return False
+
+        # Signal 1: Identical official poster URL
+        p1 = str(m1.get("poster") or "")
+        p2 = str(m2.get("poster") or "")
+        if p1 and p2 and p1 == p2 and p1.startswith("http") and "nostream" not in p1 and "no_thumb" not in p1:
+            return True
+
+        # Signal 2: Identical normalized title
+        t1 = (m1.get("title") or "").strip().lower()
+        t2 = (m2.get("title") or "").strip().lower()
+        if t1 and t2 and t1 == t2 and time_diff <= 45 * 60 * 1000:
+            return True
+
+        # Signal 3: Time <= 45 min + team token overlap with acronym expansion
+        if time_diff <= 45 * 60 * 1000:
+            w1 = self._clean_tokens_expanded(m1.get("title", ""))
+            w2 = self._clean_tokens_expanded(m2.get("title", ""))
+            if w1 and w2:
+                common = w1 & w2
+                if len(common) >= 2:
+                    return True
+
+                # Check if 1 token matches and they share the same certified competition
+                c1 = (m1.get("canonical_competition") or m1.get("competition") or "").lower().strip()
+                c2 = (m2.get("canonical_competition") or m2.get("competition") or "").lower().strip()
+                generic = {"", "other", "unknown", "altri sport", "live sports", "football", "soccer", "americhe e leghe extra-ue", "altre leghe europee"}
+                if c1 and c2 and c1 not in generic and c2 not in generic and (c1 == c2 or c1 in c2 or c2 in c1):
+                    if len(common) >= 1:
+                        raw_t1 = (m1.get("title") or "").lower()
+                        raw_t2 = (m2.get("title") or "").lower()
+                        for acr, full in self.COMMON_TEAM_ACRONYMS.items():
+                            if (acr in raw_t1 and full in raw_t2) or (acr in raw_t2 and full in raw_t1):
+                                return True
+
+        # Signal 4: Shared linear TV channel on exact match date
+        tvs1 = set(m1.get("_diretta_tv_channels") or [])
+        tvs2 = set(m2.get("_diretta_tv_channels") or [])
+        if tvs1 and tvs2 and (tvs1 & tvs2) and time_diff <= 30 * 60 * 1000:
+            return True
+
+        return False
+
+    def deduplicate_post_validation(self, matches: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Level 2e Post-Validation Multi-Signal Deduplicator:
+        Scans all validated matches within their respective sport silos and merges duplicates
+        that slipped past upstream deduplication but were certified downstream.
+        Combines stream sources so all provider links are united under a single clean card.
+        """
+        from collections import defaultdict
+        by_silo = defaultdict(list)
+        for m in matches:
+            silo = self.get_canonical_silo(m)
+            by_silo[silo].append(m)
+
+        all_deduped: List[Dict[str, Any]] = []
+        total_merged = 0
+
+        generic_comp = {"", "other", "unknown", "altri sport", "live sports", "football", "soccer", "americhe e leghe extra-ue", "altre leghe europee"}
+
+        for silo, silo_matches in by_silo.items():
+            deduped_silo: List[Dict[str, Any]] = []
+            for m in silo_matches:
+                matched_target = None
+                for target in deduped_silo:
+                    if self.are_post_validation_duplicates(m, target):
+                        matched_target = target
+                        break
+
+                if matched_target:
+                    total_merged += 1
+                    # Merge m into matched_target
+                    # 1. Prefer normalized or longer title
+                    t_new = m.get("title") or ""
+                    t_cur = matched_target.get("title") or ""
+                    if m.get("_diretta_matched") and not matched_target.get("_diretta_matched"):
+                        matched_target["title"] = t_new
+                    elif len(t_new) > len(t_cur) and not matched_target.get("_diretta_matched"):
+                        matched_target["title"] = t_new
+
+                    # 2. Date: prefer Diretta or TSDB verified date
+                    if m.get("_diretta_matched") and m.get("date"):
+                        matched_target["date"] = m["date"]
+
+                    # 3. Poster: prefer official 16:9 poster
+                    p_new = str(m.get("poster") or "")
+                    p_cur = str(matched_target.get("poster") or "")
+                    if (not p_cur or "nostream" in p_cur) and (p_new and "nostream" not in p_new):
+                        matched_target["poster"] = m["poster"]
+                    elif p_new.startswith("http") and not p_cur.startswith("http"):
+                        matched_target["poster"] = m["poster"]
+
+                    # 4. Competition: prefer non-generic
+                    c_new = (m.get("competition") or "").strip()
+                    c_cur = (matched_target.get("competition") or "").strip()
+                    if (not c_cur or c_cur.lower() in generic_comp) and (c_new and c_new.lower() not in generic_comp):
+                        matched_target["competition"] = c_new
+                        matched_target["_competition"] = c_new
+                    if m.get("canonical_competition") and not matched_target.get("canonical_competition"):
+                        matched_target["canonical_competition"] = m["canonical_competition"]
+                        matched_target["_canonical_competition"] = m["canonical_competition"]
+
+                    # 5. Metadata flags
+                    if m.get("popular"):
+                        matched_target["popular"] = True
+                    if m.get("_diretta_matched"):
+                        matched_target["_diretta_matched"] = True
+                    if m.get("_tsdb_matched"):
+                        matched_target["_tsdb_matched"] = True
+
+                    # 6. Combine stream sources without duplicate URLs
+                    existing_urls = {
+                        s.get("url") for s in matched_target.get("sources", [])
+                        if isinstance(s, dict) and s.get("url")
+                    }
+                    merged_sources = list(matched_target.get("sources", []))
+                    for s in m.get("sources", []):
+                        if not isinstance(s, dict):
+                            continue
+                        u = s.get("url")
+                        if u and u not in existing_urls:
+                            existing_urls.add(u)
+                            merged_sources.append(s)
+                        elif not u:
+                            merged_sources.append(s)
+                    matched_target["sources"] = merged_sources
+                else:
+                    deduped_silo.append(m)
+
+            all_deduped.extend(deduped_silo)
+
+        if total_merged > 0:
+            logger.info("Deduplicatore Post-Convalida: fusi con successo %d eventi duplicati a valle.", total_merged)
+
+        return all_deduped
+
     @staticmethod
     def is_real_match(m: Dict[str, Any]) -> bool:
         date_ms = m.get("date") or 0
@@ -847,6 +1064,11 @@ class CatalogService:
 
                 # 4d. Reconcile motorsport events against TheSportsDB in-RAM calendar (with canonized OCB session data)
                 thesportsdb_service.reconcile_motorsport_matches(all_matches)
+
+                # 4e. LEVEL 2e: Post-Validation Multi-Signal Deduplication
+                # Fuses matches that received the same real poster, same normalized title,
+                # or same certified competition + time + team acronym (e.g. LAFC vs Austin FC / Los Angeles FC vs Austin FC).
+                all_matches = self.deduplicate_post_validation(all_matches)
 
                 # 5. LEVEL 3: Pre-classify every match into catalog and genre
                 # Matches with _tsdb_matched have competition set, enabling exact genre matching;
