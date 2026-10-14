@@ -19,6 +19,7 @@ from app.services.db_service import db_service
 from app.services.canonical_competition_service import (
     detect_canonical_competition,
     is_competition_conflict,
+    is_simulcast_event,
 )
 
 logger = logging.getLogger("streamsport.thesportsdb")
@@ -417,9 +418,11 @@ class TheSportsDBService:
     }
 
     def _extract_teams(self, match: Dict[str, Any]) -> Tuple[str, str]:
-        # Motorsports do not have team-vs-team matches; never extract fake home/away
+        # Motorsports and simulcast shows do not have team-vs-team matches; never extract fake home/away
         m_silo = self.get_match_tsdb_silo(match)
         if any(k in m_silo for k in ("motor", "racing", "motori")):
+            return "", ""
+        if is_simulcast_event(match.get("title", "")) or is_simulcast_event(str(match.get("id", ""))):
             return "", ""
 
         teams = match.get("teams")

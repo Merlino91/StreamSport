@@ -6,6 +6,8 @@ from app.services.canonical_competition_service import (
     get_canonical_display_name,
     is_competition_conflict,
     is_redzone_event,
+    is_simulcast_event,
+    get_simulcast_info,
 )
 from app.services.catalog_service import CatalogService
 from app.services.genre_classifier import genre_classifier
@@ -46,10 +48,77 @@ class TestCanonicalDeduplication(unittest.TestCase):
         self.assertEqual(clean_title, "NFL RedZone")
         self.assertEqual(comp, "NFL")
 
-        # Genre classification
         cat, genre = genre_classifier.classify({"title": "NFL RedZone", "_silo": "american-football"})
         self.assertEqual(cat, "football_americano")
         self.assertEqual(genre, "NFL")
+
+    def test_simulcast_handling(self):
+        # 1. Detection
+        self.assertTrue(is_simulcast_event("The Golazo Show"))
+        self.assertTrue(is_simulcast_event("Simulcast (UEFA Champions League)"))
+        self.assertTrue(is_simulcast_event("Diretta Gol Serie A"))
+        self.assertTrue(is_simulcast_event("Zona Serie A"))
+        self.assertTrue(is_simulcast_event("Bundesliga Konferenz"))
+        self.assertTrue(is_simulcast_event("Diretta Basket"))
+        self.assertFalse(is_simulcast_event("Inter vs Milan"))
+        self.assertFalse(is_simulcast_event("Real Madrid vs Chelsea"))
+
+        # 2. Split title & competition (no fake 'vs' teams)
+        t1, c1 = self.cs.split_title_and_competition("The Golazo Show")
+        self.assertEqual(t1, "The Golazo Show")
+        self.assertEqual(c1, "UEFA Champions League")
+
+        t2, c2 = self.cs.split_title_and_competition("Diretta Gol Serie A")
+        self.assertEqual(t2, "Diretta Gol Serie A")
+        self.assertEqual(c2, "Serie A")
+
+        t3, c3 = self.cs.split_title_and_competition("Bundesliga Konferenz")
+        self.assertEqual(t3, "Bundesliga Konferenz")
+        self.assertEqual(c3, "Bundesliga")
+
+        # 3. Genre classification
+        cat_g, genre_g = genre_classifier.classify({"title": "The Golazo Show", "_silo": "football"})
+        self.assertEqual(cat_g, "calcio_estero")
+        self.assertEqual(genre_g, "Champions League")
+
+        cat_d, genre_d = genre_classifier.classify({"title": "Diretta Gol Serie A", "_silo": "football"})
+        self.assertEqual(cat_d, "calcio_italiano")
+        self.assertEqual(genre_d, "Serie A")
+
+        cat_b, genre_b = genre_classifier.classify({"title": "Bundesliga Konferenz", "_silo": "football"})
+        self.assertEqual(cat_b, "calcio_estero")
+        self.assertEqual(genre_b, "Bundesliga e Ligue 1")
+
+        # 4. Deduplication: A simulcast show and a 1v1 match MUST NEVER merge
+        now_ms = 1792000000000
+        sim_match = {
+            "id": "dlhd-the-golazo-show-179200",
+            "title": "The Golazo Show",
+            "date": now_ms,
+            "_silo": "football",
+            "sources": [{"id": "s1", "name": "Paramount+"}]
+        }
+        single_match = {
+            "id": "dlhd-inter-vs-barcelona-179200",
+            "title": "Inter vs Barcelona",
+            "date": now_ms,
+            "_silo": "football",
+            "sources": [{"id": "s2", "name": "Sky Sport Uno"}]
+        }
+        merged = self.cs.merge_and_deduplicate([single_match], [sim_match])
+        self.assertEqual(len(merged), 2, "Simulcast show must NEVER merge with a 1v1 match!")
+
+        # 5. Deduplication: Two identical simulcast shows within the window DO merge
+        sim_match_2 = {
+            "id": "streamed-golazo-show-179200",
+            "title": "The Golazo Show",
+            "date": now_ms + 600000,
+            "_silo": "football",
+            "sources": [{"id": "s3", "name": "CBS Sports"}]
+        }
+        merged_sims = self.cs.merge_and_deduplicate([sim_match], [sim_match_2])
+        self.assertEqual(len(merged_sims), 1, "Two identical simulcast shows must merge into one card!")
+        self.assertEqual(len(merged_sims[0]["sources"]), 2)
 
     def test_competition_conflict(self):
         # Direct conflicts in same silo

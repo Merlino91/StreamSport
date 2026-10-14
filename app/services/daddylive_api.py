@@ -15,6 +15,8 @@ from app.services.canonical_competition_service import (
     get_canonical_display_name,
     get_canonical_silo,
     is_redzone_event,
+    is_simulcast_event,
+    get_simulcast_info,
 )
 
 logger = logging.getLogger("streamsport.daddylive")
@@ -168,8 +170,10 @@ class DaddyLiveAPI:
         # Unescape HTML entities (&amp; -> &)
         t = html.unescape(raw_title or "")
 
-        if is_redzone_event(t):
-            return "NFL RedZone"
+        if is_simulcast_event(t):
+            info = get_simulcast_info(t)
+            if info:
+                return info["title"]
 
         # 1. Strip time and live markers
         t = re.sub(r"^\s*🔴\s*Inizio\s*:\s*\d{1,2}:\d{2}\s*[-:]?\s*", "", t, flags=re.IGNORECASE)
@@ -399,15 +403,15 @@ class DaddyLiveAPI:
                     if date_ms and date_ms > (now_ms + 3 * 24 * 3600 * 1000):
                         continue
 
-                    # Extract teams if 'vs' in title (never for RedZone)
-                    is_rz = is_redzone_event(raw_title) or is_redzone_event(clean_title)
+                    # Check if simulcast / whip-around show (never extract fake teams)
+                    sim_info = get_simulcast_info(raw_title, cat_raw) or get_simulcast_info(clean_title, cat_raw)
                     teams = None
-                    if is_rz:
-                        clean_title = "NFL RedZone"
-                        silo_id = "american-football"
-                        category = "american-football"
-                        canon = "am_football_nfl"
-                        comp_disp = "NFL"
+                    if sim_info:
+                        clean_title = sim_info["title"]
+                        silo_id = sim_info["silo"]
+                        category = sim_info["silo"]
+                        canon = sim_info["canonical"]
+                        comp_disp = sim_info["competition"]
                     else:
                         if " vs " in clean_title:
                             title_for_teams = re.sub(r"\s*\([^)]*\)$", "", clean_title)

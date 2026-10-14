@@ -1,5 +1,5 @@
 import re
-from typing import Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 # ==============================================================================
 # CANONICAL COMPETITION TAXONOMY
@@ -664,10 +664,189 @@ for _slug, _data in CANONICAL_LEAGUES.items():
     _COMPILED_PATTERNS.append((_slug, _data["silo"], _data["display"], _regexes))
 
 
+SIMULCAST_PATTERN = re.compile(
+    r"\b(red\s*zone|redzone|golazo(?:\s*show)?|simulcast|diretta\s*gol|direttagol|zona\s*gol|"
+    r"zona\s*serie\s*[ab]|zona\s*dazn|zona\s*europa|konferenz|multifoot|multiplex|"
+    r"multiliga|multichampions|multipremier|multigoal|goal\s*rush|diretta\s*basket|"
+    r"diretta\s*eurolega|whip\s*around)\b",
+    re.I,
+)
+
+
+def is_simulcast_event(text: str) -> bool:
+    """
+    Detects if an event is a multi-match / whip-around broadcast show
+    (e.g. NFL RedZone, The Golazo Show, UEFA Simulcast, Diretta Gol, Zona Serie A, Bundesliga Konferenz).
+    """
+    if not text:
+        return False
+    return bool(SIMULCAST_PATTERN.search(str(text)))
+
+
 def is_redzone_event(title: str) -> bool:
     """Detects if an event is NFL RedZone."""
     t = (title or "").lower()
     return bool(re.search(r"\bred\s*zone\b", t)) or "redzone" in t
+
+
+def get_simulcast_info(text: str, hint: Optional[str] = None) -> Optional[Dict[str, str]]:
+    """
+    Returns normalized metadata for a simulcast show:
+    {
+        'title': display_title,
+        'competition': comp_name,
+        'silo': sport_silo,
+        'canonical': canonical_slug,
+        'genre': genre_name,
+        'catalog': catalog_id
+    }
+    """
+    if not is_simulcast_event(text):
+        return None
+
+    raw_combined = f"{hint or ''} {text}".lower()
+    t = raw_combined.replace("-", " ").replace("_", " ")
+
+    # 1. NFL RedZone
+    if is_redzone_event(text):
+        return {
+            "title": "NFL RedZone",
+            "competition": "NFL",
+            "silo": "american-football",
+            "canonical": "am_football_nfl",
+            "genre": "NFL",
+            "catalog": "football_americano",
+        }
+
+    # 2. Golazo Show
+    if "golazo" in t:
+        is_uel = any(k in t for k in ("europa", "conference", "uel", "uecl"))
+        return {
+            "title": "The Golazo Show",
+            "competition": "UEFA Europa League" if is_uel else "UEFA Champions League",
+            "silo": "football",
+            "canonical": "football_uefa_el" if is_uel else "football_uefa_cl",
+            "genre": "Europa e Conference League" if is_uel else "Champions League",
+            "catalog": "calcio_estero",
+        }
+
+    # 3. Diretta Gol / Simulcast Serie A & Zona Serie A
+    if re.search(r"\b(serie\s*a|zona\s*serie\s*a)\b", t):
+        is_zona = "zona" in t
+        return {
+            "title": "Zona Serie A" if is_zona else "Diretta Gol Serie A",
+            "competition": "Serie A",
+            "silo": "football",
+            "canonical": "football_serie_a",
+            "genre": "Serie A",
+            "catalog": "calcio_italiano",
+        }
+
+    # 4. Diretta Gol / Simulcast Serie B & Zona Serie B
+    if re.search(r"\b(serie\s*b|zona\s*serie\s*b)\b", t):
+        is_zona = "zona" in t
+        return {
+            "title": "Zona Serie B" if is_zona else "Diretta Gol Serie B",
+            "competition": "Serie B",
+            "silo": "football",
+            "canonical": "football_serie_b",
+            "genre": "Serie B",
+            "catalog": "calcio_italiano",
+        }
+
+    # 5. Champions League Simulcast / Diretta Gol / MultiChampions
+    if re.search(r"\b(champions|ucl|multichampions)\b", t):
+        title = "Diretta Gol Champions League" if "diretta" in t else ("MultiChampions" if "multichampions" in t else "Simulcast (UEFA Champions League)")
+        return {
+            "title": title,
+            "competition": "UEFA Champions League",
+            "silo": "football",
+            "canonical": "football_uefa_cl",
+            "genre": "Champions League",
+            "catalog": "calcio_estero",
+        }
+
+    # 6. Europa / Conference League Simulcast / Diretta Gol
+    if re.search(r"\b(europa|conference|uel|uecl)\b", t):
+        title = "Diretta Gol Europa League" if "diretta" in t else "Simulcast (UEFA Europa League)"
+        return {
+            "title": title,
+            "competition": "UEFA Europa League",
+            "silo": "football",
+            "canonical": "football_uefa_el",
+            "genre": "Europa e Conference League",
+            "catalog": "calcio_estero",
+        }
+
+    # 7. Premier League Multi / Goal Rush
+    if re.search(r"\b(premier|multipremier|goal\s*rush)\b", t):
+        title = "Goal Rush (Premier League)" if "goal" in t else ("MultiPremier" if "multipremier" in t else "Diretta Gol Premier League")
+        return {
+            "title": title,
+            "competition": "Premier League",
+            "silo": "football",
+            "canonical": "football_premier_league",
+            "genre": "Premier League",
+            "catalog": "calcio_estero",
+        }
+
+    # 8. Bundesliga Konferenz
+    if re.search(r"\b(bundesliga|konferenz)\b", t):
+        return {
+            "title": "Bundesliga Konferenz",
+            "competition": "Bundesliga",
+            "silo": "football",
+            "canonical": "football_bundesliga",
+            "genre": "Bundesliga e Ligue 1",
+            "catalog": "calcio_estero",
+        }
+
+    # 9. LaLiga MultiLiga
+    if re.search(r"\b(laliga|la\s*liga|multiliga)\b", t):
+        return {
+            "title": "MultiLiga (LaLiga)",
+            "competition": "La Liga",
+            "silo": "football",
+            "canonical": "football_la_liga",
+            "genre": "La Liga",
+            "catalog": "calcio_estero",
+        }
+
+    # 10. Ligue 1 Multifoot
+    if re.search(r"\b(ligue\s*1|multifoot|multiplex)\b", t):
+        return {
+            "title": "Multifoot Ligue 1",
+            "competition": "Ligue 1",
+            "silo": "football",
+            "canonical": "football_ligue_1",
+            "genre": "Bundesliga e Ligue 1",
+            "catalog": "calcio_estero",
+        }
+
+    # 11. Diretta Basket / Eurolega
+    if re.search(r"\b(basket|eurolega|euroleague)\b", t):
+        is_el = "euro" in t
+        return {
+            "title": "Diretta Eurolega" if is_el else "Diretta Basket",
+            "competition": "EuroLeague" if is_el else "LBA Serie A",
+            "silo": "basketball",
+            "canonical": "basketball_euroleague" if is_el else "basketball_lba_serie_a",
+            "genre": "Eurolega ed Eurocup" if is_el else "LBA Serie A",
+            "catalog": "basket",
+        }
+
+    # 12. Generic Diretta Gol / Zona Gol / Zona DAZN
+    is_dazn = "dazn" in t
+    title = "Zona DAZN" if is_dazn else ("Zona Gol" if "zona" in t else "Diretta Gol")
+    is_italian = any(k in t for k in ("italia", "serie", "dazn", "sky"))
+    return {
+        "title": title,
+        "competition": "Diretta Gol",
+        "silo": "football",
+        "canonical": "football_serie_a" if is_italian else "football_uefa_cl",
+        "genre": "Serie A" if is_italian else "Champions League",
+        "catalog": "calcio_italiano" if is_italian else "calcio_estero",
+    }
 
 
 def detect_canonical_competition(text: str, silo_hint: Optional[str] = None) -> Optional[str]:

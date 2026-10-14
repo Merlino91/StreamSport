@@ -1,6 +1,10 @@
 import re
 from typing import Any, Dict, Optional, Tuple
-from app.services.canonical_competition_service import is_redzone_event
+from app.services.canonical_competition_service import (
+    is_redzone_event,
+    is_simulcast_event,
+    get_simulcast_info,
+)
 
 class GenreClassifier:
     """
@@ -288,9 +292,10 @@ class GenreClassifier:
         title = (match.get("title") or "").strip()
         title_lower = title.lower()
 
-        # 0. Early NFL RedZone check
-        if is_redzone_event(title_lower) or is_redzone_event(str(match.get("id", ""))):
-            return "football_americano", "NFL"
+        # 0. Early Simulcast & Multi-match show routing (NFL RedZone, Golazo, Diretta Gol, etc.)
+        sim_info = get_simulcast_info(title_lower, match.get("category") or match.get("_silo")) or get_simulcast_info(str(match.get("id", "")))
+        if sim_info:
+            return sim_info["catalog"], sim_info["genre"]
 
         # 1. Early Canonical Competition routing
         canon = match.get("canonical_competition")

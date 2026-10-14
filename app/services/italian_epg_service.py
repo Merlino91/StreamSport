@@ -12,6 +12,10 @@ from app.config import (
     ITALIAN_EPG_CACHE_INTERVAL,
 )
 from app.services.tvvoo_service import tvvoo_service
+from app.services.canonical_competition_service import (
+    is_simulcast_event,
+    get_simulcast_info,
+)
 
 logger = logging.getLogger("streamsport.italian_epg_service")
 
@@ -202,6 +206,8 @@ class ItalianEPGService:
         Validates that an event is a genuine sporting match, race, tournament, or session,
         filtering out single-word monografie (e.g. 'Vialli', 'Cressoni'), talk shows, and magazines.
         """
+        if is_simulcast_event(title):
+            return True
         if teams_dict:
             return True
         if cls.MAGAZINE_NOISE.search(title):
@@ -289,6 +295,11 @@ class ItalianEPGService:
         """
         d = details.strip()
         teams_dict: Optional[Dict[str, Any]] = None
+
+        if is_simulcast_event(d) or is_simulcast_event(comp):
+            sim_info = get_simulcast_info(d, comp) or get_simulcast_info(comp, d)
+            if sim_info:
+                return sim_info["title"], None
 
         # Check if details has a trailing match pairing e.g. '2a giornata: Conegliano - Busto Arsizio'
         if ":" in d:
@@ -452,7 +463,11 @@ class ItalianEPGService:
 
                 # Category & Silo
                 synopsis = ev.get("eventSynopsis") or ""
-                cat, silo = self._resolve_category_and_silo(meta, title, synopsis, genre_name, subgenre_name)
+                sim_info = get_simulcast_info(title, raw_title)
+                if sim_info:
+                    cat, silo = sim_info["silo"], sim_info["silo"]
+                else:
+                    cat, silo = self._resolve_category_and_silo(meta, title, synopsis, genre_name, subgenre_name)
 
                 # TvVoo Stream Target Resolution
                 tvvoo_streams = tvvoo_service.get_channel_streams(sky_id=ch_id, country="Italy")
@@ -566,11 +581,15 @@ class ItalianEPGService:
 
                 # Category & Silo
                 synopsis = prog.get("description") or ""
-                cat, silo = self._resolve_category_and_silo(
-                    meta, title, synopsis,
-                    genre_name=" ".join(genre_names),
-                    subgenre_name=" ".join(cat_names),
-                )
+                sim_info = get_simulcast_info(title, raw_title)
+                if sim_info:
+                    cat, silo = sim_info["silo"], sim_info["silo"]
+                else:
+                    cat, silo = self._resolve_category_and_silo(
+                        meta, title, synopsis,
+                        genre_name=" ".join(genre_names),
+                        subgenre_name=" ".join(cat_names),
+                    )
 
                 # TvVoo Stream Target Resolution
                 tvvoo_streams = tvvoo_service.get_channel_streams(tivusat_id=ch_id, country="Italy")
@@ -790,9 +809,17 @@ class ItalianEPGService:
             m_teams = m.get("teams")
             m_title = m.get("title", "")
             m_tokens = self._clean_tokens(m_title)
+            m_is_sim = is_simulcast_event(m_title) or is_simulcast_event(str(m.get("id", "")))
 
             matched_epg = None
             for ep in epg_events:
+                ep_title = ep.get("title", "")
+                ep_is_sim = is_simulcast_event(ep_title) or is_simulcast_event(str(ep.get("id", "")))
+
+                # CRITICAL: A simulcast show and a regular 1v1 match MUST NEVER match!
+                if m_is_sim != ep_is_sim:
+                    continue
+
                 ep_silo = (ep.get("_silo") or ep.get("category") or "").lower()
                 # Silo compatibility
                 if m_silo and ep_silo and m_silo != ep_silo:
@@ -801,9 +828,17 @@ class ItalianEPGService:
                         continue
 
                 ep_date = ep.get("date", 0)
-                # Time window: +-45m (or +-60m for motorsports)
-                max_offset = (60 * 60 * 1000) if m_silo == "motor-sports" else (45 * 60 * 1000)
+                # Time window: +-45m (or +-60m for motorsports, +-240m for simulcast shows)
+                max_offset = (240 * 60 * 1000) if m_is_sim else ((60 * 60 * 1000) if m_silo == "motor-sports" else (45 * 60 * 1000))
                 if m_date and ep_date and abs(m_date - ep_date) > max_offset:
+                    continue
+
+                if m_is_sim and ep_is_sim:
+                    m_info = get_simulcast_info(m_title)
+                    ep_info = get_simulcast_info(ep_title)
+                    if m_info and ep_info and m_info["title"] == ep_info["title"]:
+                        matched_epg = ep
+                        break
                     continue
 
                 ep_teams = ep.get("teams")

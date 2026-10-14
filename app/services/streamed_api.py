@@ -7,6 +7,8 @@ from app.services.canonical_competition_service import (
     detect_canonical_competition,
     get_canonical_display_name,
     is_redzone_event,
+    is_simulcast_event,
+    get_simulcast_info,
 )
 
 logger = logging.getLogger("easysports.streamed")
@@ -101,12 +103,15 @@ class StreamedAPI:
                                 # Standardize RedZone & detect canonical competition
                                 title = m.get("title") or ""
                                 mid_str = str(mid or "")
-                                if is_redzone_event(title) or is_redzone_event(mid_str):
-                                    m["title"] = "NFL RedZone"
+                                sim_info = get_simulcast_info(title, m.get("category")) or get_simulcast_info(mid_str, m.get("category"))
+                                if sim_info:
+                                    m["title"] = sim_info["title"]
                                     m["teams"] = None
-                                    m["canonical_competition"] = "am_football_nfl"
-                                    m["competition"] = "NFL"
-                                    m["_competition"] = "NFL"
+                                    m["canonical_competition"] = sim_info["canonical"]
+                                    m["competition"] = sim_info["competition"]
+                                    m["_competition"] = sim_info["competition"]
+                                    m["_silo"] = sim_info["silo"]
+                                    m["category"] = sim_info["silo"]
                                 else:
                                     sources_text = " ".join(str(s.get("id", "")) for s in m.get("sources", []) if isinstance(s, dict))
                                     full_text = f"{m.get('category', '')} {mid_str} {title} {sources_text}"
@@ -138,12 +143,15 @@ class StreamedAPI:
                         m["_silo"] = silo
                         title = m.get("title") or ""
                         mid_str = str(m.get("id") or "")
-                        if is_redzone_event(title) or is_redzone_event(mid_str):
-                            m["title"] = "NFL RedZone"
+                        sim_info = get_simulcast_info(title, cat) or get_simulcast_info(mid_str, cat)
+                        if sim_info:
+                            m["title"] = sim_info["title"]
                             m["teams"] = None
-                            m["canonical_competition"] = "am_football_nfl"
-                            m["competition"] = "NFL"
-                            m["_competition"] = "NFL"
+                            m["canonical_competition"] = sim_info["canonical"]
+                            m["competition"] = sim_info["competition"]
+                            m["_competition"] = sim_info["competition"]
+                            m["_silo"] = sim_info["silo"]
+                            m["category"] = sim_info["silo"]
                         else:
                             sources_text = " ".join(str(s.get("id", "")) for s in m.get("sources", []) if isinstance(s, dict))
                             full_text = f"{cat} {mid_str} {title} {sources_text}"

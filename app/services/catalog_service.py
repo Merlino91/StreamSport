@@ -35,6 +35,8 @@ from app.services.canonical_competition_service import (
     get_canonical_display_name,
     is_competition_conflict,
     is_redzone_event,
+    is_simulcast_event,
+    get_simulcast_info,
 )
 
 
@@ -94,8 +96,9 @@ class CatalogService:
         while removing decorative emojis.
         competition_name is stripped of all emojis and prefixes.
         """
-        if is_redzone_event(raw_title):
-            return "NFL RedZone", "NFL"
+        sim_info = get_simulcast_info(raw_title, genre)
+        if sim_info:
+            return sim_info["title"], sim_info["competition"]
 
         title = (raw_title or "").strip()
         comp = ""
@@ -352,6 +355,8 @@ class CatalogService:
         return " ".join(words)
 
     def _get_teams_key(self, match: Dict[str, Any]) -> Optional[Any]:
+        if is_simulcast_event(match.get("title", "")) or is_simulcast_event(str(match.get("id", ""))):
+            return None
         teams = match.get("teams")
         if isinstance(teams, dict) and teams.get("home") and teams.get("away"):
             h = re.sub(r"[^a-z0-9]+", " ", (teams.get("home", {}).get("name") or "").lower()).strip()
@@ -549,7 +554,7 @@ class CatalogService:
             m2_teams = self._get_teams_key(m2)
             m2_date = m2.get("date") or 0
             m2_silo = self.get_canonical_silo(m2)
-            is_m2_redzone = is_redzone_event(m2.get("title", "")) or is_redzone_event(str(m2_id or ""))
+            is_m2_simulcast = is_simulcast_event(m2.get("title", "")) or is_simulcast_event(str(m2_id or ""))
 
             matched_idx = -1
 
@@ -567,17 +572,30 @@ class CatalogService:
                     if ex_silo != m2_silo:
                         continue
 
+                    is_ex_simulcast = is_simulcast_event(existing.get("title", "")) or is_simulcast_event(str(existing.get("id", "")))
+
+                    # RULE: A simulcast show and a regular 1v1 match MUST NEVER merge!
+                    if is_m2_simulcast != is_ex_simulcast:
+                        continue
+
                     ex_date = existing.get("date") or 0
                     time_diff_ms = abs(ex_date - m2_date) if ex_date and m2_date else 0
                     time_diff_min = time_diff_ms / 60000.0
 
-                    # 1a. Special NFL RedZone matching (coincides within 4h window on same Sunday)
-                    if is_m2_redzone and (is_redzone_event(existing.get("title", "")) or is_redzone_event(str(existing.get("id", "")))):
-                        if ex_silo == "american-football" and time_diff_min <= 240:
-                            matched_idx = idx
-                            break
+                    # 1a. Special Simulcast & Multi-match show matching (coincides within 4h window)
+                    if is_m2_simulcast and is_ex_simulcast:
+                        if time_diff_min <= 240:
+                            m2_info = get_simulcast_info(m2.get("title", "")) or get_simulcast_info(str(m2_id or ""))
+                            ex_info = get_simulcast_info(existing.get("title", "")) or get_simulcast_info(str(existing.get("id", "")))
+                            if m2_info and ex_info and m2_info["title"] == ex_info["title"]:
+                                matched_idx = idx
+                                break
+                            if self.calc_similarity(m2_tokens, self._clean_tokens(existing.get("title", ""))) >= 0.70:
+                                matched_idx = idx
+                                break
+                        continue
 
-                    # 1b. Date Compatibility: hard cutoff at 45m
+                    # 1b. Date Compatibility: hard cutoff at 45m for regular matches
                     if ex_date and m2_date:
                         if time_diff_min > 45:
                             continue
