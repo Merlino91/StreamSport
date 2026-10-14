@@ -510,7 +510,15 @@ CANONICAL_LEAGUES = {
     "am_football_ncaa": {
         "display": "NCAA College Football",
         "silo": "american-football",
-        "patterns": [r"college\s*football", r"\bcfb\b", r"ncaa\s*football"],
+        "patterns": [
+            r"college\s*football",
+            r"\bcfb\b",
+            r"ncaa\s*football",
+            r"\bncaa\s*fbs\b",
+            r"\bncaaf\b",
+            r"\bncaa\b",
+            r"\bfbs\b",
+        ],
     },
     "am_football_cfl": {
         "display": "CFL",

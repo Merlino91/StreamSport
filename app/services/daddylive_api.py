@@ -200,7 +200,6 @@ class DaddyLiveAPI:
 
     DADDYLIVE_EXCLUDED_CATEGORIES = (
         "big brother", "tv show", "reality", "movies", "horse racing", "upcoming events",
-        "college football", "ncaaf",
         "college soccer", "men's college soccer", "women's college soccer",
         "college volleyball", "women's college volleyball",
         "college ice hockey", "women's college ice hockey",
@@ -252,8 +251,8 @@ class DaddyLiveAPI:
         if "baseball" in cat_lower or "mlb" in cat_lower:
             return "baseball", "baseball"
 
-        # 7. American Football (NFL, CFL, UFL & Pro Football)
-        if any(k in cat_lower for k in ("am. football", "american football", "cfl", "nfl", "ufl")):
+        # 7. American Football (NFL, NCAA FBS, CFL, UFL)
+        if any(k in cat_lower for k in ("am. football", "american football", "cfl", "nfl", "ufl", "college football", "ncaaf", "ncaa")):
             return "american-football", "american-football"
 
         # 8. Hockey
@@ -344,8 +343,13 @@ class DaddyLiveAPI:
                     if not raw_title:
                         continue
 
-                    # Exclude US college / NCAA sports even if placed in generic categories
-                    if re.search(r"\b(college\s*(?:soccer|volleyball|ice\s*hockey|football|baseball)|ncaaf?)\b", raw_title.lower()):
+                    # Exclude non-football college sports (soccer, volleyball, hockey, baseball)
+                    if re.search(r"\b(college\s*(?:soccer|volleyball|ice\s*hockey|baseball))\b", raw_title.lower()):
+                        continue
+
+                    # Exclude lower-division college football (FCS, Division II, Division III, NAIA, JuCo)
+                    # Keeping strictly Division I FBS (Football Bowl Subdivision)
+                    if re.search(r"\b(fcs|ncaa\s*fcs|division\s*(?:ii|iii|1-aa|i-aa)|d-?[23]|naia|juco)\b", raw_title.lower()):
                         continue
 
                     # UEFA Youth League: accept ONLY Italian youth teams (or matches involving Italian teams)
