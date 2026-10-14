@@ -679,6 +679,21 @@ class TheSportsDBTestCase(unittest.IsolatedAsyncioTestCase):
         window_sa = catalog_service.get_live_window_minutes(serie_a_match)
         self.assertEqual(window_sa, 160)
 
+    def test_international_aliases_and_acronyms(self):
+        """Verifies matching for translated club names and 3-letter acronyms."""
+        # 1. Stella Rossa -> Crvena Zvezda
+        self.assertTrue(thesportsdb_service._team_matches("Stella rossa", "Crvena Zvezda"))
+        self.assertTrue(thesportsdb_service._team_matches("Red Star Belgrade", "Crvena Zvezda"))
+        
+        # 2. Stade Rennais -> Rennes
+        self.assertTrue(thesportsdb_service._team_matches("Stade Rennais", "Rennes"))
+        self.assertTrue(thesportsdb_service._team_matches("Rennais", "Rennes"))
+
+        # 3. OFI Crete -> OFI (3-letter acronym)
+        self.assertTrue(thesportsdb_service._team_matches("OFI Crete", "OFI"))
+        self.assertTrue(thesportsdb_service._team_matches("PSV Eindhoven", "PSV"))
+        self.assertTrue(thesportsdb_service._team_matches("AZ Alkmaar", "AZ"))
+
 
 if __name__ == "__main__":
     unittest.main()

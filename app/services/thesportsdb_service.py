@@ -330,7 +330,8 @@ class TheSportsDBService:
         r"\bbayern\b": "bayern munchen",
         r"\bbayern munich\b": "bayern munchen",
         r"\bdortmund\b": "borussia dortmund",
-        r"\batletico\b": "atletico madrid",
+        r"\batletico bilbao\b": "athletic club",
+        r"\batletico(?!\s+(?:madrid|bilbao|mineiro|paranaense|goianiense|nacional|san luis|bucaramanga))\b": "atletico madrid",
         r"\bnewcastle\b": "newcastle united",
         r"\bleicester\b": "leicester city",
         r"\bwest ham\b": "west ham united",
@@ -354,6 +355,30 @@ class TheSportsDBService:
         r"\bgioiella prisma taranto\b": "taranto",
         r"\byuasa battery grottazzolina\b": "grottazzolina",
         r"\bcisterna volley\b": "cisterna",
+
+        # International Club & Acronym Aliases (European Competitions)
+        r"\bstella rossa\b": "crvena zvezda",
+        r"\bred star(?:\s*belgrade)?\b": "crvena zvezda",
+        r"\bstade rennais\b": "rennes",
+        r"\brennais\b": "rennes",
+        r"\bofi crete\b": "ofi",
+        r"\bsporting lisbona?\b": "sporting cp",
+        r"\bathletic bilbao\b": "athletic club",
+        r"\bshakhtar\b": "shakhtar donetsk",
+        r"\bdynamo kiev\b": "dynamo kyiv",
+        r"\bdinamo kiev\b": "dynamo kyiv",
+        r"\bpartizan belgrado\b": "partizan",
+        r"\bolympiacos\b": "olympiakos",
+        r"\bolympiakos piraeus\b": "olympiakos",
+        r"\bpanathinaikos atene\b": "panathinaikos",
+        r"\bfeyenoord rotterdam\b": "feyenoord",
+        r"\bpsv eindhoven\b": "psv",
+        r"\baz alkmaar\b": "az",
+        r"\bgalatasaray istanbul\b": "galatasaray",
+        r"\bfenerbahce istanbul\b": "fenerbahce",
+        r"\bbesiktas istanbul\b": "besiktas",
+        r"\bbod[oøe]/glimt\b": "bodo glimt",
+        r"\bmalm[oöe] ff\b": "malmo",
     }
 
     GENERIC_CLUB_WORDS = {
@@ -368,9 +393,9 @@ class TheSportsDBService:
         s = re.sub(r"[\U0001F1E6-\U0001F1FF]", "", s)
         for pat, rep in self.TSDB_ALIASES.items():
             s = re.sub(pat, rep, s)
-        # Strip common sports club qualifiers, prefixes and suffixes (including Italian ones like lidocalcio, citta di)
+        # Strip common sports club qualifiers, prefixes and suffixes (including French 'stade', Italian 'lidocalcio', 'citta di')
         s = re.sub(
-            r"\b(fc|cf|bc|sc|ac|as|ss|ssd|asd|usd|us|lidocalcio|lido\s*calcio|citta\s*di|polisportiva|unione\s*sportiva|basket|pallacanestro|calcio|volley|pallavolo|the)\b",
+            r"\b(fc|cf|bc|sc|ac|as|ss|ssd|asd|usd|us|lidocalcio|lido\s*calcio|citta\s*di|polisportiva|unione\s*sportiva|basket|pallacanestro|calcio|volley|pallavolo|the|stade)\b",
             " ",
             s,
         )
@@ -381,7 +406,10 @@ class TheSportsDBService:
     def _team_matches(self, m_t: str, cal_t: str) -> bool:
         if not m_t or not cal_t:
             return False
-        # 1. Exact match
+        m_t = self._clean_team_name(m_t)
+        cal_t = self._clean_team_name(cal_t)
+        if not m_t or not cal_t:
+            return False
         if m_t == cal_t:
             return True
         # 2. Space-insensitive compact equality (e.g. "ostiamare" == "ostiamare" from "ostia mare")
@@ -389,23 +417,23 @@ class TheSportsDBService:
         cal_compact = cal_t.replace(" ", "")
         if m_compact == cal_compact:
             return True
-        # 3. Substring matching (only if significant length >= 5)
-        if len(m_t) >= 5 and len(cal_t) >= 5:
+        # 3. Substring matching (only if length >= 4)
+        if len(m_t) >= 4 and len(cal_t) >= 4:
             if (m_t in cal_t) or (cal_t in m_t):
                 return True
-        # 4. Space-insensitive compact substring (if length >= 6)
-        if len(m_compact) >= 6 and len(cal_compact) >= 6:
+        # 4. Space-insensitive compact substring (if length >= 5)
+        if len(m_compact) >= 5 and len(cal_compact) >= 5:
             if (cal_compact in m_compact) or (m_compact in cal_compact):
                 return True
-        # 5. Significant word set intersection (excluding generic club words)
-        m_words = set(w for w in m_t.split() if len(w) >= 4)
-        c_words = set(w for w in cal_t.split() if len(w) >= 4)
+        # 5. Significant word set intersection (excluding generic club words, length >= 3 for acronyms like OFI, PSV, AEK)
+        m_words = set(w for w in m_t.split() if len(w) >= 3)
+        c_words = set(w for w in cal_t.split() if len(w) >= 3)
         distinct_common = (m_words & c_words) - self.GENERIC_CLUB_WORDS
         if distinct_common:
             return True
-        # 6. Metric fuzzy similarity (ratio >= 0.75 for names of length >= 4, e.g. turkiye vs turkey)
+        # 6. Metric fuzzy similarity (ratio >= 0.75 for names of length >= 3)
         from difflib import SequenceMatcher
-        if len(m_t) >= 4 and len(cal_t) >= 4:
+        if len(m_t) >= 3 and len(cal_t) >= 3:
             if SequenceMatcher(None, m_t, cal_t).ratio() >= 0.75:
                 return True
         return False
