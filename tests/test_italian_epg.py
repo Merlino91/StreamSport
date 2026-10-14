@@ -229,6 +229,104 @@ class TestItalianEPGService(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(volley["category"], "volley")
         self.assertEqual(volley["sources"][0]["name"], "Rai Sport HD")
 
+    def test_filter_conflicting_italian_channels_purges_palpably_wrong(self):
+        # Setup EPG cache with:
+        # Sky Sport Calcio: Latina vs Atalanta U23 at time T
+        # Sky Sport Max: Villarreal CF vs Napoli at time T
+        match_time = 1791986400000
+        self.service._cached_matches = [
+            {
+                "id": "sky_calcio_latina",
+                "title": "Latina vs Atalanta U23",
+                "date": match_time,
+                "teams": {"home": {"name": "Latina"}, "away": {"name": "Atalanta U23"}},
+                "sources": [{"name": "Sky Sport Calcio", "id": "sky sport calcio", "country": "Italy"}],
+            },
+            {
+                "id": "sky_max_villarreal",
+                "title": "Villarreal CF vs Napoli",
+                "date": match_time,
+                "teams": {"home": {"name": "Villarreal CF"}, "away": {"name": "Napoli"}},
+                "sources": [{"name": "Sky Sport Max", "id": "sky sport max", "country": "Italy"}],
+            },
+        ]
+
+        # Target match from DaddyLive with mixed channels
+        match = {
+            "id": "dlhd-latina",
+            "title": "Latina vs Atalanta U23",
+            "date": match_time,
+            "teams": {"home": {"name": "Latina"}, "away": {"name": "Atalanta U23"}},
+            "sources": [
+                {"source": "dlhd", "name": "Sky Sport Calcio"},
+                {"source": "dlhd", "name": "Sky Sport 251"},
+                {"source": "dlhd", "name": "Sky Sport Max"},
+                {"source": "dlhd", "name": "Canal+ Sport"},
+            ],
+        }
+
+        purged_count = self.service.filter_conflicting_italian_channels([match])
+        self.assertEqual(purged_count, 1)
+
+        source_names = [s["name"] for s in match["sources"]]
+        # Sky Sport Max must be purged because EPG proves Villarreal vs Napoli is on!
+        self.assertNotIn("Sky Sport Max", source_names)
+        # Legitimate and uncertain channels must be preserved
+        self.assertIn("Sky Sport Calcio", source_names)
+        self.assertIn("Sky Sport 251", source_names)  # Ignorance / missing EPG -> KEPT
+        self.assertIn("Canal+ Sport", source_names)   # Foreign channel -> KEPT
+
+    def test_filter_conflicting_italian_channels_preserves_on_diretta_confirmation(self):
+        match_time = 1791986400000
+        self.service._cached_matches = [
+            {
+                "id": "sky_max_villarreal",
+                "title": "Villarreal CF vs Napoli",
+                "date": match_time,
+                "sources": [{"name": "Sky Sport Max", "id": "sky sport max", "country": "Italy"}],
+            },
+        ]
+
+        match = {
+            "id": "dlhd-match",
+            "title": "Sample Match",
+            "date": match_time,
+            "_diretta_tv_channels": ["Sky Sport Max"],  # Explicitly confirmed by Diretta.it!
+            "sources": [
+                {"source": "dlhd", "name": "Sky Sport Max"},
+            ],
+        }
+
+        purged_count = self.service.filter_conflicting_italian_channels([match])
+        self.assertEqual(purged_count, 0)
+        self.assertEqual(len(match["sources"]), 1)
+        self.assertEqual(match["sources"][0]["name"], "Sky Sport Max")
+
+    def test_filter_conflicting_italian_channels_preserves_generic_container(self):
+        match_time = 1791986400000
+        self.service._cached_matches = [
+            {
+                "id": "sky_calcio_diretta_gol",
+                "title": "Diretta Gol Serie B",
+                "date": match_time,
+                "sources": [{"name": "Sky Sport Calcio", "id": "sky sport calcio", "country": "Italy"}],
+            },
+        ]
+
+        match = {
+            "id": "dlhd-latina",
+            "title": "Latina vs Atalanta U23",
+            "date": match_time,
+            "sources": [
+                {"source": "dlhd", "name": "Sky Sport Calcio"},
+            ],
+        }
+
+        purged_count = self.service.filter_conflicting_italian_channels([match])
+        self.assertEqual(purged_count, 0)
+        self.assertEqual(len(match["sources"]), 1)
+
 
 if __name__ == "__main__":
     unittest.main()
+

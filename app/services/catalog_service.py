@@ -1028,6 +1028,10 @@ class CatalogService:
                 all_db_matches = [m for m in db_service.get_active_matches() if self.is_real_match(m)]
                 all_matches = self.merge_and_deduplicate_by_silos(combined_fresh, all_db_matches) if all_db_matches else combined_fresh
 
+                # Purge palpably conflicting Italian TV channels (e.g. DaddyLive hallucinated channels)
+                # Rules: only purges when EPG proves a conflicting program is on; keeps on uncertainty or Diretta confirmation.
+                italian_epg_service.filter_conflicting_italian_channels(all_matches)
+
                 # Enrich any match (from DaddyLive, Streamed, etc.) with TvVoo FHD streams if matching recognized broadcasters
                 tvvoo_service.enrich_matches_with_tvvoo(all_matches)
 
@@ -1057,6 +1061,9 @@ class CatalogService:
                     )
                     if espn_events:
                         espn_service.reconcile_matches(all_matches, espn_events, self._clean_tokens, self._get_teams_key)
+
+                # Sweep any Italian channels that conflict after Diretta & TSDB normalization
+                italian_epg_service.filter_conflicting_italian_channels(all_matches)
 
                 # 4c. Reconcile motorsport events against official Orange Cat Blacktop session registry
                 if ocb_sessions:

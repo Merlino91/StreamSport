@@ -847,9 +847,159 @@ class ItalianEPGService:
                 if added_for_match > 0:
                     enriched_count += 1
 
-        if enriched_count > 0:
-            logger.info("Italian EPG: agganciati canali Sky/Tivùsat TvVoo a %d match reali.", enriched_count)
-        return enriched_count
+    def filter_conflicting_italian_channels(self, matches: List[Dict[str, Any]]) -> int:
+        """
+        Purges palpably incorrect Italian TV channels from matches.
+        If an external provider (like DaddyLive) attributes an Italian sports channel
+        (e.g. Sky Sport Max) to a match (e.g. Latina vs Atalanta U23), but the official
+        Italian EPG shows a completely different, conflicting sporting event on that channel
+        (e.g. Villarreal CF vs Napoli) and Diretta.it does not list it, the channel source
+        is purged.
+
+        Rules:
+        - Only purges when the program is PALPABLY CONFLICTING (palesemente errato).
+        - If there is uncertainty, missing EPG data, future date, generic container show
+          (e.g. Diretta Gol, Studio, Calcio Show), or Diretta.it confirmation, THE CHANNEL IS KEPT.
+        """
+        if not self._cached_matches or not matches:
+            return 0
+
+        from difflib import SequenceMatcher
+        total_purged = 0
+
+        GENERIC_CONTAINERS = (
+            "diretta gol", "zona gol", "zona dazn", "zona serie a", "zona serie b",
+            "studio", "speciale", "mondo gol", "magazine", "highlights", "tg24",
+            "sport24", "rubrica", "calcio show", "sky calcio club", "tutto il calcio",
+            "linea notte", "anteprima"
+        )
+
+        for m in matches:
+            sources = m.get("sources")
+            if not isinstance(sources, list) or not sources:
+                continue
+
+            m_date = m.get("date") or 0
+            if not m_date:
+                continue
+
+            m_title = m.get("title") or ""
+            m_silo = (m.get("_silo") or m.get("category") or "").lower()
+            m_tokens = set(self._clean_tokens(m_title).split())
+            m_teams = m.get("teams")
+
+            # Check channels confirmed by Diretta.it
+            diretta_tvs = m.get("_diretta_tv_channels") or []
+            diretta_canon_keys = set()
+            for dtv in diretta_tvs:
+                k = tvvoo_service.get_canonical_key(dtv, country="Italy")
+                if k:
+                    diretta_canon_keys.add(k)
+
+            cleaned_sources = []
+            for s in sources:
+                if not isinstance(s, dict):
+                    cleaned_sources.append(s)
+                    continue
+
+                s_name = s.get("name") or ""
+                # Resolve Italian canonical key
+                canon_ita = tvvoo_service.get_canonical_key(s_name, country="Italy")
+                if not canon_ita and (s.get("country") or "").lower() == "italy":
+                    canon_ita = s.get("id")
+
+                # If NOT an Italian TV channel -> we don't have EPG for foreign channels (ignoranza) -> KEEP!
+                if not canon_ita:
+                    cleaned_sources.append(s)
+                    continue
+
+                # If confirmed by Diretta.it -> 100% verified -> KEEP!
+                if canon_ita in diretta_canon_keys or any(canon_ita in dtv.lower() for dtv in diretta_tvs):
+                    cleaned_sources.append(s)
+                    continue
+
+                # Search Italian EPG for any broadcast on this channel active during the match
+                conflicting_event = None
+                has_matching_or_ambiguous = False
+                has_any_epg_on_channel = False
+
+                for ep in self._cached_matches:
+                    ep_chans = {
+                        tvvoo_service.get_canonical_key(st.get("name"), country="Italy") or st.get("id")
+                        for st in ep.get("sources", [])
+                        if isinstance(st, dict)
+                    }
+                    if canon_ita not in ep_chans:
+                        continue
+
+                    ep_date = ep.get("date") or 0
+                    time_diff = abs(m_date - ep_date) if (m_date and ep_date) else 999999999
+                    # Event is active if starting within +-45m or started up to 90m earlier
+                    is_active = (time_diff <= 45 * 60 * 1000) or (0 <= (m_date - ep_date) <= 90 * 60 * 1000)
+                    if not is_active:
+                        continue
+
+                    has_any_epg_on_channel = True
+                    ep_title = ep.get("title") or ""
+                    ep_title_lower = ep_title.lower()
+
+                    # 1. Container / studio / multi-match broadcast?
+                    if any(gen in ep_title_lower for gen in GENERIC_CONTAINERS):
+                        has_matching_or_ambiguous = True
+                        break
+
+                    # 2. Team match
+                    ep_teams = ep.get("teams")
+                    if m_teams and ep_teams and self._teams_match_fuzzy(m_teams, ep_teams):
+                        has_matching_or_ambiguous = True
+                        break
+
+                    # 3. Token match
+                    ep_tokens = set(self._clean_tokens(ep_title).split())
+                    common = m_tokens & ep_tokens
+                    if common:
+                        has_matching_or_ambiguous = True
+                        break
+
+                    # 4. Sequence similarity
+                    sim = SequenceMatcher(None, self._clean_tokens(m_title), self._clean_tokens(ep_title)).ratio()
+                    if sim >= 0.50:
+                        has_matching_or_ambiguous = True
+                        break
+
+                    # 5. Tennis on Tennis channel safeguard: if same tournament or both tennis court sessions
+                    ep_silo = (ep.get("_silo") or ep.get("category") or "").lower()
+                    if m_silo == "tennis" and ep_silo == "tennis":
+                        has_matching_or_ambiguous = True
+                        break
+
+                    # Distinct conflicting event found!
+                    conflicting_event = ep
+                    break
+
+                if not has_any_epg_on_channel:
+                    # Incertezza / ignoranza: EPG does not have programs for this channel at this time -> KEEP!
+                    cleaned_sources.append(s)
+                elif has_matching_or_ambiguous:
+                    # Matched or ambiguous -> KEEP!
+                    cleaned_sources.append(s)
+                elif conflicting_event:
+                    # PALESEMENTE ERRATO! Conflicting event confirmed on this exact channel!
+                    logger.info(
+                        "Filtro Palinsesto EPG: Scartato canale '%s' per '%s' (in onda: '%s' alle %s).",
+                        s_name, m_title, conflicting_event.get("title"),
+                        datetime.datetime.fromtimestamp((conflicting_event.get("date") or 0) / 1000).strftime("%H:%M")
+                    )
+                    total_purged += 1
+                else:
+                    cleaned_sources.append(s)
+
+            m["sources"] = cleaned_sources
+
+        if total_purged > 0:
+            logger.info("Filtro Palinsesto EPG: bonificate %d sorgenti di canali TV italiani palesemente errate.", total_purged)
+
+        return total_purged
 
 
 italian_epg_service = ItalianEPGService()
