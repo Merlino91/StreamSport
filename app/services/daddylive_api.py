@@ -13,6 +13,7 @@ import hashlib
 from app.services.canonical_competition_service import (
     detect_canonical_competition,
     get_canonical_display_name,
+    get_canonical_silo,
     is_redzone_event,
 )
 
@@ -402,25 +403,12 @@ class DaddyLiveAPI:
                             continue
                         silo_id, category = silo_info
                         canon = detect_canonical_competition(f"{cat_raw} : {raw_title}", silo_hint=silo_id)
-                        if canon:
-                            if canon.startswith("football_"):
-                                silo_id, category = "football", "football"
-                            elif canon.startswith("basketball_"):
-                                silo_id, category = "basketball", "basketball"
-                            elif canon.startswith("tennis_"):
-                                silo_id, category = "tennis", "tennis"
-                            elif canon.startswith("motorsport_"):
-                                silo_id, category = "motor-sports", "motor-sports"
-                            elif canon.startswith("am_football_"):
-                                silo_id, category = "american-football", "american-football"
-                            elif canon.startswith("baseball_"):
-                                silo_id, category = "baseball", "baseball"
-                            elif canon.startswith("hockey_"):
-                                silo_id, category = "hockey", "hockey"
-                            elif canon.startswith("fight_"):
-                                silo_id, category = "fight", "fight"
-                            elif canon.startswith("volleyball_"):
-                                silo_id, category = "volley", "volleyball"
+                        # Only allow canonical competition to refine silo_id/category if the sport was generic
+                        if canon and category in ("other", "unknown", ""):
+                            canon_silo = get_canonical_silo(canon)
+                            if canon_silo:
+                                silo_id = canon_silo
+                                category = "football" if canon_silo == "football" else canon_silo
                         comp_disp = get_canonical_display_name(canon) or cat_raw
 
                     slug = re.sub(r"[^a-z0-9]+", "-", clean_title.lower()).strip("-")[:60]

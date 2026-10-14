@@ -172,10 +172,10 @@ CANONICAL_LEAGUES = {
         "display": "Bundesliga",
         "silo": "football",
         "patterns": [
-            r"germany\s*-\s*bundesliga\b(?!\s*2\b)",
-            r"germania:\s*bundesliga\b(?!\s*2\b)(?!\s*-\s*femminile)",
-            r"german\s*bundesliga\b(?!\s*2\b)",
-            r"(?<!austria\s)(?<!austrian\s)(?<!austria:\s)(?<!handball\s)(?<!handball-)(?<!women\s)(?<!femminile\s)\bbundesliga\b(?!\s*austria)(?!\s*2\b)(?!\s*-\s*femminile)",
+            r"germany\s*-\s*bundesliga\b(?!\s*2\b)(?!\s*women\b)(?!\s*frauen\b)",
+            r"germania:\s*bundesliga\b(?!\s*2\b)(?!\s*-\s*femminile)(?!\s*women\b)(?!\s*frauen\b)",
+            r"german\s*bundesliga\b(?!\s*2\b)(?!\s*women\b)(?!\s*frauen\b)",
+            r"(?<!austria\s)(?<!austrian\s)(?<!austria:\s)(?<!handball\s)(?<!handball-)(?<!women\s)(?<!femminile\s)\bbundesliga\b(?!\s*austria)(?!\s*2\b)(?!\s*-\s*femminile)(?!\s*women\b)(?!\s*frauen\b)",
         ],
     },
     "football_austrian_bundesliga": {
@@ -688,13 +688,16 @@ def detect_canonical_competition(text: str, silo_hint: Optional[str] = None) -> 
                     if rx.search(t):
                         return slug
 
-        # Strict Silo Boundary: if an event belongs to a known sport silo,
-        # it must NEVER cross-match into a completely different sport (e.g. hockey -> football).
-        if norm_silo not in ("all", "other", "altri_sport", "unknown", ""):
+        # Strict Silo Boundary: if an event belongs to a known sport silo (including 'altri_sport'),
+        # it must NEVER cross-match into a completely different sport (e.g. handball/altri_sport -> football).
+        if norm_silo not in ("all", "other", "unknown", ""):
             return None
 
     # 2. Match across all leagues ONLY if no specific sport silo was known
     for slug, s_silo, display, regexes in _COMPILED_PATTERNS:
+        # Never match football if text explicitly mentions another sport
+        if s_silo == "football" and re.search(r"\b(handball|hbl|ehf|volleyball|pallamano|pallavolo|rugby)\b", t):
+            continue
         for rx in regexes:
             if rx.search(t):
                 return slug
