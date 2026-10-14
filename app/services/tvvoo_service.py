@@ -189,6 +189,10 @@ class TvVooService:
         "ro", "romania",
         "hr", "croatia",
         "rs", "serbia",
+        "ba", "bih", "bosnia",
+        "me", "mne", "montenegro",
+        "si", "slovenia",
+        "mk", "mkd", "macedonia",
         "gr", "greece",
         "cy", "cyprus",
         "il", "israel",
@@ -1105,14 +1109,23 @@ class TvVooService:
         if not cleaned:
             return None
 
+        # Strict "Arena" protection:
+        # Balkan and foreign Arena channels (e.g. Arena Sport 1..10, Arena Premium 1..5, Arena 1..10,
+        # Arena Tennis, Arena Sport Croatia/Serbia, Arena Esport, Arena Fight, bare 'Arena') must NEVER
+        # resolve to Italian "Sky Sport Arena" or UK "Sky Sports Arena", nor accidentally match other
+        # numbered channels (such as 'sport 1' in 'arena sport 1' matching 'sport1 de').
+        # Any legitimate Arena channel in our supported silos MUST explicitly contain 'sky'.
+        if re.search(r"\barena\b", cleaned) and not re.search(r"\bsky\b", cleaned):
+            return None
+
         # Check trailing country word/code (e.g. 'dazn ca', 'dazn de', 'dazn 1 de', 'bein sports 1 france')
         trailing_word_match = re.search(r"\b([a-z]{2,12})$", cleaned)
-        if trailing_word_match and country is None:
+        if trailing_word_match:
             trailing_code = trailing_word_match.group(1)
             if trailing_code in self.UNSUPPORTED_COUNTRY_SUFFIXES:
-                # Explicit non-supported foreign broadcast (e.g. Canada, USA, Brazil) -> Do NOT fallback to Italy
+                # Explicit non-supported foreign broadcast (e.g. Canada, USA, Brazil, Serbia, Croatia) -> NEVER match
                 return None
-            if trailing_code in self.COUNTRY_SUFFIX_MAP:
+            if country is None and trailing_code in self.COUNTRY_SUFFIX_MAP:
                 detected_country = self.COUNTRY_SUFFIX_MAP[trailing_code]
                 base_without_suffix = cleaned[:trailing_word_match.start()].strip()
                 silo = self.COUNTRY_ALIASES.get(detected_country, {})

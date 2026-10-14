@@ -91,6 +91,53 @@ class TestTvVooService(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.service.get_canonical_key("Sky Sport 1", country="Germany"), "sky sport 1 de")
         self.assertEqual(self.service.get_canonical_key("Sky Sport 1", country="Italy"), "sky sport uno")
 
+    def test_arena_channel_protection(self):
+        """
+        Tests that foreign / Balkan Arena channels (Arena Sport, Arena Premium, etc.)
+        are strictly prevented from resolving to Italian Sky Sport Arena or UK Sky Sports Arena,
+        and cannot trigger false substring matches (such as 'Arena Sport 1' matching 'sport1 de').
+        """
+        # Foreign Arena variants MUST be rejected both globally and within Italy silo
+        foreign_arenas = [
+            "Arena 1 Premium Serbia",
+            "Arena 2 Premium Serbia",
+            "Arena 3 Premium Serbia",
+            "Arena Sport 1 Croatia",
+            "Arena Sport 1 Serbia",
+            "Arena Sport 4 Croatia",
+            "Arena Sport 10 Serbia",
+            "Arena Sport 1x2 Serbia",
+            "Arena Sport 1",
+            "Arena Sport 2",
+            "Arena Sport 3",
+            "Arena Sport 4",
+            "Arena Sport",
+            "Arena 1",
+            "Arena 2",
+            "Arena Premium 1",
+            "Arena 1 Premium",
+            "Arena Tennis",
+            "Arena Sport 1 HD",
+            "Arena Sport 1 (Serbia)",
+            "Arena Sport 1 HR",
+            "Arena",
+            "Arena 204",
+        ]
+        for name in foreign_arenas:
+            self.assertIsNone(self.service.get_canonical_key(name), f"Failed global rejection for {name}")
+            self.assertIsNone(self.service.get_canonical_key(name, country="Italy"), f"Failed Italy silo rejection for {name}")
+            self.assertEqual(self.service.get_channel_streams(name), [], f"get_channel_streams should return empty for {name}")
+
+        # Legitimate Sky Arena channels MUST resolve correctly
+        self.assertEqual(self.service.get_canonical_key("Sky Sport Arena"), "sky sport arena")
+        self.assertEqual(self.service.get_canonical_key("Sky Sport Arena HD"), "sky sport arena")
+        self.assertEqual(self.service.get_canonical_key("Sky Arena"), "sky sport arena")
+        self.assertEqual(self.service.get_canonical_key("Sky Sport Arena IT"), "sky sport arena")
+        self.assertEqual(self.service.get_canonical_key("204"), "sky sport arena")
+        self.assertEqual(self.service.get_canonical_key("Sky Sport 204"), "sky sport arena")
+        self.assertEqual(self.service.get_canonical_key("Sky Sports Arena UK"), "sky sports arena uk")
+        self.assertEqual(self.service.get_canonical_key("Sky Sports Arena"), "sky sports arena uk")
+
     @patch("app.services.tvvoo_service.httpx.AsyncClient")
     async def test_sync_channels_mock(self, mock_client_cls):
         mock_client = AsyncMock()
