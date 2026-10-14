@@ -255,8 +255,8 @@ class DaddyLiveAPI:
         if any(k in cat_lower for k in ("am. football", "american football", "cfl", "nfl", "ufl", "college football", "ncaaf", "ncaa")):
             return "american-football", "american-football"
 
-        # 8. Hockey
-        if "hockey" in cat_lower or any(k in cat_lower for k in ("nhl", "shl", "ohl", "ushl")):
+        # 8. Hockey (NHL, European Leagues, Roller Hockey, Field Hockey)
+        if "hockey" in cat_lower or "hockey" in title_lower or any(k in cat_lower for k in ("nhl", "shl", "ohl", "ushl")):
             return "hockey", "hockey"
 
         # 9. Volleyball
@@ -272,7 +272,7 @@ class DaddyLiveAPI:
             return "altri_sport", "cricket"
         if "darts" in cat_lower:
             return "altri_sport", "darts"
-        if "cycling" in cat_lower or "ciclismo" in title_lower:
+        if ("cycling" in cat_lower or "ciclismo" in title_lower) and "hockey" not in title_lower:
             return "altri_sport", "cycling"
         if "handball" in cat_lower or "pallamano" in title_lower:
             return "altri_sport", "handball"

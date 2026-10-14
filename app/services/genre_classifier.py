@@ -610,12 +610,16 @@ class GenreClassifier:
         # ------------------------------------------------------------------
         # 7. HOCKEY (Dedicated Catalog: 'hockey')
         # ------------------------------------------------------------------
-        if cat in ("hockey", "ice-hockey", "ice hockey") or "nhl" in title_lower:
+        if (
+            cat in ("hockey", "ice-hockey", "ice hockey")
+            or silo == "hockey"
+            or any(k in title_lower for k in ("hockey", "nhl", "khl", "shl", "ohl", "ushl"))
+        ) and not is_football_context:
             if re.search(r"\b(nhl|stanley\s*cup)\b", title_lower) or any(t in home or t in away or t in title_lower for t in self.NHL_TEAMS):
                 return "hockey", "NHL"
             if re.search(r"\b(khl|del|liiga|shl)\b", title_lower):
                 return "hockey", "KHL e Leghe Europee"
-            if re.search(r"\b(iihf|mondiali|olympics)\b", title_lower):
+            if re.search(r"\b(iihf|mondiali|olympics|world\s*championship|roller|field)\b", title_lower):
                 return "hockey", "Mondiali e Nazionali"
             return "hockey", "NHL"
 
@@ -660,7 +664,7 @@ class GenreClassifier:
                 return "altri_sport", "Golf"
             if re.search(r"\b(darts|freccette|pdc)\b", title_lower):
                 return "altri_sport", "Freccette / Darts"
-            if re.search(r"\b(ciclismo|cycling|tour\s*de\s*france|giro\s*d['’]italia|vuelta|uci|road\s*race|time\s*trial)\b", title_lower) or cat == "cycling":
+            if (re.search(r"\b(ciclismo|cycling|tour\s*de\s*france|giro\s*d['’]italia|vuelta|uci|road\s*race|time\s*trial)\b", title_lower) or cat == "cycling") and "hockey" not in title_lower:
                 return "altri_sport", "Ciclismo"
             if re.search(r"\b(handball|pallamano|ihf|ehf|dhb\s*pokal)\b", title_lower) or cat == "handball":
                 return "altri_sport", "Pallamano"
