@@ -90,6 +90,8 @@ class TennisPosterService:
         self._tsdb_lock = asyncio.Lock()
         self._last_tsdb_call: float = 0.0
         self._unknown_cutout_cache: Optional[Image.Image] = None
+        self._unknown_male_cache: Optional[Image.Image] = None
+        self._unknown_female_cache: Optional[Image.Image] = None
 
         # Pre-render missing background templates
         self._ensure_background_templates()
@@ -336,24 +338,59 @@ class TennisPosterService:
             return True
         return False
 
-    def _get_unknown_cutout(self) -> Optional[Image.Image]:
-        """Loads the official locked/unknown athlete bust silhouette asset (Tennis_Player_Unknow)."""
-        if self._unknown_cutout_cache is not None:
-            return self._unknown_cutout_cache
+    @staticmethod
+    def is_female_competition(title: str, genre: str = "") -> bool:
+        """Determines if a match belongs to a women's tournament or circuit."""
+        combined = f"{genre} {title}".lower()
+        return bool(
+            re.search(r"\b(wta|women(?:'s)?|ladies|femminile|donne|bjk|billie\s*jean|fed\s*cup)\b", combined)
+        )
+
+    def _get_unknown_cutout(self, is_female: bool = False) -> Optional[Image.Image]:
+        """Loads the official locked/unknown athlete bust silhouette asset (male or female)."""
+        if is_female:
+            if self._unknown_female_cache is not None:
+                return self._unknown_female_cache
+            for p in (
+                ASSETS_DIR / "Unknow_female.png",
+                STATIC_ASSETS_DIR / "Unknow_female.png",
+                ASSETS_DIR / "Tennis_Player_Unknow_female.png",
+                STATIC_ASSETS_DIR / "Tennis_Player_Unknow_female.png",
+            ):
+                if p.exists():
+                    try:
+                        self._unknown_female_cache = Image.open(p).convert("RGBA")
+                        return self._unknown_female_cache
+                    except Exception as e:
+                        logger.warning("Failed loading unknown female cutout from %s: %s", p, e)
+        else:
+            if self._unknown_male_cache is not None:
+                return self._unknown_male_cache
+            for p in (
+                ASSETS_DIR / "Unknow_male.png",
+                STATIC_ASSETS_DIR / "Unknow_male.png",
+                ASSETS_DIR / "Tennis_Player_Unknow.png",
+                STATIC_ASSETS_DIR / "Tennis_Player_Unknow.png",
+            ):
+                if p.exists():
+                    try:
+                        self._unknown_male_cache = Image.open(p).convert("RGBA")
+                        return self._unknown_male_cache
+                    except Exception as e:
+                        logger.warning("Failed loading unknown male cutout from %s: %s", p, e)
+
+        # Fallbacks if specific gender asset is missing
         for p in (
             ASSETS_DIR / "Tennis_Player_Unknow.png",
             STATIC_ASSETS_DIR / "Tennis_Player_Unknow.png",
-            ASSETS_DIR / "Tennis_Player_Unknown.png",
-            STATIC_ASSETS_DIR / "Tennis_Player_Unknown.png",
             STATIC_ASSETS_DIR / "Unknown.png",
             ASSETS_DIR / "Unknown.png",
         ):
             if p.exists():
                 try:
-                    self._unknown_cutout_cache = Image.open(p).convert("RGBA")
-                    return self._unknown_cutout_cache
-                except Exception as e:
-                    logger.warning("Failed loading unknown cutout from %s: %s", p, e)
+                    return Image.open(p).convert("RGBA")
+                except Exception:
+                    pass
         return None
 
     async def get_player_cutout(self, player_name: str) -> Optional[Image.Image]:
@@ -513,7 +550,9 @@ class TennisPosterService:
 
         return canvas
 
-    async def _render_standard_match(self, canvas: Image.Image, p1_name: str, p2_name: str) -> Image.Image:
+    async def _render_standard_match(
+        self, canvas: Image.Image, p1_name: str, p2_name: str, is_female: bool = False
+    ) -> Image.Image:
         """Renders player cutouts (supporting both Singles and Doubles) and broadcast lower-third banner."""
         W, H = CANVAS_WIDTH, CANVAS_HEIGHT
         banner_h = 75
@@ -521,7 +560,7 @@ class TennisPosterService:
         y_bottom = banner_top  # Player image ends exactly where the banner begins
         cx = W // 2
 
-        unknown_cutout = self._get_unknown_cutout()
+        unknown_cutout = self._get_unknown_cutout(is_female=is_female)
 
         team1 = self.parse_team_players(p1_name)
         team2 = self.parse_team_players(p2_name)
@@ -548,7 +587,7 @@ class TennisPosterService:
                     p2_resized = img2.resize((w2, target_h), Image.Resampling.LANCZOS)
                     canvas.paste(p2_resized, (W - 170 - (w2 * 3) // 4, y_bottom - target_h), p2_resized)
         else:
-            # Doubles layout: 2 players per side with depth of field
+            # Doubles layout: 2 players per side with depth of field and balanced sizing
             p1_a_name = team1[0] if len(team1) > 0 else ""
             p1_b_name = team1[1] if len(team1) > 1 else ""
             p2_a_name = team2[0] if len(team2) > 0 else ""
@@ -562,8 +601,8 @@ class TennisPosterService:
             ]
             t1_a_img, t1_b_img, t2_a_img, t2_b_img = await asyncio.gather(*tasks)
 
-            h_front = 480
-            h_back = 420
+            h_front = 400
+            h_back = 350
 
             def _paste_athlete(img: Image.Image, target_cx: int, target_h: int):
                 scale = target_h / img.height
@@ -578,10 +617,10 @@ class TennisPosterService:
                 paste_y = y_bottom - target_h
                 canvas.paste(resized, (paste_x, paste_y), resized)
 
-            cx_left_outer = 150
+            cx_left_outer = 170
             cx_left_inner = 390
             cx_right_inner = W - 390
-            cx_right_outer = W - 150
+            cx_right_outer = W - 170
 
             # Left Team - Player 1B (Back, outer left)
             img1_b = t1_b_img or unknown_cutout
@@ -742,12 +781,14 @@ class TennisPosterService:
             if not p1_name:
                 return None
 
+            is_fem = self.is_female_competition(title, genre)
+
             # 2. Check if Country match (Davis Cup / BJK Cup / 'Italy vs China')
             if self.is_country_match(title, p1_name, p2_name, genre):
                 canvas = self._render_country_match(canvas, p1_name, p2_name, tourn_name)
             else:
                 # 3. Standard Player vs Player Match
-                canvas = await self._render_standard_match(canvas, p1_name, p2_name)
+                canvas = await self._render_standard_match(canvas, p1_name, p2_name, is_female=is_fem)
 
         # Save to disk as high-quality JPEG
         final_rgb = canvas.convert("RGB")
@@ -846,7 +887,15 @@ class TennisPosterService:
                     except Exception:
                         pass
                 elif f.suffix.lower() == ".png":
-                    if f.name.lower() == "unknown.png":
+                    if f.name.lower() in (
+                        "unknown.png",
+                        "tennis_player_unknow.png",
+                        "tennis_player_unknown.png",
+                        "unknow_male.png",
+                        "unknow_female.png",
+                        "unknown_male.png",
+                        "unknown_female.png",
+                    ):
                         continue
                     if f.stem not in active_slugs:
                         try:

@@ -162,6 +162,23 @@ class TennisPosterTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(mock_file.exists())
         self.assertTrue((ASSETS_DIR / "Unknown.png").exists() or (STATIC_ASSETS_DIR / "Unknown.png").exists())
 
+    def test_is_female_competition(self):
+        """Verifies female competition detection for WTA, women's tournaments, and BJK cup."""
+        self.assertTrue(tennis_poster_service.is_female_competition("WTA 1000 Wuhan", "tennis"))
+        self.assertTrue(tennis_poster_service.is_female_competition("Ann Li vs Janice Tjen (WTA - Singles)", "WTA"))
+        self.assertTrue(tennis_poster_service.is_female_competition("Lanlana Tararudee vs Laura Samson (Challenger Women - Singles)", "Challenger"))
+        self.assertTrue(tennis_poster_service.is_female_competition("Italy vs China", "Billie Jean King Cup"))
+        self.assertFalse(tennis_poster_service.is_female_competition("ATP Masters 1000 Shanghai", "tennis"))
+        self.assertFalse(tennis_poster_service.is_female_competition("Zverev vs De Minaur", "ATP"))
+        self.assertFalse(tennis_poster_service.is_female_competition("Challenger Men - Singles: Olbia", "Challenger"))
+
+    def test_gender_unknown_cutouts(self):
+        """Verifies distinct male and female cutout assets are returned."""
+        male_cutout = tennis_poster_service._get_unknown_cutout(is_female=False)
+        female_cutout = tennis_poster_service._get_unknown_cutout(is_female=True)
+        self.assertIsNotNone(male_cutout)
+        self.assertIsNotNone(female_cutout)
+
 
 if __name__ == "__main__":
     unittest.main()
