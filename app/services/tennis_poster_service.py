@@ -337,16 +337,23 @@ class TennisPosterService:
         return False
 
     def _get_unknown_cutout(self) -> Optional[Image.Image]:
-        """Loads the official locked/unknown athlete bust silhouette asset."""
+        """Loads the official locked/unknown athlete bust silhouette asset (Tennis_Player_Unknow)."""
         if self._unknown_cutout_cache is not None:
             return self._unknown_cutout_cache
-        for p in (STATIC_ASSETS_DIR / "Unknown.png", ASSETS_DIR / "Unknown.png"):
+        for p in (
+            ASSETS_DIR / "Tennis_Player_Unknow.png",
+            STATIC_ASSETS_DIR / "Tennis_Player_Unknow.png",
+            ASSETS_DIR / "Tennis_Player_Unknown.png",
+            STATIC_ASSETS_DIR / "Tennis_Player_Unknown.png",
+            STATIC_ASSETS_DIR / "Unknown.png",
+            ASSETS_DIR / "Unknown.png",
+        ):
             if p.exists():
                 try:
                     self._unknown_cutout_cache = Image.open(p).convert("RGBA")
                     return self._unknown_cutout_cache
                 except Exception as e:
-                    logger.warning("Failed loading Unknown.png from %s: %s", p, e)
+                    logger.warning("Failed loading unknown cutout from %s: %s", p, e)
         return None
 
     async def get_player_cutout(self, player_name: str) -> Optional[Image.Image]:
@@ -555,36 +562,46 @@ class TennisPosterService:
             ]
             t1_a_img, t1_b_img, t2_a_img, t2_b_img = await asyncio.gather(*tasks)
 
-            h_front = 500
-            h_back = 440
+            h_front = 480
+            h_back = 420
 
-            # Left Team - Player 1B (Back, shifted towards outside)
+            def _paste_athlete(img: Image.Image, target_cx: int, target_h: int):
+                scale = target_h / img.height
+                wb = int(img.width * scale)
+                resized = img.resize((wb, target_h), Image.Resampling.LANCZOS)
+                bbox = img.getbbox()
+                if bbox:
+                    athlete_center_x = ((bbox[0] + bbox[2]) / 2.0) * scale
+                else:
+                    athlete_center_x = wb / 2.0
+                paste_x = int(target_cx - athlete_center_x)
+                paste_y = y_bottom - target_h
+                canvas.paste(resized, (paste_x, paste_y), resized)
+
+            cx_left_outer = 150
+            cx_left_inner = 390
+            cx_right_inner = W - 390
+            cx_right_outer = W - 150
+
+            # Left Team - Player 1B (Back, outer left)
             img1_b = t1_b_img or unknown_cutout
             if p1_b_name and img1_b:
-                wb1 = int(img1_b.width * (h_back / img1_b.height))
-                b1_resized = img1_b.resize((wb1, h_back), Image.Resampling.LANCZOS)
-                canvas.paste(b1_resized, (60, y_bottom - h_back), b1_resized)
+                _paste_athlete(img1_b, cx_left_outer, h_back)
 
-            # Left Team - Player 1A (Front, shifted towards center, pasted over 1B)
+            # Left Team - Player 1A (Front, inner left, layered over 1B)
             img1_a = t1_a_img or unknown_cutout
             if img1_a:
-                wa1 = int(img1_a.width * (h_front / img1_a.height))
-                a1_resized = img1_a.resize((wa1, h_front), Image.Resampling.LANCZOS)
-                canvas.paste(a1_resized, (220, y_bottom - h_front), a1_resized)
+                _paste_athlete(img1_a, cx_left_inner, h_front)
 
-            # Right Team - Player 2B (Back, shifted towards outside)
+            # Right Team - Player 2B (Back, outer right)
             img2_b = t2_b_img or unknown_cutout
             if p2_b_name and img2_b:
-                wb2 = int(img2_b.width * (h_back / img2_b.height))
-                b2_resized = img2_b.resize((wb2, h_back), Image.Resampling.LANCZOS)
-                canvas.paste(b2_resized, (W - 60 - wb2, y_bottom - h_back), b2_resized)
+                _paste_athlete(img2_b, cx_right_outer, h_back)
 
-            # Right Team - Player 2A (Front, shifted towards center, pasted over 2B)
+            # Right Team - Player 2A (Front, inner right, layered over 2B)
             img2_a = t2_a_img or unknown_cutout
             if p2_a_name and img2_a:
-                wa2 = int(img2_a.width * (h_front / img2_a.height))
-                a2_resized = img2_a.resize((wa2, h_front), Image.Resampling.LANCZOS)
-                canvas.paste(a2_resized, (W - 220 - wa2, y_bottom - h_front), a2_resized)
+                _paste_athlete(img2_a, cx_right_inner, h_front)
 
         # Continuous Edge-to-Edge Broadcast Lower-Third Banner
         banner = Image.new("RGBA", (W, banner_h), (0, 0, 0, 0))
