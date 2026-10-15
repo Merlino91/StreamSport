@@ -1081,30 +1081,9 @@ class CatalogService:
                 all_db_matches = [m for m in all_db_matches if m.get("id") not in fresh_ids]
                 all_matches = self.merge_and_deduplicate_by_silos(combined_fresh, all_db_matches) if all_db_matches else combined_fresh
 
-                # Purge palpably conflicting Italian TV channels (e.g. DaddyLive hallucinated channels)
-                # Rules: only purges when EPG proves a conflicting program is on; keeps on uncertainty or Diretta confirmation.
-                italian_epg_service.filter_conflicting_italian_channels(all_matches)
-
-                # Enrich any match (from DaddyLive, Streamed, etc.) with TvVoo FHD streams if matching recognized broadcasters
-                tvvoo_service.enrich_matches_with_tvvoo(all_matches)
-
-                # Enrich confirmed real matches with official Italian Sky & Tivùsat TvVoo channels from Italian EPG (strictly channel mapper)
-                await italian_epg_service.enrich_matches_with_epg_channels(all_matches)
-
-
-                # 3. Persist merged matches in DB
-                if all_matches:
-                    db_service.save_matches(all_matches)
-
-                # Purge matches older than retention window from DB (6h if ENABLE_REPLAYS=False, 72h if True)
-                db_service.purge_expired_matches()
-                banner_service.purge_stale_banners(max_age_hours=24)
-
-                # 4a. LEVEL 1: Reconcile against official TheSportsDB Calendar registry
-                # (Awards official 16:9 poster, competition name, and canonical teams)
-                thesportsdb_service.reconcile_matches(all_matches)
-
-                # 4b. LEVEL 2: Downstream Validation (Diretta.it Primary, ESPN as Emergency Fallback)
+                # 3. FASE 1: CONVALIDATORI UFFICIALI & ARRICCHIMENTO INFORMATIVE (Diretta.it & OCB)
+                # Primary downstream validator: establishes official kickoff time (UTC minute),
+                # official competition, and clean normalized Italian team names without destroying raw titles.
                 diretta_matched = 0
                 if diretta_service.is_healthy:
                     diretta_matched = diretta_service.reconcile_matches(all_matches)
@@ -1116,19 +1095,39 @@ class CatalogService:
                     if espn_events:
                         espn_service.reconcile_matches(all_matches, espn_events, self._clean_tokens, self._get_teams_key)
 
-                # Sweep any Italian channels that conflict after Diretta & TSDB normalization
-                italian_epg_service.filter_conflicting_italian_channels(all_matches)
-
-                # 4c. Reconcile motorsport events against official Orange Cat Blacktop session registry
+                # Reconcile motorsport events against official Orange Cat Blacktop session registry
+                # (Generates _tsdb_query, circuit and exact FP1/Qualifiche/Gara session data)
                 if ocb_sessions:
                     ocblacktop_service.reconcile_matches(all_matches, ocb_sessions)
 
-                # 4d. Reconcile motorsport events against TheSportsDB in-RAM calendar (with canonized OCB session data)
+                # 4. FASE 2: ARRICCHIMENTO FLUSSI TV (TvVoo & EPG Sky/Tivùsat)
+                # Enrich any match (from DaddyLive, Streamed, etc.) with TvVoo FHD streams if matching recognized broadcasters
+                tvvoo_service.enrich_matches_with_tvvoo(all_matches)
+
+                # Enrich confirmed real matches with official Italian Sky & Tivùsat TvVoo channels from Italian EPG
+                # Now benefits from certified kickoff times and _diretta_tv_channels!
+                await italian_epg_service.enrich_matches_with_epg_channels(all_matches)
+
+                # Purge palpably conflicting Italian TV channels (aligned with asymmetric window)
+                italian_epg_service.filter_conflicting_italian_channels(all_matches)
+
+                # 5. FASE 3: ASSEGNAZIONE LOCANDINE 16:9 & CALENDARIO THESPORTSDB
+                # Reconcile against official TheSportsDB Calendar registry
+                # Dual-test evaluates both raw provider titles and Diretta.it normalized team names!
+                thesportsdb_service.reconcile_matches(all_matches)
+
+                # Reconcile motorsport events against TheSportsDB in-RAM calendar (with canonized OCB session data)
                 thesportsdb_service.reconcile_motorsport_matches(all_matches)
 
-                # 4e. LEVEL 2e: Post-Validation Multi-Signal Deduplication
-                # Fuses matches that received the same real poster, same normalized title,
-                # or same certified competition + time + team acronym (e.g. LAFC vs Austin FC / Los Angeles FC vs Austin FC).
+                # 6. FASE 4: PERSISTENZA E DEDUPLICAZIONE POST-VALIDAZIONE
+                if all_matches:
+                    db_service.save_matches(all_matches)
+
+                # Purge matches older than retention window from DB (6h if ENABLE_REPLAYS=False, 72h if True)
+                db_service.purge_expired_matches()
+                banner_service.purge_stale_banners(max_age_hours=24)
+
+                # LEVEL 2e: Post-Validation Multi-Signal Deduplication
                 all_matches = self.deduplicate_post_validation(all_matches)
 
                 # 5. LEVEL 3: Pre-classify every match into catalog and genre

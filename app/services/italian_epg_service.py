@@ -982,10 +982,15 @@ class ItalianEPGService:
                         continue
 
                     ep_date = ep.get("date") or 0
-                    time_diff = abs(m_date - ep_date) if (m_date and ep_date) else 999999999
-                    # Event is active if starting within +-45m or started up to 90m earlier
-                    is_active = (time_diff <= 45 * 60 * 1000) or (0 <= (m_date - ep_date) <= 90 * 60 * 1000)
-                    if not is_active:
+                    if not (m_date and ep_date):
+                        continue
+                    # Asymmetric TV window alignment:
+                    # Pre-match broadcast/studio up to 90 min before kickoff (120 min for motorsports).
+                    # Broadcast starting after kickoff allowed up to 20 min late.
+                    pre_max = (120 * 60 * 1000) if m_silo == "motor-sports" else (90 * 60 * 1000)
+                    post_max = 20 * 60 * 1000
+                    time_diff = m_date - ep_date  # Positive if EPG program starts before match kickoff
+                    if time_diff > pre_max or time_diff < -post_max:
                         continue
 
                     has_any_epg_on_channel = True

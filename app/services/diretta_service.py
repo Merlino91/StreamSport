@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 import httpx
 
 from app.services.canonical_competition_service import detect_canonical_competition, get_canonical_display_name
+from app.services.team_matching import calculate_match_score, extract_team_words
 from app.services.tvvoo_service import tvvoo_service
 
 logger = logging.getLogger("streamsport.diretta")
@@ -228,22 +229,16 @@ class DirettaService:
             return self._cached_events
 
     def _clean_team_words(self, name: str) -> Set[str]:
-        t = (name or "").lower()
-        t = unicodedata.normalize("NFKD", t).encode("ascii", "ignore").decode("utf-8")
-        t = re.sub(r"[\U0001F1E6-\U0001F1FF]{2}", "", t)
-        for pat, rep in self.TEAM_ALIASES.items():
-            t = re.sub(pat, rep, t)
-        words = set(re.sub(r"[^a-z0-9]+", " ", t).split()) - self.GENERIC_TERMS
-        return {w for w in words if len(w) > 1}
+        return extract_team_words(name)
 
     def reconcile_matches(self, matches: List[Dict[str, Any]]) -> int:
         """
         Reconciles stream matches against cached Diretta.it official schedule.
         When matched:
-        - Normalizes match title in clean 'Home vs Away' form
+        - Normalizes match title in clean 'Home vs Away' form (while retaining raw_titles)
         - Aligns kickoff date/time to exact UTC minute
         - Assigns official competition if missing
-        - Marks _diretta_matched = True
+        - Marks _diretta_matched = True, _diretta_home, _diretta_away, _official_date
         """
         if not self._cached_events or not matches:
             return 0
@@ -266,61 +261,32 @@ class DirettaService:
             if not candidates:
                 continue
 
-            m_date = m.get("date") or 0
-            m_title = m.get("title") or ""
-            teams = m.get("teams")
-
-            m_home_words: Set[str] = set()
-            m_away_words: Set[str] = set()
-
-            if isinstance(teams, dict) and teams.get("home") and teams.get("away"):
-                m_home_words = self._clean_team_words(teams.get("home", {}).get("name", ""))
-                m_away_words = self._clean_team_words(teams.get("away", {}).get("name", ""))
-            elif " vs " in m_title.lower():
-                parts = re.split(r"\s+vs\s+", m_title, maxsplit=1, flags=re.IGNORECASE)
-                m_home_words = self._clean_team_words(parts[0])
-                m_away_words = self._clean_team_words(parts[1])
-
-            if not m_home_words or not m_away_words:
-                continue
-
             best_cand: Optional[Dict[str, Any]] = None
+            best_score: float = 0.0
 
             for cand in candidates:
-                c_date = cand.get("date") or 0
-                # Strict kickoff proximity: within +/- 90 minutes
-                if m_date and c_date:
-                    if abs(m_date - c_date) > 90 * 60 * 1000:
-                        continue
-
-                c_home_words = self._clean_team_words(cand.get("home", ""))
-                c_away_words = self._clean_team_words(cand.get("away", ""))
-                if not c_home_words or not c_away_words:
-                    continue
-
-                # Direct Home-Home and Away-Away match
-                home_match = bool(m_home_words & c_home_words)
-                away_match = bool(m_away_words & c_away_words)
-
-                if home_match and away_match:
+                res = calculate_match_score(m, cand, phase="phase1_diretta")
+                if res["matched"] and res["score"] > best_score:
                     best_cand = cand
-                    break
-
-                # Inverted match (for US "at" format or reversed streams)
-                home_inv = bool(m_home_words & c_away_words)
-                away_inv = bool(m_away_words & c_home_words)
-
-                if home_inv and away_inv:
-                    best_cand = cand
-                    break
+                    best_score = res["score"]
+                    if best_score >= 0.95:
+                        break
 
             if best_cand:
                 reconciled_count += 1
                 m["_diretta_matched"] = True
-                m["title"] = f"{best_cand['home']} vs {best_cand['away']}"
+                m["_diretta_home"] = best_cand["home"]
+                m["_diretta_away"] = best_cand["away"]
+                m["_diretta_title"] = f"{best_cand['home']} vs {best_cand['away']}"
+
+                # Non-destructive: preserve raw title if not already tracked
+                if "raw_titles" not in m and m.get("title"):
+                    m["raw_titles"] = [m["title"]]
+                m["title"] = m["_diretta_title"]
 
                 # Adopt exact kickoff time from Diretta
                 if best_cand.get("date"):
+                    m["_official_date"] = best_cand["date"]
                     m["date"] = best_cand["date"]
 
                 # Adopt official Italian competition if missing or generic

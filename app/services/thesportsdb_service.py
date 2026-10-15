@@ -20,6 +20,7 @@ from app.services.canonical_competition_service import (
     is_competition_conflict,
     is_simulcast_event,
 )
+from app.services.team_matching import clean_team_name, match_single_team
 
 logger = logging.getLogger("streamsport.thesportsdb")
 
@@ -382,55 +383,12 @@ class TheSportsDBService:
     }
 
     def _clean_team_name(self, name: str) -> str:
-        s = (name or "").lower()
-        s = unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode("utf-8")
-        s = re.sub(r"[\U0001F1E6-\U0001F1FF]", "", s)
-        for pat, rep in self.TSDB_ALIASES.items():
-            s = re.sub(pat, rep, s)
-        # Strip common sports club qualifiers, prefixes and suffixes (including French 'stade', Italian 'lidocalcio', 'citta di')
-        s = re.sub(
-            r"\b(fc|cf|bc|sc|ac|as|ss|ssd|asd|usd|us|lidocalcio|lido\s*calcio|citta\s*di|polisportiva|unione\s*sportiva|basket|pallacanestro|calcio|volley|pallavolo|the|stade)\b",
-            " ",
-            s,
-        )
-        s = re.sub(r"[^a-z0-9]+", " ", s)
-        s = re.sub(r"\s+", " ", s).strip()
-        return s
+        return clean_team_name(name)
 
     def _team_matches(self, m_t: str, cal_t: str) -> bool:
         if not m_t or not cal_t:
             return False
-        m_t = self._clean_team_name(m_t)
-        cal_t = self._clean_team_name(cal_t)
-        if not m_t or not cal_t:
-            return False
-        if m_t == cal_t:
-            return True
-        # 2. Space-insensitive compact equality (e.g. "ostiamare" == "ostiamare" from "ostia mare")
-        m_compact = m_t.replace(" ", "")
-        cal_compact = cal_t.replace(" ", "")
-        if m_compact == cal_compact:
-            return True
-        # 3. Substring matching (only if length >= 4)
-        if len(m_t) >= 4 and len(cal_t) >= 4:
-            if (m_t in cal_t) or (cal_t in m_t):
-                return True
-        # 4. Space-insensitive compact substring (if length >= 5)
-        if len(m_compact) >= 5 and len(cal_compact) >= 5:
-            if (cal_compact in m_compact) or (m_compact in cal_compact):
-                return True
-        # 5. Significant word set intersection (excluding generic club words, length >= 3 for acronyms like OFI, PSV, AEK)
-        m_words = set(w for w in m_t.split() if len(w) >= 3)
-        c_words = set(w for w in cal_t.split() if len(w) >= 3)
-        distinct_common = (m_words & c_words) - self.GENERIC_CLUB_WORDS
-        if distinct_common:
-            return True
-        # 6. Metric fuzzy similarity (ratio >= 0.75 for names of length >= 3)
-        from difflib import SequenceMatcher
-        if len(m_t) >= 3 and len(cal_t) >= 3:
-            if SequenceMatcher(None, m_t, cal_t).ratio() >= 0.75:
-                return True
-        return False
+        return match_single_team(m_t, cal_t) >= 0.75
 
     NON_COMPETITOR_WORDS = {
         "atp", "wta", "itf", "challenger", "tour", "open", "finals", "final",
@@ -674,7 +632,9 @@ class TheSportsDBService:
                 candidates = self._calendar_cache
 
             m_home, m_away = self._extract_teams(m)
-            if not m_home or not m_away:
+            dir_home = m.get("_diretta_home") or ""
+            dir_away = m.get("_diretta_away") or ""
+            if not (m_home and m_away) and not (dir_home and dir_away):
                 continue
 
             m_date = m.get("date", 0)
@@ -694,13 +654,21 @@ class TheSportsDBService:
                 if not cal_home or not cal_away:
                     continue
 
-                h_direct = self._team_matches(m_home, cal_home)
-                a_direct = self._team_matches(m_away, cal_away)
-                h_inverted = self._team_matches(m_home, cal_away)
-                a_inverted = self._team_matches(m_away, cal_home)
+                # Gatekeeper 1: Bilateral team match is MANDATORY (Dual-Test: Raw stream teams OR Diretta normalized teams)
+                h_direct = self._team_matches(m_home, cal_home) if (m_home and m_away) else False
+                a_direct = self._team_matches(m_away, cal_away) if (m_home and m_away) else False
+                h_inverted = self._team_matches(m_home, cal_away) if (m_home and m_away) else False
+                a_inverted = self._team_matches(m_away, cal_home) if (m_home and m_away) else False
+                teams_matched = (h_direct and a_direct) or (h_inverted and a_inverted)
 
-                # Gatekeeper 1: Bilateral team match is MANDATORY
-                if not ((h_direct and a_direct) or (h_inverted and a_inverted)):
+                if not teams_matched and dir_home and dir_away:
+                    dh_direct = self._team_matches(dir_home, cal_home)
+                    da_direct = self._team_matches(dir_away, cal_away)
+                    dh_inverted = self._team_matches(dir_home, cal_away)
+                    da_inverted = self._team_matches(dir_away, cal_home)
+                    teams_matched = (dh_direct and da_direct) or (dh_inverted and da_inverted)
+
+                if not teams_matched:
                     continue
 
                 # Gatekeeper 2: Strict time window (max 90 minutes for team sports)
