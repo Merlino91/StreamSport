@@ -563,10 +563,30 @@ CANONICAL_LEAGUES = {
         "silo": "hockey",
         "patterns": [r"\bkhl\b", r"russia\s*khl"],
     },
+    "hockey_shl": {
+        "display": "SHL",
+        "silo": "hockey",
+        "patterns": [r"\bshl\b", r"swedish\s*hockey\s*league", r"svezia\s*shl", r"sweden\s*shl"],
+    },
+    "hockey_extraliga": {
+        "display": "Czech Extraliga",
+        "silo": "hockey",
+        "patterns": [r"czech\s*extraliga", r"tipsport\s*extraliga", r"\bextraliga\b"],
+    },
+    "hockey_liiga": {
+        "display": "Liiga",
+        "silo": "hockey",
+        "patterns": [r"\bliiga\b", r"sm-liiga", r"finnish\s*liiga"],
+    },
+    "hockey_del": {
+        "display": "DEL",
+        "silo": "hockey",
+        "patterns": [r"\bdel\b", r"deutsche\s*eishockey\s*liga"],
+    },
     "hockey_euro": {
         "display": "Leghe Europee Hockey",
         "silo": "hockey",
-        "patterns": [r"\bshl\b", r"\bliiga\b", r"\bdel\b"],
+        "patterns": [r"leghe\s*europee", r"european\s*leagues?", r"national\s*league", r"icehl", r"ebel", r"alps\s*hockey"],
     },
 
     # --------------------------------------------------------------------------

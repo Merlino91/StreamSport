@@ -263,23 +263,31 @@ class CatalogService:
             "", "other", "unknown", "altri sport", "live sports", "football", "soccer",
             "calcio", "basket", "tennis", "undefined",
             "americhe e leghe extra-ue", "altre leghe europee", "altri campionati europei",
-            "calcio internazionale", "partite amichevoli", "campionati minori"
+            "calcio internazionale", "partite amichevoli", "campionati minori",
+            "leghe europee hockey", "leghe europee"
         }
 
         comp_badge = ""
-        # 1. Canonical competition first (official display name)
         canon = match.get("canonical_competition") or match.get("_canonical_competition")
-        if canon:
+        raw_comp = match.get("competition") or match.get("_competition") or comp_name or ""
+        c_clean = re.sub(r"[\U00010000-\U0010ffff]", "", raw_comp).strip(": -")
+
+        # 1. Specific Canonical competition first (official display name, unless it was generic hockey_euro)
+        if canon and canon != "hockey_euro":
             comp_display = get_canonical_display_name(canon)
             if comp_display:
                 comp_badge = f"🏆 {comp_display}"
 
-        # 2. Specific competition from Diretta / TheSportsDB
+        # 2. Specific competition from Diretta / Livesport / TheSportsDB
         if not comp_badge:
-            raw_comp = match.get("competition") or match.get("_competition") or comp_name or ""
-            c_clean = re.sub(r"[\U00010000-\U0010ffff]", "", raw_comp).strip(": -")
             if c_clean and c_clean.lower() not in GENERIC_GENRES:
                 comp_badge = f"🏆 {c_clean}"
+
+        # 2b. Fallback to generic canonical display name if available
+        if not comp_badge and canon:
+            comp_display = get_canonical_display_name(canon)
+            if comp_display:
+                comp_badge = f"🏆 {comp_display}"
 
         # 3. Fallback to genre only if no specific competition was identified
         if not comp_badge:

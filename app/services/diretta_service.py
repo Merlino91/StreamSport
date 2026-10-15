@@ -99,6 +99,14 @@ class DirettaService:
         "apple tv", "mls season pass", "nba global league pass", "nhl.tv", "fiba tv", "euroleague tv", "mlb.tv"
     )
 
+    GENERIC_COMPETITIONS: Set[str] = {
+        "", "other", "unknown", "altri sport", "live sports", "football", "soccer",
+        "calcio", "basket", "tennis", "undefined",
+        "americhe e leghe extra-ue", "altre leghe europee", "altri campionati europei",
+        "calcio internazionale", "partite amichevoli", "campionati minori",
+        "leghe europee hockey", "leghe europee", "european leagues", "ice hockey", "hockey"
+    }
+
     def __init__(self):
         self._cached_events: List[Dict[str, Any]] = []
         self._en_events_by_silo: Dict[str, List[Dict[str, Any]]] = {}
@@ -346,6 +354,17 @@ class DirettaService:
 
             if best_en_cand and best_en_score >= 0.75:
                 m["_flashscore_id"] = best_en_cand.get("flashscore_id") or best_en_cand.get("id")
+                # DOMINANT: Adopt official English competition from Livesport (Flashscore EN)
+                en_comp = (best_en_cand.get("competition") or "").strip()
+                if en_comp and en_comp.lower() not in self.GENERIC_COMPETITIONS:
+                    m["competition"] = en_comp
+                    m["_competition"] = en_comp
+                    en_canon = detect_canonical_competition(
+                        f"{en_comp} : {best_en_cand.get('title') or m.get('title', '')}", silo_hint=silo
+                    )
+                    if en_canon:
+                        m["canonical_competition"] = en_canon
+                        m["_canonical_competition"] = en_canon
 
             # Pass 2: Reconcile against Italian / Consolidated candidates (with Match ID bonus/penalty)
             candidates = by_silo.get(silo, [])
@@ -382,19 +401,13 @@ class DirettaService:
                     m["_official_date"] = chosen["date"]
                     m["date"] = chosen["date"]
 
-                # Adopt official Italian competition if missing or generic
-                GENERIC_COMPETITIONS = {
-                    "", "other", "unknown", "altri sport", "live sports", "football", "soccer",
-                    "calcio", "basket", "tennis", "undefined",
-                    "americhe e leghe extra-ue", "altre leghe europee", "altri campionati europei",
-                    "calcio internazionale", "partite amichevoli", "campionati minori"
-                }
+                # Adopt official Italian competition ONLY if missing or generic (Livesport English competition is dominant)
                 current_comp = (m.get("competition") or "").lower().strip()
-                if not current_comp or current_comp in GENERIC_COMPETITIONS:
+                if not current_comp or current_comp in self.GENERIC_COMPETITIONS:
                     m["competition"] = chosen["competition"]
                     m["_competition"] = chosen["competition"]
 
-                # Enrich canonical competition tag if missing
+                # Enrich canonical competition tag if still missing
                 if not m.get("canonical_competition") and chosen.get("competition"):
                     canon = detect_canonical_competition(
                         f"{chosen['competition']} : {m['title']}", silo_hint=silo

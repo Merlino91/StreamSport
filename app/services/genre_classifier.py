@@ -408,6 +408,11 @@ class GenreClassifier:
                 "hockey_chl": ("hockey", "KHL e Leghe Europee"),
                 "hockey_nhl": ("hockey", "NHL"),
                 "hockey_khl": ("hockey", "KHL e Leghe Europee"),
+                "hockey_shl": ("hockey", "KHL e Leghe Europee"),
+                "hockey_extraliga": ("hockey", "KHL e Leghe Europee"),
+                "hockey_liiga": ("hockey", "KHL e Leghe Europee"),
+                "hockey_del": ("hockey", "KHL e Leghe Europee"),
+                "hockey_euro": ("hockey", "KHL e Leghe Europee"),
                 "fight_ufc": ("combattimento", "UFC"),
                 "fight_boxing": ("combattimento", "Boxe"),
                 "fight_wwe": ("combattimento", "Wrestling e WWE"),
@@ -620,13 +625,13 @@ class GenreClassifier:
             or silo == "hockey"
             or any(k in title_lower for k in ("hockey", "nhl", "khl", "shl", "ohl", "ushl"))
         ) and not is_football_context:
-            if re.search(r"\b(nhl|stanley\s*cup)\b", title_lower) or any(t in home or t in away or t in title_lower for t in self.NHL_TEAMS):
+            if re.search(r"\b(nhl|stanley\s*cup)\b", eval_text) or any(t in home or t in away or t in title_lower for t in self.NHL_TEAMS):
                 return "hockey", "NHL"
-            if re.search(r"\b(khl|del|liiga|shl)\b", title_lower):
+            if re.search(r"\b(khl|del|liiga|shl|extraliga|tipsport|allsvenskan|national\s*league|icehl|ebel|alps|leghe\s*europee|sweden|svezia|czech|cechia|finland|germany|deutsch|swiss|svizzera|austria)\b", eval_text):
                 return "hockey", "KHL e Leghe Europee"
-            if re.search(r"\b(iihf|mondiali|olympics|world\s*championship|roller|field)\b", title_lower):
+            if re.search(r"\b(iihf|mondiali|olympics|world\s*championship|roller|field)\b", eval_text):
                 return "hockey", "Mondiali e Nazionali"
-            return "hockey", "NHL"
+            return "hockey", "KHL e Leghe Europee"
 
         # ------------------------------------------------------------------
         # 8. SPORT DA COMBATTIMENTO (Dedicated Catalog: 'combattimento')
