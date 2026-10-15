@@ -28,7 +28,6 @@ from app.services.tennis_poster_service import tennis_poster_service
 from app.services.thesportsdb_service import thesportsdb_service
 from app.services.tvvoo_service import tvvoo_service
 from app.services.italian_epg_service import italian_epg_service
-from app.services.virgilio_service import virgilio_service
 from app.services.diretta_service import diretta_service
 from app.services.canonical_competition_service import (
     detect_canonical_competition,
@@ -545,8 +544,12 @@ class CatalogService:
         primary_matches: List[Dict[str, Any]],
         secondary_matches: List[Dict[str, Any]],
     ) -> List[Dict[str, Any]]:
-        """Merges duplicate events into a single card, combining their streams and best metadata."""
         merged_list: List[Dict[str, Any]] = [dict(m) for m in primary_matches]
+        for m in merged_list:
+            if m.get("title") and "raw_titles" not in m:
+                m["raw_titles"] = [m["title"]]
+            if m.get("teams") and "alt_teams" not in m:
+                m["alt_teams"] = [m["teams"]]
 
         for m2 in secondary_matches:
             m2_id = m2.get("id")
@@ -658,6 +661,22 @@ class CatalogService:
                             existing_sources.append(s)
                         existing_ids.add(str(s.get("id")))
 
+                # Preserve all variant titles across merged providers
+                raw_titles = existing.setdefault("raw_titles", [])
+                if existing.get("title") and existing["title"] not in raw_titles:
+                    raw_titles.append(existing["title"])
+                m2_title = m2.get("title")
+                if m2_title and m2_title not in raw_titles:
+                    raw_titles.append(m2_title)
+
+                # Preserve all alternative team objects across merged providers
+                alt_teams = existing.setdefault("alt_teams", [])
+                if existing.get("teams") and existing["teams"] not in alt_teams:
+                    alt_teams.append(existing["teams"])
+                m2_teams = m2.get("teams")
+                if m2_teams and m2_teams not in alt_teams:
+                    alt_teams.append(m2_teams)
+
                 if not existing.get("teams") and m2.get("teams"):
                     existing["teams"] = m2["teams"]
                 if not existing.get("poster") and m2.get("poster"):
@@ -673,7 +692,12 @@ class CatalogService:
                 if not existing.get("_silo") and m2.get("_silo"):
                     existing["_silo"] = m2["_silo"]
             else:
-                merged_list.append(dict(m2))
+                m2_dict = dict(m2)
+                if m2_dict.get("title") and "raw_titles" not in m2_dict:
+                    m2_dict["raw_titles"] = [m2_dict["title"]]
+                if m2_dict.get("teams") and "alt_teams" not in m2_dict:
+                    m2_dict["alt_teams"] = [m2_dict["teams"]]
+                merged_list.append(m2_dict)
 
 
         return merged_list
@@ -1028,8 +1052,6 @@ class CatalogService:
                     ocblacktop_service.get_official_sessions(),
                     thesportsdb_service.fetch_multi_day_calendar(days_ahead=2, days_behind=1),
                     italian_epg_service.get_matches(),
-                    virgilio_service.get_matches(),
-                    thesportsdb_service.fetch_browse_tv_matches(),
                     diretta_service.get_events(),
                 ]
                 results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -1038,22 +1060,14 @@ class CatalogService:
                 espn_events = results[2] if isinstance(results[2], list) else []
                 ocb_sessions = results[3] if isinstance(results[3], list) else []
                 epg_raw = results[5] if isinstance(results[5], list) else []
-                virgilio_raw = results[6] if isinstance(results[6], list) else []
-                tsdb_tv_raw = results[7] if isinstance(results[7], list) else []
-                diretta_events = results[8] if isinstance(results[8], list) else []
+                diretta_events = results[6] if isinstance(results[6], list) else []
 
                 streamed_matches = [m for m in streamed_raw if self.is_real_match(m)]
                 daddylive_matches = [m for m in daddylive_raw if self.is_real_match(m)]
                 epg_matches = [m for m in epg_raw if self.is_real_match(m)]
-                virgilio_matches = [m for m in virgilio_raw if self.is_real_match(m)]
-                tsdb_tv_matches = [m for m in tsdb_tv_raw if self.is_real_match(m)]
 
                 # Merge streamed and daddylive matches silo-by-silo into combined fresh
                 combined_fresh = self.merge_and_deduplicate_by_silos(streamed_matches, daddylive_matches)
-
-                # Merge TheSportsDB multi-nation TV schedule with TvVoo streams
-                if tsdb_tv_matches:
-                    combined_fresh = self.merge_and_deduplicate_by_silos(combined_fresh, tsdb_tv_matches)
 
                 # 2. Pull all active matches from DB to retain existing enriched posters
                 all_db_matches = [m for m in db_service.get_active_matches() if self.is_real_match(m)]

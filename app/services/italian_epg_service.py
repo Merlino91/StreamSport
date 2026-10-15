@@ -828,10 +828,20 @@ class ItalianEPGService:
                         continue
 
                 ep_date = ep.get("date", 0)
-                # Time window: +-45m (or +-60m for motorsports, +-240m for simulcast shows)
-                max_offset = (240 * 60 * 1000) if m_is_sim else ((60 * 60 * 1000) if m_silo == "motor-sports" else (45 * 60 * 1000))
-                if m_date and ep_date and abs(m_date - ep_date) > max_offset:
-                    continue
+                if m_date and ep_date:
+                    if m_is_sim:
+                        if abs(m_date - ep_date) > 240 * 60 * 1000:
+                            continue
+                    else:
+                        # Asymmetric TV window:
+                        # Pre-match broadcast/studio can start up to 90 min before kickoff (m_date - ep_date up to +90m).
+                        # Broadcast start after kickoff allowed only up to 20 min late (ep_date - m_date up to +20m).
+                        # For motorsports, coverage can start up to 120 min before session.
+                        pre_max = (120 * 60 * 1000) if m_silo == "motor-sports" else (90 * 60 * 1000)
+                        post_max = 20 * 60 * 1000
+                        time_diff = m_date - ep_date  # Positive if EPG starts before match kickoff
+                        if time_diff > pre_max or time_diff < -post_max:
+                            continue
 
                 if m_is_sim and ep_is_sim:
                     m_info = get_simulcast_info(m_title)
@@ -881,6 +891,10 @@ class ItalianEPGService:
 
                 if added_for_match > 0:
                     enriched_count += 1
+
+        if enriched_count > 0:
+            logger.info("Italian EPG: agganciati flussi FHD ufficiali a %d match confermati.", enriched_count)
+        return enriched_count
 
     def filter_conflicting_italian_channels(self, matches: List[Dict[str, Any]]) -> int:
         """

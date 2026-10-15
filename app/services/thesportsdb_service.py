@@ -13,7 +13,6 @@ from app.config import (
     THESPORTSDB_USER,
     THESPORTSDB_PASS,
     THESPORTSDB_CALENDAR_INTERVAL,
-    THESPORTSDB_BROWSE_TV_INTERVAL,
 )
 from app.services.db_service import db_service
 from app.services.canonical_competition_service import (
@@ -121,11 +120,6 @@ class TheSportsDBService:
         self._calendar_by_silo: Dict[str, List[Dict[str, Any]]] = {}
         self._last_calendar_fetch: float = 0.0
         self._calendar_lock = asyncio.Lock()
-
-        # Browse TV Schedule State
-        self._browse_tv_cache: List[Dict[str, Any]] = []
-        self._last_browse_tv_fetch: float = 0.0
-        self._browse_tv_lock = asyncio.Lock()
 
     async def _get_client(self) -> httpx.AsyncClient:
         if self._client is None or self._client.is_closed:
@@ -659,7 +653,7 @@ class TheSportsDBService:
     def reconcile_matches(self, matches: List[Dict[str, Any]]) -> int:
         """
         LEVEL 1 RECONCILIATION:
-        Matches upstream matches (Streamed, DaddyLive, Virgilio) against the official TheSportsDB Calendar.
+        Matches upstream matches (Streamed, DaddyLive) against the official TheSportsDB Calendar.
         Prioritizes:
         1. Bilateral team match (Mandatory)
         2. Strict time proximity (<= 90 min)
@@ -1289,259 +1283,6 @@ class TheSportsDBService:
         except Exception as e:
             logger.debug("search_event_thumb exception: %s", e)
         return None, None
-
-    async def fetch_browse_tv_matches(self, force: bool = False) -> List[Dict[str, Any]]:
-        """
-        Scrapes https://www.thesportsdb.com/browse_tv to discover live TV sports broadcasts for
-        Italy, Spain, Germany, France, United Kingdom, and World.
-        Maps recognized broadcasters directly to TvVoo FHD streams.
-        Returns match objects ready for merging into the central catalog.
-        Caches results for THESPORTSDB_BROWSE_TV_INTERVAL seconds (default: 6 hours).
-        """
-        now = time.time()
-        if not force and self._browse_tv_cache and (now - self._last_browse_tv_fetch < THESPORTSDB_BROWSE_TV_INTERVAL):
-            return self._browse_tv_cache
-
-        async with self._browse_tv_lock:
-            if not force and self._browse_tv_cache and (now - self._last_browse_tv_fetch < THESPORTSDB_BROWSE_TV_INTERVAL):
-                return self._browse_tv_cache
-
-            from app.services.tvvoo_service import tvvoo_service
-            await tvvoo_service.ensure_synced()
-
-            url = "https://www.thesportsdb.com/browse_tv"
-            try:
-                client = await self._get_client()
-                res = await client.get(url)
-                if res.status_code != 200:
-                    logger.warning("TheSportsDB browse_tv returned status %d", res.status_code)
-                    return self._browse_tv_cache
-                html_content = res.text
-            except Exception as e:
-                logger.warning("Failed to fetch TheSportsDB browse_tv: %s", e)
-                return self._browse_tv_cache
-
-            cards = re.findall(
-                r'<td\s+class=[\x27\x22]tv-event-card[\x27\x22][^>]*>(.*?)</td>',
-                html_content,
-                re.DOTALL | re.IGNORECASE,
-            )
-            if not cards:
-                return self._browse_tv_cache
-
-            target_countries = {
-                "italy", "italia", "spain", "germany", "france",
-                "united-kingdom", "united_kingdom", "world"
-            }
-            today_utc = datetime.datetime.now(datetime.timezone.utc).date()
-            matches: List[Dict[str, Any]] = []
-
-            for card in cards:
-                ev_m = re.search(r'/event/(\d+)-([^\x27\x22]+)', card)
-                ev_id = ev_m.group(1) if ev_m else ""
-                ev_slug = ev_m.group(2) if ev_m else ""
-
-                # Decode untruncated event name from the URL slug (TSDB HTML cards truncate title at ~32 chars)
-                slug_title = ""
-                if ev_slug:
-                    slug_unquoted = urllib.parse.unquote(ev_slug).replace('-', ' ')
-                    slug_title = re.sub(r'\s+vs\s+', ' vs ', slug_unquoted.title(), flags=re.IGNORECASE).strip()
-
-                t_m = re.search(r'calendar\.png[^\>]*\>\s*([^<]+)<', card)
-                card_title = t_m.group(1).strip() if t_m else ""
-
-                # Prefer untruncated slug title if card title was truncated or missing
-                if slug_title and (not card_title or len(slug_title) > len(card_title)):
-                    title = slug_title
-                else:
-                    title = card_title or slug_title
-                if not title:
-                    continue
-
-                time_m = re.search(r'(\d{2}:\d{2})\s*UTC', card)
-                time_str = time_m.group(1) if time_m else "00:00"
-
-                try:
-                    dt = datetime.datetime.strptime(f"{today_utc} {time_str}", "%Y-%m-%d %H:%M").replace(
-                        tzinfo=datetime.timezone.utc
-                    )
-                    date_ms = int(dt.timestamp() * 1000)
-                except Exception:
-                    date_ms = int(time.time() * 1000)
-
-                # Poster thumbnail
-                th_m = re.search(r'src=[\x27\x22]([^\x27\x22]*thumb[^\x27\x22]*)[\x27\x22]', card)
-                thumb = th_m.group(1) if th_m else None
-                if thumb and "no_thumb" not in thumb:
-                    thumb = re.sub(r'/(?:small|tiny|preview)$', '', thumb)
-                    if not thumb.endswith('/medium'):
-                        thumb = f"{thumb}/medium"
-                else:
-                    thumb = None
-
-                # Channel matching for target countries
-                ch_matches = re.findall(
-                    r'<img[^>]*flags/([^.\x27\x22/]+)\.(?:svg|png)[^>]*>\s*<a\s+href=[\x27\x22]/channel/(\d+)-([^\x27\x22]+)[\x27\x22][^>]*/*>([^<]+)</a>',
-                    card,
-                    re.DOTALL,
-                )
-
-                sources: List[Dict[str, Any]] = []
-                seen_streams = set()
-
-                for flag, ch_id, ch_slug, ch_name in ch_matches:
-                    flag_norm = flag.lower().replace('_', '-')
-                    is_target = any(tc in flag_norm or flag_norm in tc for tc in target_countries)
-                    if not is_target:
-                        continue
-
-                    ch_clean = ch_name.strip()
-                    ch_lower = ch_clean.lower()
-                    # Silence generic unnumbered "Magenta Sport" from TheSportsDB
-                    if "magenta sport" in ch_lower and not re.search(r"\b\d+\b", ch_clean):
-                        continue
-
-                    # Silence generic unnumbered OTT platform entries from TheSportsDB (not linear TV channels)
-                    if re.match(r"^dazn\s+(spain|germany|italy|uk|national league|france|us|canada|es|de|it|fr)$", ch_lower):
-                        continue
-
-                    # Map flag_norm to country silo
-                    flag_country = None
-                    if "ital" in flag_norm: flag_country = "Italy"
-                    elif "germ" in flag_norm or "deut" in flag_norm: flag_country = "Germany"
-                    elif "spain" in flag_norm or "esp" in flag_norm: flag_country = "Spain"
-                    elif "fran" in flag_norm: flag_country = "France"
-                    elif "uk" in flag_norm or "unit" in flag_norm or "eng" in flag_norm: flag_country = "United Kingdom"
-
-                    streams = tvvoo_service.get_channel_streams(ch_clean, country=flag_country)
-                    for st in streams:
-                        key = (st.get("canonical"), st.get("tag"))
-                        if key not in seen_streams and st.get("url"):
-                            seen_streams.add(key)
-                            sources.append({
-                                "source": "tvvoo",
-                                "id": st.get("canonical", "tvvoo"),
-                                "name": st.get("display_name", ch_name.strip()),
-                                "url": st["url"],
-                                "tag": st.get("tag", "c"),
-                                "country": st.get("country", ""),
-                            })
-
-                # GHOST EVENT FILTER: Must have at least one playable TvVoo source
-                if not sources:
-                    continue
-
-                # Prioritize Italian TvVoo sources at index 0..k
-                sources.sort(key=lambda s: 0 if s.get("country") == "Italy" or "🇮🇹" in s.get("name", "") else 1)
-
-                # Structured teams
-                teams_dict = None
-                if " vs " in title:
-                    parts = title.split(" vs ", 1)
-                    teams_dict = {"home": {"name": parts[0].strip()}, "away": {"name": parts[1].strip()}}
-                elif " - " in title:
-                    parts = title.split(" - ", 1)
-                    teams_dict = {"home": {"name": parts[0].strip()}, "away": {"name": parts[1].strip()}}
-
-                # Category / Silo resolution from calendar cache if available
-                silo = "altri_sport"
-                comp = ""
-                if self._calendar_cache:
-                    NOISE_TOKENS = {"vs", "at", "the", "fc", "cf", "sc", "ac", "bc", "as", "club"}
-                    clean_title_tokens = {w for w in re.sub(r'[^a-z0-9]+', ' ', title.lower()).split() if w not in NOISE_TOKENS and len(w) > 1}
-                    is_title_youth = bool(re.search(r"\b(u-?1[5-9]|u-?2[01]|under\s*1[5-9]|under\s*2[01]|youth|juvenil|primavera)\b", title.lower()))
-                    is_title_women = bool(re.search(r"\b(women(?:['']s)?|femminile|ladies|frauen|femenino|w-|wta|uwcl)\b", title.lower()))
-
-                    h_toks = set()
-                    a_toks = set()
-                    if teams_dict and teams_dict.get("home") and teams_dict.get("away"):
-                        h_name = (teams_dict["home"].get("name") or "").lower()
-                        a_name = (teams_dict["away"].get("name") or "").lower()
-                        h_toks = {w for w in re.sub(r'[^a-z0-9]+', ' ', h_name).split() if w not in NOISE_TOKENS and len(w) > 1}
-                        a_toks = {w for w in re.sub(r'[^a-z0-9]+', ' ', a_name).split() if w not in NOISE_TOKENS and len(w) > 1}
-
-                    for cev in self._calendar_cache:
-                        cev_id = str(cev.get("id") or "")
-                        cev_title = cev.get("title", "").strip().lower()
-                        cev_tokens = {w for w in re.sub(r'[^a-z0-9]+', ' ', cev_title).split() if w not in NOISE_TOKENS and len(w) > 1}
-                        is_cev_youth = bool(re.search(r"\b(u-?1[5-9]|u-?2[01]|under\s*1[5-9]|under\s*2[01]|youth|juvenil|primavera)\b", cev_title))
-                        is_cev_women = bool(re.search(r"\b(women(?:['']s)?|femminile|ladies|frauen|femenino|w-|wta|uwcl)\b", cev_title))
-
-                        # Strict youth / women separation
-                        if is_title_youth != is_cev_youth or is_title_women != is_cev_women:
-                            continue
-
-                        # Exact ID or exact title match
-                        if (ev_id and cev_id == ev_id) or cev_title == title.lower():
-                            silo = cev.get("_silo", "altri_sport")
-                            comp = cev.get("competition", "")
-                            if not thumb and cev.get("thumb"):
-                                thumb = cev.get("thumb")
-                            break
-
-                        # Bilateral team matching (both home and away must overlap)
-                        matched = False
-                        if h_toks and a_toks:
-                            if h_toks.intersection(cev_tokens) and a_toks.intersection(cev_tokens):
-                                matched = True
-                        elif len(clean_title_tokens) >= 2 and len(cev_tokens) >= 2:
-                            common = clean_title_tokens.intersection(cev_tokens)
-                            if len(common) >= 2 and len(common) >= len(clean_title_tokens) - 1:
-                                matched = True
-
-                        if matched:
-                            silo = cev.get("_silo", "altri_sport")
-                            comp = cev.get("competition", "")
-                            if not thumb and cev.get("thumb"):
-                                thumb = cev.get("thumb")
-                            break
-
-                # Keyword fallback for silo if not in calendar
-                if silo == "altri_sport":
-                    t_low = title.lower()
-                    from app.services.genre_classifier import genre_classifier
-                    if any(w in t_low for w in ("basket", "baloncesto", "olimpia", "virtus", "partizan", "barcelona basket", "real madrid basket", "euroleague")) or any(team in t_low for team in genre_classifier.NBA_TEAMS):
-                        silo = "basketball"
-                    elif any(w in t_low for w in ("fc ", "united", "inter", "milan", "juventus", "calcio", "madrid", "galatasaray", "barcelona", "harrogate", "aldershot", "gateshead", "spain vs croatia", "england", "scotland", "national league")):
-                        silo = "football"
-                    elif any(w in t_low for w in ("nfl", "cfl", "super bowl", "redzone")) or any(team in t_low for team in genre_classifier.NFL_TEAMS):
-                        silo = "american-football"
-                    elif any(w in t_low for w in ("braves", "phillies", "astros", "white sox", "yankees", "red sox", "mlb")) or any(team in t_low for team in genre_classifier.MLB_TEAMS):
-                        silo = "baseball"
-                    elif any(w in t_low for w in ("hurricanes", "panthers", "nhl", "rangers", "bruins")) or any(team in t_low for team in genre_classifier.NHL_TEAMS):
-                        silo = "hockey"
-
-                from app.services.canonical_competition_service import detect_canonical_competition, get_canonical_display_name
-                canon = detect_canonical_competition(title, silo_hint=silo)
-                if canon:
-                    comp = get_canonical_display_name(canon) or comp
-
-                slug_title = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")
-                match_id = f"tsdb_tv_{ev_id or slug_title}_{int(date_ms / 1000)}"
-
-                match_obj: Dict[str, Any] = {
-                    "id": match_id,
-                    "title": title,
-                    "category": silo,
-                    "canonical_competition": canon,
-                    "_silo": silo,
-                    "competition": comp,
-                    "_competition": comp,
-                    "date": date_ms,
-                    "sources": sources,
-                    "popular": False,
-                    "poster": thumb,
-                    "_source_type": "thesportsdb_tv",
-                }
-                if teams_dict:
-                    match_obj["teams"] = teams_dict
-
-                matches.append(match_obj)
-
-            self._browse_tv_cache = matches
-            self._last_browse_tv_fetch = now
-            logger.info("TheSportsDB browse_tv: estratti %d eventi con stream TvVoo pronti.", len(matches))
-            return matches
 
 
 thesportsdb_service = TheSportsDBService()

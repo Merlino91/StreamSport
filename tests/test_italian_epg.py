@@ -326,6 +326,54 @@ class TestItalianEPGService(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(purged_count, 0)
         self.assertEqual(len(match["sources"]), 1)
 
+    def test_asymmetric_tv_schedule_window(self):
+        """Verifies TV EPG allows up to 90m pre-match studio, but rejects late joinings > 20m."""
+        import asyncio
+        import time
+        match_kickoff = 1791986400000  # 21:00
+
+        self.service._last_fetch_time = time.time()
+        self.service._cached_matches = [
+            {
+                "id": "sky_juve_milan",
+                "title": "Juventus vs Milan",
+                "date": match_kickoff - (60 * 60 * 1000),  # 20:00
+                "_silo": "football",
+                "sources": [{"name": "Sky Sport Uno", "id": "sky sport uno", "country": "Italy", "canonical": "sky sport uno"}],
+            }
+        ]
+        match_pre = {
+            "id": "streamed-juve-milan",
+            "title": "Juventus vs Milan",
+            "date": match_kickoff,
+            "_silo": "football",
+            "sources": [],
+        }
+        enriched = asyncio.run(self.service.enrich_matches_with_epg_channels([match_pre]))
+        self.assertEqual(enriched, 1)
+        self.assertTrue(any(s.get("name") == "Sky Sport Uno" for s in match_pre["sources"]))
+
+        # Case B: EPG starts 30m after kickoff (21:30) -> REJECTED
+        self.service._cached_matches = [
+            {
+                "id": "sky_juve_milan_late",
+                "title": "Juventus vs Milan",
+                "date": match_kickoff + (30 * 60 * 1000),  # 21:30
+                "_silo": "football",
+                "sources": [{"name": "Sky Sport Uno", "id": "sky sport uno", "country": "Italy", "canonical": "sky sport uno"}],
+            }
+        ]
+        match_late = {
+            "id": "streamed-juve-milan-late",
+            "title": "Juventus vs Milan",
+            "date": match_kickoff,
+            "_silo": "football",
+            "sources": [],
+        }
+        enriched_late = asyncio.run(self.service.enrich_matches_with_epg_channels([match_late]))
+        self.assertEqual(enriched_late, 0)
+        self.assertEqual(len(match_late["sources"]), 0)
+
 
 if __name__ == "__main__":
     unittest.main()

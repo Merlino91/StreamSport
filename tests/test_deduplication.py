@@ -63,6 +63,10 @@ class TestDeduplication(unittest.TestCase):
         # TvVoo must be at index 0 (top priority)
         self.assertEqual(merged[0]["sources"][0]["source"], "tvvoo")
 
+        # Verify preservation of titles and teams from both sources
+        self.assertIn("Turkey vs Italy", merged[0]["raw_titles"])
+        self.assertIn("Türkiye vs. Italy", merged[0]["raw_titles"])
+
 
 if __name__ == "__main__":
     unittest.main()

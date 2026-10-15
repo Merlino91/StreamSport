@@ -230,8 +230,8 @@ class TheSportsDBTestCase(unittest.IsolatedAsyncioTestCase):
             "football": thesportsdb_service._calendar_cache
         }
 
-        # Virgilio-style title with 'Ostia Mare Lidocalcio'
-        virgilio_match = {
+        # Test title with Italian club prefix 'Ostia Mare Lidocalcio'
+        test_match = {
             "id": "match_ostiamare_forli",
             "title": "Ostia Mare Lidocalcio vs Forlì",
             "_silo": "football",
@@ -241,9 +241,9 @@ class TheSportsDBTestCase(unittest.IsolatedAsyncioTestCase):
             "competition": None,
         }
 
-        count = thesportsdb_service.enrich_matches([virgilio_match])
+        count = thesportsdb_service.enrich_matches([test_match])
         self.assertEqual(count, 1)
-        self.assertEqual(virgilio_match["poster"], "https://r2.thesportsdb.com/images/media/event/thumb/ostiamare_forli.jpg/medium")
+        self.assertEqual(test_match["poster"], "https://r2.thesportsdb.com/images/media/event/thumb/ostiamare_forli.jpg/medium")
 
         # 2. Test guardrails: generic prefixes (Real, Virtus, Atletico) MUST NOT false match
         self.assertFalse(thesportsdb_service._team_matches("real madrid", "real sociedad"))
@@ -458,81 +458,6 @@ class TheSportsDBTestCase(unittest.IsolatedAsyncioTestCase):
         finally:
             thesportsdb_service._calendar_cache = old_cache
             thesportsdb_service._calendar_by_silo = old_silo
-
-    @patch("app.services.thesportsdb_service.thesportsdb_service._get_client")
-    @patch("app.services.tvvoo_service.tvvoo_service.ensure_synced")
-    async def test_fetch_browse_tv_matches(self, mock_ensure_synced, mock_get_client):
-        sample_html = """
-        <table>
-            <tr>
-                <td class="tv-event-card">
-                    <a href='/event/1001-spain-vs-croatia'>
-                        <img src='https://r2.thesportsdb.com/images/media/event/thumb/spain_croatia.jpg/small' alt='thumb'/>
-                        <br><img src='/images/icons/calendar.png'/> Spain vs Croatia<br>
-                    </a>
-                    <img src='/images/icons/time.png'/>18:00 UTC<br>
-                    <img src='/images/icons/svg/flags/italy.svg'/> <a href='/channel/10-sky-sport-arena'>Sky Sport Arena</a><br>
-                    <img src='/images/icons/svg/flags/spain.svg'/> <a href='/channel/20-movistar-laliga'>Movistar LaLiga</a><br>
-                </td>
-                <td class="tv-event-card">
-                    <a href='/event/1002-canada-local-match'>
-                        <img src='https://r2.thesportsdb.com/images/media/event/thumb/canada.jpg/small' alt='thumb'/>
-                        <br><img src='/images/icons/calendar.png'/> Canada Event<br>
-                    </a>
-                    <img src='/images/icons/time.png'/>20:00 UTC<br>
-                    <img src='/images/icons/svg/flags/canada.svg'/> <a href='/channel/30-onesoccer'>OneSoccer CA</a><br>
-                </td>
-            </tr>
-        </table>
-        """
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.text = sample_html
-
-        mock_client = AsyncMock()
-        mock_client.get.return_value = mock_resp
-        mock_get_client.return_value = mock_client
-
-        from app.services.tvvoo_service import tvvoo_service
-        old_channels = tvvoo_service._channels_by_canonical
-        try:
-            tvvoo_service._channels_by_canonical = {
-                "sky sport arena": [{
-                    "canonical": "sky sport arena",
-                    "display_name": "Sky Sport Arena",
-                    "url": "https://vavoo.to/play/sky_arena_c",
-                    "tag": "c",
-                    "country": "Italy",
-                }],
-                "movistar laliga": [{
-                    "canonical": "movistar laliga",
-                    "display_name": "🇪🇸 Movistar LaLiga",
-                    "url": "https://vavoo.to/play/movistar_c",
-                    "tag": "c",
-                    "country": "Spain",
-                }],
-            }
-
-            matches = await thesportsdb_service.fetch_browse_tv_matches(force=True)
-
-            # Canada event filtered out; Spain vs Croatia retained
-            self.assertEqual(len(matches), 1)
-            m = matches[0]
-            self.assertEqual(m["title"], "Spain vs Croatia")
-            self.assertEqual(m["category"], "football")
-            self.assertEqual(m["poster"], "https://r2.thesportsdb.com/images/media/event/thumb/spain_croatia.jpg/medium")
-            self.assertEqual(m["teams"]["home"]["name"], "Spain")
-            self.assertEqual(m["teams"]["away"]["name"], "Croatia")
-
-            # TvVoo streams attached and Italian stream prioritized at index 0
-            sources = m["sources"]
-            self.assertEqual(len(sources), 2)
-            self.assertEqual(sources[0]["name"], "Sky Sport Arena")
-            self.assertEqual(sources[0]["country"], "Italy")
-            self.assertEqual(sources[1]["name"], "🇪🇸 Movistar LaLiga")
-            self.assertEqual(sources[1]["country"], "Spain")
-        finally:
-            tvvoo_service._channels_by_canonical = old_channels
 
     def test_are_competitions_compatible(self):
         # 1. Sub-group / Girone tolerance
