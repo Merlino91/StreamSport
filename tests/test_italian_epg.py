@@ -374,7 +374,123 @@ class TestItalianEPGService(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(enriched_late, 0)
         self.assertEqual(len(match_late["sources"]), 0)
 
+    def test_tennis_circuit_and_city_extraction(self):
+        """Verifies circuit and city extraction from various tennis strings."""
+        circ, city = ItalianEPGService._extract_tennis_circuit_and_city("Tennis 🎾 ATP - Singles: Shanghai (China)")
+        self.assertEqual(circ, "atp")
+        self.assertEqual(city, "shanghai")
+
+        circ, city = ItalianEPGService._extract_tennis_circuit_and_city("Tennis 🎾 WTA - Singles: Wuhan (China)")
+        self.assertEqual(circ, "wta")
+        self.assertEqual(city, "wuhan")
+
+        circ, city = ItalianEPGService._extract_tennis_circuit_and_city("Tennis 🎾 Challenger Men - Singles: Olbia (Italy)")
+        self.assertEqual(circ, "challenger")
+        self.assertEqual(city, "olbia")
+
+        circ, city = ItalianEPGService._extract_tennis_circuit_and_city("1/4 Final 2 (ATP Masters Shanghai)")
+        self.assertEqual(circ, "atp")
+        self.assertEqual(city, "shanghai")
+
+        circ, city = ItalianEPGService._extract_tennis_circuit_and_city("Dalla Qizhong Forest Sports City Arena di Shanghai, Cina.")
+        self.assertEqual(city, "shanghai")
+
+        circ, city = ItalianEPGService._extract_tennis_circuit_and_city("... Tennis: WTA 1000 Wuhan. - Dall'Optics Valley International Tennis Center di Wuhan, Cina")
+        self.assertEqual(circ, "wta")
+        self.assertEqual(city, "wuhan")
+
+    def test_tennis_session_bridge_enrichment_and_poster(self):
+        """
+        Verifies individual tennis matches inherit Sky Sport Tennis channel
+        and official 16:9 poster from tournament session broadcast.
+        """
+        import asyncio
+        import time
+        session_start = 1792058400000  # 10:00 AM
+
+        self.service._last_fetch_time = time.time()
+        self.service._cached_matches = [
+            {
+                "id": "sky_tennis_shanghai_session",
+                "title": "ATP Masters 1000 Shanghai - 8a giornata",
+                "eventSynopsis": "Dalla Qizhong Forest Sports City Arena di Shanghai, Cina.",
+                "competition": "ATP Masters 1000 Shanghai",
+                "date": session_start,
+                "_silo": "tennis",
+                "category": "tennis",
+                "teams": None,  # General tournament session broadcast, not 1v1 specific players
+                "poster": "https://apid.sky.it/uuid/95ec79e3-ee6f-47fa-8c63-bb193f49afed/COVER_TITLE_WIDE",
+                "sources": [
+                    {
+                        "source": "tvvoo",
+                        "id": "sky sport tennis",
+                        "name": "Sky Sport Tennis",
+                        "country": "Italy",
+                        "canonical": "sky sport tennis",
+                    }
+                ],
+            }
+        ]
+
+        # Match 1: Zverev vs De Minaur in Shanghai (starts 2h into the 6h session) -> MATCHES
+        match_shanghai = {
+            "id": "dlhd-zverev-de-minaur",
+            "title": "Zverev A. vs De Minaur A.",
+            "competition": "Tennis: ATP - Singles: Shanghai (China)",
+            "date": session_start + (120 * 60 * 1000),  # 12:00 PM (+2h)
+            "_silo": "tennis",
+            "category": "tennis",
+            "poster": None,
+            "sources": [{"source": "dlhd", "id": "1073", "name": "Tennis HD Stream"}],
+        }
+
+        # Match 2: WTA Wuhan match (different city and circuit) -> DOES NOT MATCH
+        match_wuhan = {
+            "id": "dlhd-muchova-shnaider",
+            "title": "Muchova K. vs Shnaider D.",
+            "competition": "Tennis: WTA - Singles: Wuhan (China)",
+            "date": session_start + (60 * 60 * 1000),
+            "_silo": "tennis",
+            "category": "tennis",
+            "poster": None,
+            "sources": [{"source": "dlhd", "id": "1075", "name": "Tennis HD Stream"}],
+        }
+
+        enriched = asyncio.run(self.service.enrich_matches_with_epg_channels([match_shanghai, match_wuhan]))
+        self.assertEqual(enriched, 1)
+
+        # Shanghai match inherited Sky Sport Tennis as primary channel and Sky 16:9 poster
+        self.assertEqual(match_shanghai["sources"][0]["name"], "Sky Sport Tennis")
+        self.assertEqual(match_shanghai["sources"][0]["canonical"], "sky sport tennis")
+        self.assertEqual(match_shanghai["poster"], "https://apid.sky.it/uuid/95ec79e3-ee6f-47fa-8c63-bb193f49afed/COVER_TITLE_WIDE")
+
+        # Wuhan match did NOT inherit Sky Sport Tennis
+        self.assertEqual(len(match_wuhan["sources"]), 1)
+        self.assertEqual(match_wuhan["sources"][0]["name"], "Tennis HD Stream")
+        self.assertIsNone(match_wuhan["poster"])
+
+    def test_tennis_live_window_duration(self):
+        """Verifies 160 minutes for VS matches and 360 minutes for sessions."""
+        from app.services.catalog_service import catalog_service
+
+        vs_match = {
+            "title": "Zverev A. vs De Minaur A.",
+            "_silo": "tennis",
+            "category": "tennis",
+            "teams": {"home": {"name": "Zverev A."}, "away": {"name": "De Minaur A."}},
+        }
+        self.assertEqual(catalog_service.get_live_window_minutes(vs_match), 160)
+
+        session_match = {
+            "title": "WTA 1000 Wuhan",
+            "_silo": "tennis",
+            "category": "tennis",
+            "teams": None,
+        }
+        self.assertEqual(catalog_service.get_live_window_minutes(session_match), 360)
+
 
 if __name__ == "__main__":
     unittest.main()
+
 

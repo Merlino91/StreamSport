@@ -493,6 +493,18 @@ class ItalianEPGService:
                 slug_title = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")
                 match_id = f"sky_{ch_id}_{slug_title}_{int(date_ms / 1000)}"
 
+                # Extract official Sky 16:9 poster image from imagesMap
+                sky_poster = None
+                images_map = ev.get("content", {}).get("imagesMap", [])
+                if isinstance(images_map, list):
+                    img_dict = {
+                        item.get("key"): item.get("img", {}).get("url")
+                        for item in images_map if isinstance(item, dict)
+                    }
+                    chosen_img = img_dict.get("scene_key_art") or img_dict.get("background") or img_dict.get("cover")
+                    if chosen_img:
+                        sky_poster = f"https://apid.sky.it{chosen_img}" if chosen_img.startswith("/") else chosen_img
+
                 match_obj: Dict[str, Any] = {
                     "id": match_id,
                     "title": title,
@@ -503,7 +515,9 @@ class ItalianEPGService:
                     "date": date_ms,
                     "sources": sources,
                     "popular": False,
-                    "poster": None,
+                    "poster": sky_poster,
+                    "background": sky_poster,
+                    "eventSynopsis": synopsis,
                 }
                 if teams_dict:
                     match_obj["teams"] = teams_dict
@@ -615,6 +629,12 @@ class ItalianEPGService:
                 slug_title = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")
                 match_id = f"tivusat_{ch_id}_{slug_title}_{int(date_ms / 1000)}"
 
+                # Extract Tivùsat official image if available
+                tivu_poster = None
+                img = prog.get("image") or (prog.get("images", {}).get("url") if isinstance(prog.get("images"), dict) else None)
+                if img and str(img).startswith("http"):
+                    tivu_poster = str(img)
+
                 match_obj: Dict[str, Any] = {
                     "id": match_id,
                     "title": title,
@@ -625,7 +645,8 @@ class ItalianEPGService:
                     "date": date_ms,
                     "sources": sources,
                     "popular": False,
-                    "poster": None,
+                    "poster": tivu_poster,
+                    "background": tivu_poster,
                 }
                 if teams_dict:
                     match_obj["teams"] = teams_dict
@@ -786,6 +807,54 @@ class ItalianEPGService:
         t = re.sub(r"[^a-z0-9]+", " ", t)
         return re.sub(r"\s+", " ", t).strip()
 
+    @staticmethod
+    def _extract_tennis_circuit_and_city(text: str) -> Tuple[Optional[str], Optional[str]]:
+        """
+        Dynamically extracts tennis circuit (atp, wta, challenger, slam) and city/venue
+        from a tennis match or broadcast session title/synopsis without hardcoded city dictionaries.
+        """
+        import unicodedata
+        t = unicodedata.normalize("NFKD", (text or "").lower()).encode("ascii", "ignore").decode("utf-8")
+
+        circuit = None
+        if re.search(r"\b(wta|wta\s*1000|wta\s*500|wta\s*250|wta\s*125)\b", t):
+            circuit = "wta"
+        elif re.search(r"\b(challenger)\b", t):
+            circuit = "challenger"
+        elif re.search(r"\b(wimbledon|roland\s*garros|us\s*open|australian\s*open)\b", t):
+            circuit = "slam"
+        elif re.search(r"\b(atp|masters\s*1000|atp\s*500|atp\s*250|atp\s*finals|masters)\b", t):
+            circuit = "atp"
+
+        excluded = {
+            "men", "women", "singles", "doubles", "singolare", "doppio", "live", "tour",
+            "2025", "2026", "masters", "finals", "open", "quarti", "semifinali", "semifinal",
+            "finale", "finals", "giornata", "sessione", "day", "night", "court", "campo",
+            "round", "turno", "match", "diretta", "tennis"
+        }
+        city = None
+        # Pattern 1: e.g. "ATP - Singles: Shanghai (China)" or "Tennis: ATP - Singles: Shanghai"
+        m_city = re.search(r"(?:atp|wta|challenger)[^:]*?:\s*([a-z]+)", t)
+        if m_city and m_city.group(1).strip() not in excluded:
+            city = m_city.group(1).strip()
+
+        # Pattern 2: e.g. "ATP Masters 1000 Shanghai - 8a giornata", "WTA 1000 Wuhan", "ATP 500 Vienna"
+        if not city:
+            m_city2 = re.search(
+                r"\b(?:atp|wta|challenger)(?:\s+(?:masters|finals|\d{3,4}|series|tour|singles|men|women|uomini|donne))*\s+([a-z]+)",
+                t,
+            )
+            if m_city2 and m_city2.group(1).strip() not in excluded:
+                city = m_city2.group(1).strip()
+
+        # Pattern 3: e.g. "di Shanghai, Cina" or "da Wuhan, Cina" (standard Sky EPG synopsis syntax)
+        if not city:
+            m_city3 = re.search(r"\b(?:di|da)\s+([a-z]+),\s*[a-z]+", t)
+            if m_city3 and m_city3.group(1).strip() not in excluded:
+                city = m_city3.group(1).strip()
+
+        return circuit, city
+
     async def enrich_matches_with_epg_channels(self, matches: List[Dict[str, Any]]) -> int:
         """
         Uses the Italian EPG (Sky & Tivùsat) strictly as a channel resolver / mapper.
@@ -837,8 +906,16 @@ class ItalianEPGService:
                         # Pre-match broadcast/studio can start up to 90 min before kickoff (m_date - ep_date up to +90m).
                         # Broadcast start after kickoff allowed only up to 20 min late (ep_date - m_date up to +20m).
                         # For motorsports, coverage can start up to 120 min before session.
-                        pre_max = (120 * 60 * 1000) if m_silo == "motor-sports" else (90 * 60 * 1000)
-                        post_max = 20 * 60 * 1000
+                        # For tennis, tournament coverage sessions can span up to 360 min (6 hours) of play.
+                        if m_silo == "tennis":
+                            pre_max = 360 * 60 * 1000
+                            post_max = 60 * 60 * 1000
+                        elif m_silo == "motor-sports":
+                            pre_max = 120 * 60 * 1000
+                            post_max = 20 * 60 * 1000
+                        else:
+                            pre_max = 90 * 60 * 1000
+                            post_max = 20 * 60 * 1000
                         time_diff = m_date - ep_date  # Positive if EPG starts before match kickoff
                         if time_diff > pre_max or time_diff < -post_max:
                             continue
@@ -871,11 +948,44 @@ class ItalianEPGService:
                             if ratio >= 0.70:
                                 is_same = True
 
+                # Tennis Tournament Session Bridge:
+                # If ep is a general tournament session / main event (not a specific 1v1 match between different players)
+                # and both belong to the same circuit (ATP/WTA/Challenger/Slam) and city/venue,
+                # bridge the official TV channel (Sky Sport Tennis / SuperTennis) to the match.
+                if not is_same and m_silo == "tennis" and ep_silo == "tennis":
+                    is_ep_specific_match = bool(ep_teams and ep_teams.get("home") and ep_teams.get("away"))
+                    if not is_ep_specific_match:
+                        m_eval = f"{m.get('competition', '')} {m.get('title', '')} {m.get('canonical_competition', '')}"
+                        ep_eval = f"{ep.get('competition', '')} {ep.get('title', '')} {ep.get('eventSynopsis', '')}"
+                        m_circ, m_city = self._extract_tennis_circuit_and_city(m_eval)
+                        ep_circ, ep_city = self._extract_tennis_circuit_and_city(ep_eval)
+                        circ_match = False
+                        if m_circ and ep_circ:
+                            circ_match = (m_circ == ep_circ)
+                        elif m_circ or ep_circ:
+                            circ_match = not ((m_circ == "wta" or "wta" in m_eval.lower()) and (ep_circ == "atp" or "atp" in ep_eval.lower())) and \
+                                         not ((m_circ == "atp" or "atp" in m_eval.lower()) and (ep_circ == "wta" or "wta" in ep_eval.lower()))
+                        else:
+                            circ_match = True
+
+                        city_match = False
+                        if m_city and ep_city:
+                            city_match = (m_city == ep_city or m_city in ep_eval.lower() or ep_city in m_eval.lower())
+
+                        if circ_match and city_match:
+                            is_same = True
+
                 if is_same:
                     matched_epg = ep
                     break
 
             if matched_epg:
+                # Inherit official 16:9 HD poster from Sky/Tivùsat if the match does not already have a valid poster
+                if (not m.get("poster") or "unknown" in str(m.get("poster")).lower()) and matched_epg.get("poster"):
+                    m["poster"] = matched_epg["poster"]
+                    if not m.get("background"):
+                        m["background"] = matched_epg.get("background") or matched_epg["poster"]
+
                 existing_sources = m.setdefault("sources", [])
                 existing_keys = {
                     (s.get("canonical", s.get("id")), s.get("tag", ""))

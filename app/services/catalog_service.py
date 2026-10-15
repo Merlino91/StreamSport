@@ -156,9 +156,19 @@ class CatalogService:
         if silo == "basketball":
             return 150
 
-        # 3. Tennis: 300 minutes (up to 5 hours for Grand Slam / best-of-5 marathons)
+        # 3. Tennis: 160 minutes for VS matches, 360 minutes (6 hours) for tournament sessions / main events
         if silo == "tennis":
-            return 300
+            title = (match.get("title") or "").lower()
+            teams = match.get("teams")
+            is_vs_match = (
+                " vs " in title
+                or " - " in title
+                or (isinstance(teams, dict) and bool(teams.get("home")) and bool(teams.get("away")))
+            )
+            is_session = bool(re.search(r"\b(atp\s*masters|wta\s*1000|wta\s*500|wta\s*250|sessione|quarti\s*di\s*finale|semifinal|finali?|diretta)\b", title))
+            if is_vs_match and not is_session:
+                return 160
+            return 360
 
         # 4. Motori (Motorsport): 80m for practice/qualifying/sprints, 160m for Grand Prix / main races
         if silo == "motor-sports":
