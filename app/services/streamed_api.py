@@ -33,6 +33,7 @@ STREAMED_SPORTS_MAP = {
 
 # Subpaths for sports where minor leagues/empty streams should be filtered out
 STREAMED_SPORT_SUBPATHS = {
+    "football": "football/popular",
     "american-football": "american-football/popular",
 }
 

@@ -356,14 +356,18 @@ class DaddyLiveAPI:
                     if re.search(r"\b(fcs|ncaa\s*fcs|division\s*(?:ii|iii|1-aa|i-aa)|d-?[23]|naia|juco)\b", raw_title.lower()):
                         continue
 
-                    # UEFA Youth League: accept ONLY Italian youth teams (or matches involving Italian teams)
-                    if "youth league" in cat_lower or "youth league" in raw_title.lower():
-                        is_italian_youth = (
-                            "🇮🇹" in raw_title
-                            or bool(re.search(r"\b(italy|italia|milan|inter|juventus|roma|atalanta|bologna|lazio|fiorentina|torino|empoli|lecce|napoli|verona|sassuolo|genoa|monza|cagliari|sampdoria)\b", raw_title.lower()))
-                        )
-                        if not is_italian_youth:
-                            continue
+                    # Soccer Youth & Women: accept ONLY Italian teams/competitions
+                    is_soccer = "soccer" in cat_lower or "football" in cat_lower
+                    if is_soccer:
+                        is_youth = bool(re.search(r"\b(u-?1[5-9]|under\s*1[5-9]|u-?2[0-3]|under\s*2[0-3]|youth(?:\s*league)?|primavera|junior|allievi|giovanissimi)\b", raw_title.lower()))
+                        is_women = bool(re.search(r"\b(women(?:[’']s)?|femminile|ladies|frauen|f[ée]minine|femenino|w-|uwcl)\b", raw_title.lower()))
+                        if is_youth or is_women:
+                            is_italian = (
+                                "🇮🇹" in raw_title
+                                or bool(re.search(r"\b(italy|italia|milan|inter|juventus|roma|atalanta|bologna|lazio|fiorentina|torino|empoli|lecce|napoli|verona|sassuolo|genoa|monza|cagliari|sampdoria|parma|udinese|venezia|palermo|bari|brescia|cremonese|cesena|salernitana|spezia|frosinone|catanzaro|cosenza|reggiana|modena|carrarese|mantova|sudtirol|cittadella|pisa|juve\s*stabia)\b", raw_title.lower()))
+                            )
+                            if not is_italian:
+                                continue
 
                     # Clean event title
                     clean_title = self._clean_title(raw_title)
