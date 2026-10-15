@@ -1048,7 +1048,6 @@ class CatalogService:
                 tasks = [
                     streamed_api.get_all_matches(force_refresh=True),
                     daddylive_api.get_matches(force=True),
-                    espn_service.get_official_events(),
                     ocblacktop_service.get_official_sessions(),
                     thesportsdb_service.fetch_multi_day_calendar(days_ahead=2, days_behind=1),
                     italian_epg_service.get_matches(),
@@ -1057,10 +1056,9 @@ class CatalogService:
                 results = await asyncio.gather(*tasks, return_exceptions=True)
                 streamed_raw = results[0] if isinstance(results[0], list) else []
                 daddylive_raw = results[1] if isinstance(results[1], list) else []
-                espn_events = results[2] if isinstance(results[2], list) else []
-                ocb_sessions = results[3] if isinstance(results[3], list) else []
-                epg_raw = results[5] if isinstance(results[5], list) else []
-                diretta_events = results[6] if isinstance(results[6], list) else []
+                ocb_sessions = results[2] if isinstance(results[2], list) else []
+                epg_raw = results[4] if isinstance(results[4], list) else []
+                diretta_events = results[5] if isinstance(results[5], list) else []
 
                 streamed_matches = [m for m in streamed_raw if self.is_real_match(m)]
                 daddylive_matches = [m for m in daddylive_raw if self.is_real_match(m)]
@@ -1114,6 +1112,7 @@ class CatalogService:
                     logger.warning(
                         "Diretta.it non raggiungibile o non operativo: scatta il fallback di emergenza su ESPN Scoreboard."
                     )
+                    espn_events = await espn_service.get_official_events()
                     if espn_events:
                         espn_service.reconcile_matches(all_matches, espn_events, self._clean_tokens, self._get_teams_key)
 
