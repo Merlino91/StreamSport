@@ -318,6 +318,14 @@ def calculate_match_score(
 
         # 4. Bilateral Team Similarity Score (SequenceMatcher ponderato)
         h_score, a_score, is_inv = compare_teams_fuzzy(m_h, m_a, c_h, c_a, allow_inverted=True)
+        # Check alternate English names if available on candidate
+        c_alt_h = candidate.get("alt_home") or ""
+        c_alt_a = candidate.get("alt_away") or ""
+        if c_alt_h and c_alt_a:
+            alt_h, alt_a, alt_inv = compare_teams_fuzzy(m_h, m_a, c_alt_h, c_alt_a, allow_inverted=True)
+            if (alt_h + alt_a) > (h_score + a_score):
+                h_score, a_score, is_inv = alt_h, alt_a, alt_inv
+
         avg_score = (h_score + a_score) / 2.0
 
         # Strict bilateral threshold: both teams must have acceptable similarity
@@ -325,6 +333,20 @@ def calculate_match_score(
         is_matched = (h_score >= 0.65 and a_score >= 0.65 and avg_score >= 0.75) or (
             max(h_score, a_score) >= 0.95 and min(h_score, a_score) >= 0.60
         )
+
+        # 5. Flashscore Match ID Bridge: +0.20 bonus on ID match, -0.20 penalty on mismatch
+        m_fs_id = match.get("_flashscore_id")
+        c_fs_id = candidate.get("flashscore_id") or candidate.get("id")
+        if m_fs_id and c_fs_id:
+            m_clean = str(m_fs_id).replace("diretta-", "").strip()
+            c_clean = str(c_fs_id).replace("diretta-", "").strip()
+            if m_clean == c_clean:
+                avg_score = min(1.0, avg_score + 0.20)
+                is_matched = True
+            else:
+                avg_score = max(0.0, avg_score - 0.20)
+                if avg_score < 0.70:
+                    is_matched = False
 
         # Optional Competition Bonus: if both have competition and they match, add small bonus
         bonus = 0.0

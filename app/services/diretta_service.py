@@ -15,21 +15,30 @@ from app.services.tvvoo_service import tvvoo_service
 
 logger = logging.getLogger("streamsport.diretta")
 
-# Flashscore sport IDs mapped to (Sport Display Name, StreamSport Silo)
-FS_SPORTS: Dict[int, Tuple[str, str]] = {
+# Flashscore Italian feeds (Project 400 - Diretta.it): extracts Italian names & Italian TV channels
+FS_IT_SPORTS: Dict[int, Tuple[str, str]] = {
     1: ("Calcio", "football"),
     2: ("Tennis", "tennis"),
+    3: ("Basket", "basketball"),
+    12: ("Volley", "volley"),
+}
+
+# Flashscore English feeds (Project 2 - Flashscore Global): English team names, TV channels disabled
+FS_EN_SPORTS: Dict[int, Tuple[str, str]] = {
+    1: ("Calcio", "football"),
     3: ("Basket", "basketball"),
     4: ("Hockey", "hockey"),
     5: ("Football Americano", "american-football"),
     6: ("Baseball", "baseball"),
-    12: ("Volley", "volley"),
 }
+
+# Combined mapping for backward compatibility
+FS_SPORTS: Dict[int, Tuple[str, str]] = {**FS_IT_SPORTS, **FS_EN_SPORTS}
 
 class DirettaService:
     """
-    Primary downstream validator powered by Diretta.it (Flashscore) feed engine.
-    Fetches real-time multi-sport official schedule across yesterday, today, and upcoming days (-1 to +2).
+    Primary downstream validator powered by Diretta.it and Flashscore Global feed engine.
+    Fetches multi-sport official schedule across yesterday, today, and tomorrow (-1 to +1).
     Validates kickoff times, normalizes team names in Italian/clean form, and enriches missing competitions.
     """
 
@@ -38,6 +47,13 @@ class DirettaService:
         "x-fsign": "SW9D1eZo",
         "Referer": "https://www.diretta.it/",
         "Origin": "https://www.diretta.it"
+    }
+
+    FLASHSCORE_EN_HEADERS = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+        "x-fsign": "SW9D1eZo",
+        "Referer": "https://www.flashscore.com/",
+        "Origin": "https://www.flashscore.com"
     }
 
     # Normalized aliases for common club names across Italian & international sources
@@ -85,6 +101,7 @@ class DirettaService:
 
     def __init__(self):
         self._cached_events: List[Dict[str, Any]] = []
+        self._en_events_by_silo: Dict[str, List[Dict[str, Any]]] = {}
         self._cache_time: float = 0.0
         self._cache_ttl: float = 1800  # 30 minutes TTL
         self._is_healthy: bool = False
@@ -95,7 +112,13 @@ class DirettaService:
         """Returns True if the last fetch from Diretta.it was successful and returned events."""
         return self._is_healthy and len(self._cached_events) > 0
 
-    def parse_flashscore_feed(self, raw_text: str, sport_name: str, silo_name: str) -> List[Dict[str, Any]]:
+    def parse_flashscore_feed(
+        self,
+        raw_text: str,
+        sport_name: str,
+        silo_name: str,
+        extract_tv_channels: bool = True
+    ) -> List[Dict[str, Any]]:
         """Parses raw Flashscore stream delimited by ~ and ¬ into structured match dictionaries."""
         matches: List[Dict[str, Any]] = []
         current_league = "Unknown"
@@ -130,18 +153,19 @@ class DirettaService:
                 time_epoch = fields.get("AD")
                 date_ms = int(time_epoch) * 1000 if time_epoch and time_epoch.isdigit() else 0
 
-                # Extract official broadcast channels from AL field, strictly filtering OTT and mosaico streams
+                # Extract official broadcast channels only for Italian feeds (strictly filtering OTT)
                 tv_channels: List[str] = []
-                al_raw = fields.get("AL")
-                if al_raw:
-                    try:
-                        al_data = json.loads(al_raw)
-                        for tv in al_data.get("1", []):
-                            bn = tv.get("BN", "").strip()
-                            if bn and not any(ott in bn.lower() for ott in self.OTT_EXCLUDE):
-                                tv_channels.append(bn)
-                    except Exception:
-                        pass
+                if extract_tv_channels:
+                    al_raw = fields.get("AL")
+                    if al_raw:
+                        try:
+                            al_data = json.loads(al_raw)
+                            for tv in al_data.get("1", []):
+                                bn = tv.get("BN", "").strip()
+                                if bn and not any(ott in bn.lower() for ott in self.OTT_EXCLUDE):
+                                    tv_channels.append(bn)
+                        except Exception:
+                            pass
 
                 if home and away:
                     if current_country and current_league:
@@ -151,6 +175,7 @@ class DirettaService:
 
                     matches.append({
                         "id": f"diretta-{m_id}",
+                        "flashscore_id": m_id,
                         "_silo": silo_name,
                         "sport": sport_name,
                         "country": current_country,
@@ -166,8 +191,8 @@ class DirettaService:
 
     async def get_events(self, force: bool = False) -> List[Dict[str, Any]]:
         """
-        Fetches multi-day schedule from Diretta.it across all sports (-1 to +2 days).
-        Returns in-memory cache if valid within TTL.
+        Fetches multi-day schedule from Flashscore IT and Global EN engines across yesterday, today, tomorrow (-1 to +1).
+        Enriches Italian events with native English club names (alt_home/alt_away).
         """
         now = time.time()
         if not force and self._cached_events and (now - self._cache_time < self._cache_ttl):
@@ -177,54 +202,102 @@ class DirettaService:
             if not force and self._cached_events and (now - self._cache_time < self._cache_ttl):
                 return self._cached_events
 
-            all_events: List[Dict[str, Any]] = []
+            target_days = (-1, 0, 1)
+            tasks = []
             success_count = 0
             fail_count = 0
 
-            # Query days: -1 (yesterday), 0 (today), 1 (tomorrow), 2 (day after tomorrow)
-            target_days = (-1, 0, 1, 2)
-            tasks = []
-
-            async with httpx.AsyncClient(timeout=9.0, headers=self.DIRETTA_HEADERS) as client:
-                async def fetch_sport_day(s_id: int, s_name: str, s_silo: str, day: int):
+            async with httpx.AsyncClient(timeout=9.0) as client:
+                async def fetch_it(s_id: int, s_name: str, s_silo: str, day: int):
                     url = f"https://400.flashscore.ninja/400/x/feed/f_{s_id}_{day}_3_it_1"
                     try:
-                        res = await client.get(url)
+                        res = await client.get(url, headers=self.DIRETTA_HEADERS)
                         if res.status_code == 200 and res.text:
-                            return self.parse_flashscore_feed(res.text, s_name, s_silo)
+                            return ("it", self.parse_flashscore_feed(res.text, s_name, s_silo, extract_tv_channels=True))
                     except Exception as e:
-                        logger.debug("Diretta.it fetch failed for sport %s day %d: %s", s_name, day, e)
-                    return []
+                        logger.debug("Diretta IT fetch failed for sport %s day %d: %s", s_name, day, e)
+                    return ("it", [])
 
-                for s_id, (s_name, s_silo) in FS_SPORTS.items():
+                async def fetch_en(s_id: int, s_name: str, s_silo: str, day: int):
+                    url = f"https://2.flashscore.ninja/2/x/feed/f_{s_id}_{day}_3_en-uk_1"
+                    try:
+                        res = await client.get(url, headers=self.FLASHSCORE_EN_HEADERS)
+                        if res.status_code == 200 and res.text:
+                            return ("en", self.parse_flashscore_feed(res.text, s_name, s_silo, extract_tv_channels=False))
+                    except Exception as e:
+                        logger.debug("Flashscore EN fetch failed for sport %s day %d: %s", s_name, day, e)
+                    return ("en", [])
+
+                for s_id, (s_name, s_silo) in FS_IT_SPORTS.items():
                     for day in target_days:
-                        tasks.append(fetch_sport_day(s_id, s_name, s_silo, day))
+                        tasks.append(fetch_it(s_id, s_name, s_silo, day))
+
+                for s_id, (s_name, s_silo) in FS_EN_SPORTS.items():
+                    for day in target_days:
+                        tasks.append(fetch_en(s_id, s_name, s_silo, day))
 
                 results = await asyncio.gather(*tasks, return_exceptions=True)
 
+                it_events: List[Dict[str, Any]] = []
+                en_events: List[Dict[str, Any]] = []
+                en_by_id: Dict[str, Dict[str, Any]] = {}
+                en_events_by_silo: Dict[str, List[Dict[str, Any]]] = {}
+
                 for res in results:
-                    if isinstance(res, list) and res:
-                        all_events.extend(res)
-                        success_count += 1
+                    if isinstance(res, tuple) and len(res) == 2:
+                        origin, ev_list = res
+                        if isinstance(ev_list, list) and ev_list:
+                            success_count += 1
+                            if origin == "it":
+                                it_events.extend(ev_list)
+                            else:
+                                for ev in ev_list:
+                                    en_events.append(ev)
+                                    fid = ev.get("flashscore_id")
+                                    if fid:
+                                        en_by_id[fid] = ev
+                                    en_events_by_silo.setdefault(ev.get("_silo", "altri_sport"), []).append(ev)
+                        else:
+                            fail_count += 1
                     else:
                         fail_count += 1
 
-            if len(all_events) > 100:
-                self._cached_events = all_events
-                self._cache_time = now
-                self._is_healthy = True
-                logger.info(
-                    "Diretta.it feed engine synchronized: %d events indexed across 4 days (success: %d feeds).",
-                    len(all_events),
-                    success_count,
-                )
-            else:
-                self._is_healthy = False
-                logger.warning(
-                    "Diretta.it feed engine returned insufficient events (%d events, failed feeds: %d). Marking unhealthy for fallback.",
-                    len(all_events),
-                    fail_count,
-                )
+                # Enrich Italian events with alt_home / alt_away from English feed
+                for it_ev in it_events:
+                    fid = it_ev.get("flashscore_id")
+                    if fid and fid in en_by_id:
+                        en_m = en_by_id[fid]
+                        it_ev["alt_home"] = en_m["home"]
+                        it_ev["alt_away"] = en_m["away"]
+                        it_ev["alt_title"] = en_m["title"]
+
+                # Consolidated cache: IT events + EN-only sports (Hockey, American Football, Baseball)
+                # and any EN events not covered by IT
+                all_consolidated = list(it_events)
+                it_fids = {ev.get("flashscore_id") for ev in it_events if ev.get("flashscore_id")}
+                for en_ev in en_events:
+                    fid = en_ev.get("flashscore_id")
+                    if fid not in it_fids:
+                        all_consolidated.append(en_ev)
+
+                if len(all_consolidated) > 100:
+                    self._cached_events = all_consolidated
+                    self._en_events_by_silo = en_events_by_silo
+                    self._cache_time = now
+                    self._is_healthy = True
+                    logger.info(
+                        "Diretta.it feed engine synchronized: %d events indexed (IT: %d, EN: %d).",
+                        len(all_consolidated),
+                        len(it_events),
+                        len(en_events),
+                    )
+                else:
+                    self._is_healthy = False
+                    logger.warning(
+                        "Diretta.it feed engine returned insufficient events (%d events, failed feeds: %d). Marking unhealthy for fallback.",
+                        len(all_consolidated),
+                        fail_count,
+                    )
 
             return self._cached_events
 
@@ -233,17 +306,15 @@ class DirettaService:
 
     def reconcile_matches(self, matches: List[Dict[str, Any]]) -> int:
         """
-        Reconciles stream matches against cached Diretta.it official schedule.
-        When matched:
-        - Normalizes match title in clean 'Home vs Away' form (while retaining raw_titles)
-        - Aligns kickoff date/time to exact UTC minute
-        - Assigns official competition if missing
-        - Marks _diretta_matched = True, _diretta_home, _diretta_away, _official_date
+        Reconciles stream matches using a 2-pass Flashscore algorithm:
+        Pass 1: Identifies the match on the English feed (to obtain the universal Flashscore ID).
+        Pass 2: Reconciles against Italian / Consolidated candidates with a +0.20 Match ID bonus,
+                inheriting official Italian titles and TV channels.
         """
         if not self._cached_events or not matches:
             return 0
 
-        # Group Diretta events by sport silo
+        # Group consolidated events by silo
         by_silo: Dict[str, List[Dict[str, Any]]] = {}
         for ev in self._cached_events:
             by_silo.setdefault(ev.get("_silo", "altri_sport"), []).append(ev)
@@ -251,19 +322,38 @@ class DirettaService:
         reconciled_count = 0
 
         for m in matches:
-            # Determine silo
             silo = (m.get("_silo") or "").lower().strip()
             if not silo:
                 from app.services.catalog_service import catalog_service
                 silo = catalog_service.get_canonical_silo(m)
 
+            m_date = m.get("date") or 0
+
+            # Pass 1: Flashscore EN Identification
+            en_cands = self._en_events_by_silo.get(silo, [])
+            if m_date and en_cands:
+                en_cands = [e for e in en_cands if abs((e.get("date") or 0) - m_date) <= 90 * 60 * 1000]
+
+            best_en_cand: Optional[Dict[str, Any]] = None
+            best_en_score: float = 0.0
+            for en_c in en_cands:
+                sc = calculate_match_score(m, en_c, phase="phase1_diretta")
+                if sc["matched"] and sc["score"] > best_en_score:
+                    best_en_score = sc["score"]
+                    best_en_cand = en_c
+                    if best_en_score >= 0.95:
+                        break
+
+            if best_en_cand and best_en_score >= 0.75:
+                m["_flashscore_id"] = best_en_cand.get("flashscore_id") or best_en_cand.get("id")
+
+            # Pass 2: Reconcile against Italian / Consolidated candidates (with Match ID bonus/penalty)
             candidates = by_silo.get(silo, [])
-            if not candidates:
-                continue
+            if m_date and candidates:
+                candidates = [e for e in candidates if abs((e.get("date") or 0) - m_date) <= 90 * 60 * 1000]
 
             best_cand: Optional[Dict[str, Any]] = None
             best_score: float = 0.0
-
             for cand in candidates:
                 res = calculate_match_score(m, cand, phase="phase1_diretta")
                 if res["matched"] and res["score"] > best_score:
@@ -272,12 +362,15 @@ class DirettaService:
                     if best_score >= 0.95:
                         break
 
-            if best_cand:
+            # If an Italian/consolidated candidate matched, use it; otherwise fallback to the EN match
+            chosen = best_cand if (best_cand and best_score >= 0.75) else (best_en_cand if (best_en_cand and best_en_score >= 0.75) else None)
+
+            if chosen:
                 reconciled_count += 1
                 m["_diretta_matched"] = True
-                m["_diretta_home"] = best_cand["home"]
-                m["_diretta_away"] = best_cand["away"]
-                m["_diretta_title"] = f"{best_cand['home']} vs {best_cand['away']}"
+                m["_diretta_home"] = chosen["home"]
+                m["_diretta_away"] = chosen["away"]
+                m["_diretta_title"] = f"{chosen['home']} vs {chosen['away']}"
 
                 # Non-destructive: preserve raw title if not already tracked
                 if "raw_titles" not in m and m.get("title"):
@@ -285,9 +378,9 @@ class DirettaService:
                 m["title"] = m["_diretta_title"]
 
                 # Adopt exact kickoff time from Diretta
-                if best_cand.get("date"):
-                    m["_official_date"] = best_cand["date"]
-                    m["date"] = best_cand["date"]
+                if chosen.get("date"):
+                    m["_official_date"] = chosen["date"]
+                    m["date"] = chosen["date"]
 
                 # Adopt official Italian competition if missing or generic
                 GENERIC_COMPETITIONS = {
@@ -298,20 +391,20 @@ class DirettaService:
                 }
                 current_comp = (m.get("competition") or "").lower().strip()
                 if not current_comp or current_comp in GENERIC_COMPETITIONS:
-                    m["competition"] = best_cand["competition"]
-                    m["_competition"] = best_cand["competition"]
+                    m["competition"] = chosen["competition"]
+                    m["_competition"] = chosen["competition"]
 
                 # Enrich canonical competition tag if missing
-                if not m.get("canonical_competition") and best_cand.get("competition"):
+                if not m.get("canonical_competition") and chosen.get("competition"):
                     canon = detect_canonical_competition(
-                        f"{best_cand['competition']} : {m['title']}", silo_hint=silo
+                        f"{chosen['competition']} : {m['title']}", silo_hint=silo
                     )
                     if canon:
                         m["canonical_competition"] = canon
                         m["_canonical_competition"] = canon
 
-                # Attach recognized TV channels & enrich with TvVoo streams
-                cand_tvs = best_cand.get("tv_channels", [])
+                # Attach recognized TV channels & enrich with TvVoo streams (only if present, e.g. from IT feed)
+                cand_tvs = chosen.get("tv_channels", [])
                 if cand_tvs:
                     m["_diretta_tv_channels"] = cand_tvs
                     existing_urls = {

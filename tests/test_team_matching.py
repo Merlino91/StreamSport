@@ -126,5 +126,39 @@ class TestTeamMatching(unittest.TestCase):
         self.assertTrue(res["matched"])
         self.assertGreaterEqual(res["score"], 0.80)
 
+    def test_phase1_diretta_flashscore_id_bonus_and_penalty(self):
+        # Match with stream title and candidate
+        match = {
+            "title": "Eintracht Frankfurt vs Koln",
+            "teams": {"home": {"name": "Eintracht Frankfurt"}, "away": {"name": "Koln"}},
+            "date": 1729018800000,
+            "_silo": "football",
+            "_flashscore_id": "ADR926vh",
+        }
+        cand_same_id = {
+            "home": "Francoforte",
+            "away": "Colonia",
+            "alt_home": "Eintracht Frankfurt",
+            "alt_away": "FC Koln",
+            "flashscore_id": "ADR926vh",
+            "date": 1729018800000,
+            "competition": "Bundesliga",
+        }
+        res_same = calculate_match_score(match, cand_same_id, phase="phase1_diretta")
+        self.assertTrue(res_same["matched"])
+        self.assertGreaterEqual(res_same["score"], 0.95)
+
+        # Candidate with different Flashscore ID suffers penalty
+        cand_diff_id = {
+            "home": "Francoforte",
+            "away": "Colonia",
+            "flashscore_id": "DIFFERENT_ID_999",
+            "date": 1729018800000,
+            "competition": "Bundesliga",
+        }
+        res_diff = calculate_match_score(match, cand_diff_id, phase="phase1_diretta")
+        self.assertLess(res_diff["score"], res_same["score"])
+
 if __name__ == "__main__":
     unittest.main()
+
