@@ -176,10 +176,8 @@ class DirettaService:
                             pass
 
                 if home and away:
-                    if current_country and current_league:
-                        comp_name = f"{current_country}: {current_league}".strip(": ")
-                    else:
-                        comp_name = current_league or current_country or "Live Sports"
+                    # Clean competition name: use league name directly (fallback to country or Live Sports)
+                    comp_name = current_league.strip() if current_league else (current_country or "Live Sports")
 
                     matches.append({
                         "id": f"diretta-{m_id}",
@@ -354,11 +352,14 @@ class DirettaService:
 
             if best_en_cand and best_en_score >= 0.75:
                 m["_flashscore_id"] = best_en_cand.get("flashscore_id") or best_en_cand.get("id")
-                # DOMINANT: Adopt official English competition from Livesport (Flashscore EN)
+                # DOMINANT: Adopt official English competition and country from Livesport (Flashscore EN)
                 en_comp = (best_en_cand.get("competition") or "").strip()
                 if en_comp and en_comp.lower() not in self.GENERIC_COMPETITIONS:
                     m["competition"] = en_comp
                     m["_competition"] = en_comp
+                    if best_en_cand.get("country"):
+                        m["country"] = best_en_cand["country"]
+                        m["_country"] = best_en_cand["country"]
                     en_canon = detect_canonical_competition(
                         f"{en_comp} : {best_en_cand.get('title') or m.get('title', '')}", silo_hint=silo
                     )
@@ -400,6 +401,11 @@ class DirettaService:
                 if chosen.get("date"):
                     m["_official_date"] = chosen["date"]
                     m["date"] = chosen["date"]
+
+                # Adopt country from chosen validator candidate
+                if chosen.get("country") and not m.get("country"):
+                    m["country"] = chosen["country"]
+                    m["_country"] = chosen["country"]
 
                 # Adopt official Italian competition ONLY if missing or generic (Livesport English competition is dominant)
                 current_comp = (m.get("competition") or "").lower().strip()

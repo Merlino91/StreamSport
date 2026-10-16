@@ -434,7 +434,8 @@ class GenreClassifier:
         cat = (match.get("category") or "").lower().strip()
         silo = (match.get("_silo") or "").lower().strip()
         comp = (match.get("competition") or match.get("_competition") or "").lower().strip()
-        eval_text = f"{title_lower} {comp}".strip()
+        country = (match.get("country") or match.get("_country") or "").lower().strip()
+        eval_text = f"{title_lower} {country} {comp}".strip()
 
         teams = match.get("teams") or {}
         home = ""
