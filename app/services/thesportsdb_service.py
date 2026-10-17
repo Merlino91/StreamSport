@@ -420,14 +420,14 @@ class TheSportsDBService:
             clean_t = re.sub(r"^[A-Za-z0-9\s-]+:\s*", "", clean_t)
             # Remove parenthesized notes
             clean_t = re.sub(r"\([^)]*\)", "", clean_t)
-            for sep in (" vs ", " - ", " v "):
+            for sep in (" vs. ", " vs ", " - ", " – ", " — ", " v. ", " v "):
                 if sep in clean_t:
                     parts = clean_t.split(sep, 1)
                     p0_lower = parts[0].strip().lower()
                     p1_lower = parts[1].strip().lower()
 
                     # Guard against non-competitor hyphen splits (e.g. 'ATP Tokyo - Finals', 'Formula 1 - Practice 1')
-                    if sep == " - ":
+                    if sep in (" - ", " – ", " — "):
                         has_nc_word = any(
                             re.search(rf"\b{re.escape(w)}\b", p0_lower) or re.search(rf"\b{re.escape(w)}\b", p1_lower)
                             for w in self.NON_COMPETITOR_WORDS

@@ -284,12 +284,17 @@ def calculate_match_score(
         m_a = (m_teams.get("away", {}).get("name") or "") if isinstance(m_teams, dict) else ""
         if not m_h or not m_a:
             t = match.get("title") or ""
-            if " vs " in t.lower():
-                parts = re.split(r"\s+vs\s+", t, maxsplit=1, flags=re.I)
-                m_h, m_a = parts[0], parts[1]
-            elif " - " in t:
-                parts = re.split(r"\s+-\s+", t, maxsplit=1)
-                m_h, m_a = parts[0], parts[1]
+            clean_t = re.sub(r"^[0-9:\s-]+(?:\s*:\s*)?", "", t)
+            clean_t = re.sub(r"\([^)]*\)", "", clean_t)
+            if re.search(r"\s+vs\.?\s+", clean_t, re.IGNORECASE):
+                parts = re.split(r"\s+vs\.?\s+", clean_t, maxsplit=1, flags=re.IGNORECASE)
+                m_h, m_a = parts[0].strip(), parts[1].strip()
+            elif re.search(r"\s+[\-–—]\s+", clean_t):
+                parts = re.split(r"\s+[\-–—]\s+", clean_t, maxsplit=1)
+                m_h, m_a = parts[0].strip(), parts[1].strip()
+            elif re.search(r"\s+v\.?\s+", clean_t, re.IGNORECASE):
+                parts = re.split(r"\s+v\.?\s+", clean_t, maxsplit=1, flags=re.IGNORECASE)
+                m_h, m_a = parts[0].strip(), parts[1].strip()
 
         c_h = candidate.get("home") or ""
         c_a = candidate.get("away") or ""
@@ -453,8 +458,8 @@ def calculate_match_score(
         # Test 3: Raw Title tokens if teams failed
         if best_score < 0.70:
             for title_cand in match.get("raw_titles", [match.get("title", "")]):
-                if " vs " in title_cand.lower():
-                    parts = re.split(r"\s+vs\s+", title_cand, maxsplit=1, flags=re.I)
+                if re.search(r"\s+vs\.?\s+", title_cand, re.IGNORECASE):
+                    parts = re.split(r"\s+vs\.?\s+", title_cand, maxsplit=1, flags=re.IGNORECASE)
                     h_score, a_score, is_inv = compare_teams_fuzzy(parts[0], parts[1], c_h, c_a, allow_inverted=True)
                     if h_score >= 0.65 and a_score >= 0.65:
                         cand_avg = (h_score + a_score) / 2.0

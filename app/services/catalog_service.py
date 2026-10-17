@@ -776,15 +776,22 @@ class CatalogService:
         t = (text or "").lower()
         t = unicodedata.normalize("NFKD", t).encode("ascii", "ignore").decode("utf-8")
         t = re.sub(r"[\U0001F1E6-\U0001F1FF]{2}", "", t)
+        for comp in (
+            "new york", "los angeles", "san diego", "san francisco", "kansas city",
+            "oklahoma city", "salt lake", "st louis", "san jose", "san antonio",
+            "green bay", "tampa bay", "notre dame", "penn state", "ohio state",
+            "florida state", "michigan state", "north carolina", "south carolina"
+        ):
+            t = t.replace(comp, comp.replace(" ", "_"))
         for acr, full in self.COMMON_TEAM_ACRONYMS.items():
             t = re.sub(rf"\b{acr}\b", full, t)
-        words = set(re.sub(r"[^a-z0-9]+", " ", t).split())
+        words = set(re.sub(r"[^a-z0-9_]+", " ", t).split())
         stopwords = {
             "vs", "v", "fc", "ac", "cf", "sc", "as", "club", "u19", "u20", "u21", "u23", "at", "the",
             "calcio", "basket", "champions", "league", "cup", "coppa", "supercup", "supercoppa",
             "division", "serie", "liga", "torneo", "tournament", "simulcast", "highlight", "highlights",
             "show", "direct", "live", "conference", "europa", "uefa", "fifa", "concacaf", "conmebol",
-            "afc", "caf", "ehf", "chl"
+            "afc", "caf", "ehf", "chl", "city", "de", "del", "da", "do", "el", "al"
         }
         return {w for w in words if w not in stopwords and len(w) > 1}
 
@@ -804,6 +811,18 @@ class CatalogService:
 
         time_diff = abs(d1 - d2)
         if time_diff > 90 * 60 * 1000:
+            return False
+
+        # Guard: Cross-silo matches must NEVER merge
+        silo1 = self.get_canonical_silo(m1)
+        silo2 = self.get_canonical_silo(m2)
+        if silo1 != silo2:
+            return False
+
+        # Guard: Simulcast events (Diretta Gol, RedZone) must NEVER merge with regular 1v1 matches
+        sim1 = is_simulcast_event(m1.get("title", "")) or is_simulcast_event(str(m1.get("id", "")))
+        sim2 = is_simulcast_event(m2.get("title", "")) or is_simulcast_event(str(m2.get("id", "")))
+        if sim1 != sim2:
             return False
 
         # Guard: Youth matches must NEVER merge with Senior matches
@@ -848,6 +867,51 @@ class CatalogService:
                             if (acr in raw_t1 and full in raw_t2) or (acr in raw_t2 and full in raw_t1):
                                 return True
 
+        # Signal 4: Garbage Side Asymmetric Match for Team Sports
+        # Protects against corrupt upstream provider team names (e.g. '114 vs Ipswich Town' vs 'Manchester City vs Ipswich Town')
+        TEAM_SPORT_SILOS = {
+            "football", "soccer", "calcio", "basket", "basketball", "hockey",
+            "baseball", "football_americano", "american_football", "volley", "pallavolo", "rugby"
+        }
+        silo1 = self.get_canonical_silo(m1)
+        silo2 = self.get_canonical_silo(m2)
+        if (
+            silo1 in TEAM_SPORT_SILOS and silo2 in TEAM_SPORT_SILOS
+            and time_diff <= 15 * 60 * 1000
+            and not is_simulcast_event(m1.get("title", ""))
+            and not is_simulcast_event(m2.get("title", ""))
+            and not is_simulcast_event(str(m1.get("id", "")))
+            and not is_simulcast_event(str(m2.get("id", "")))
+        ):
+            t1_raw = (m1.get("title") or "").strip()
+            t2_raw = (m2.get("title") or "").strip()
+
+            def _get_garbage_opponent(t: str) -> Optional[str]:
+                # Matches "114 vs Opponent" or "Opponent vs 114"
+                m_num = re.search(r"^\d+\s+(?:vs\.?|\-|v\.?)\s+(.+)$", t, re.IGNORECASE)
+                if m_num:
+                    return m_num.group(1).strip()
+                m_num2 = re.search(r"^(.+?)\s+(?:vs\.?|\-|v\.?)\s+\d+$", t, re.IGNORECASE)
+                if m_num2:
+                    return m_num2.group(1).strip()
+                return None
+
+            opp1 = _get_garbage_opponent(t1_raw)
+            opp2 = _get_garbage_opponent(t2_raw)
+
+            # Strictly asymmetric: exactly one event must have a garbage side
+            if (opp1 and not opp2) or (opp2 and not opp1):
+                clean_opp = (opp1 or opp2).lower()
+                clean_target = (t2_raw if opp1 else t1_raw).lower()
+                opp_tokens = self._clean_tokens_expanded(clean_opp)
+                target_tokens = self._clean_tokens_expanded(clean_target)
+                common_tokens = opp_tokens & target_tokens
+                if len(common_tokens) >= 1:
+                    GENERIC_CITY_WORDS = {"new", "york", "san", "diego", "los", "angeles", "state", "city", "north", "south", "fc", "real", "club", "united"}
+                    substantive = [w for w in common_tokens if w not in GENERIC_CITY_WORDS and len(w) >= 4]
+                    if substantive or len(common_tokens) >= 2:
+                        return True
+
         return False
 
     def deduplicate_post_validation(self, matches: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -865,6 +929,7 @@ class CatalogService:
 
         all_deduped: List[Dict[str, Any]] = []
         total_merged = 0
+        merged_away_ids: List[str] = []
 
         generic_comp = {"", "other", "unknown", "altri sport", "live sports", "football", "soccer", "americhe e leghe extra-ue", "altre leghe europee"}
 
@@ -879,11 +944,22 @@ class CatalogService:
 
                 if matched_target:
                     total_merged += 1
+                    m_id = m.get("id")
+                    if m_id:
+                        merged_away_ids.append(m_id)
+
                     # Merge m into matched_target
-                    # 1. Prefer normalized or longer title
+                    # 1. Prefer non-garbage, normalized or longer title
                     t_new = m.get("title") or ""
                     t_cur = matched_target.get("title") or ""
-                    if m.get("_diretta_matched") and not matched_target.get("_diretta_matched"):
+                    new_is_garbage = bool(re.search(r"^\d+\s+(?:vs\.?|\-|v\.?)\s+|\s+(?:vs\.?|\-|v\.?)\s+\d+$", t_new, re.I))
+                    cur_is_garbage = bool(re.search(r"^\d+\s+(?:vs\.?|\-|v\.?)\s+|\s+(?:vs\.?|\-|v\.?)\s+\d+$", t_cur, re.I))
+
+                    if cur_is_garbage and not new_is_garbage:
+                        matched_target["title"] = t_new
+                    elif not cur_is_garbage and new_is_garbage:
+                        pass
+                    elif m.get("_diretta_matched") and not matched_target.get("_diretta_matched"):
                         matched_target["title"] = t_new
                     elif len(t_new) > len(t_cur) and not matched_target.get("_diretta_matched"):
                         matched_target["title"] = t_new
@@ -941,6 +1017,15 @@ class CatalogService:
 
         if total_merged > 0:
             logger.info("Deduplicatore Post-Convalida: fusi con successo %d eventi duplicati a valle.", total_merged)
+
+        # Clean merged away IDs from SQLite persistence
+        valid_merged_ids = [mid for mid in merged_away_ids if mid]
+        if valid_merged_ids:
+            try:
+                db_service.delete_matches_by_ids(valid_merged_ids)
+                logger.info("Deduplicatore Post-Convalida: epurati dal database %d ID duplicati assorbiti.", len(valid_merged_ids))
+            except Exception as e:
+                logger.debug("Errore rimozione ID duplicati fusi dal db: %s", e)
 
         return all_deduped
 
@@ -1137,16 +1222,17 @@ class CatalogService:
                 # Reconcile motorsport events against TheSportsDB in-RAM calendar (with canonized OCB session data)
                 thesportsdb_service.reconcile_motorsport_matches(all_matches)
 
-                # 6. FASE 4: PERSISTENZA E DEDUPLICAZIONE POST-VALIDAZIONE
-                if all_matches:
-                    db_service.save_matches(all_matches)
-
+                # 6. FASE 4: DEDUPLICAZIONE POST-VALIDAZIONE & PERSISTENZA
                 # Purge matches older than retention window from DB (6h if ENABLE_REPLAYS=False, 72h if True)
                 db_service.purge_expired_matches()
                 banner_service.purge_stale_banners(max_age_hours=24)
 
-                # LEVEL 2e: Post-Validation Multi-Signal Deduplication
+                # LEVEL 2e: Post-Validation Multi-Signal Deduplication (in RAM and cleans absorbed IDs from DB)
                 all_matches = self.deduplicate_post_validation(all_matches)
+
+                # Persist ONLY clean, deduplicated matches into SQLite!
+                if all_matches:
+                    db_service.save_matches(all_matches)
 
                 # 5. LEVEL 3: Pre-classify every match into catalog and genre
                 # Matches with _tsdb_matched have competition set, enabling exact genre matching;
