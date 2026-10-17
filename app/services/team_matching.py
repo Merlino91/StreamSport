@@ -303,7 +303,10 @@ def calculate_match_score(
             result["reason"] = "missing_team_names"
             return result
 
-        # 3. Guard against Youth / Women conflicts (only if explicit)
+        # 3. Trait Evaluation: Youth and Women
+        # Neutral ('=') is the natural default when unspecified.
+        # Only explicit markers indicate '+' (Women / Youth).
+        # We never assign or infer '-' from league names.
         m_comp = (match.get("competition") or match.get("_competition") or "").lower()
         c_comp = (candidate.get("competition") or "").lower()
         m_text = f"{m_comp} {m_h} {m_a}".lower()
@@ -311,15 +314,19 @@ def calculate_match_score(
 
         m_youth = bool(re.search(r"\b(u-?1[5-9]|u-?2[01]|under\s*1[5-9]|under\s*2[01]|youth|primavera|junior)\b", m_text))
         c_youth = bool(re.search(r"\b(u-?1[5-9]|u-?2[01]|under\s*1[5-9]|under\s*2[01]|youth|primavera|junior)\b", c_text))
-        if m_youth != c_youth:
-            result["reason"] = "conflict_youth"
-            return result
 
-        m_women = bool(re.search(r"\b(women(?:['']s)?|femminile|femenino|ladies|frauen|w-|wta|wnba|uwcl)\b", m_text))
-        c_women = bool(re.search(r"\b(women(?:['']s)?|femminile|femenino|ladies|frauen|w-|wta|wnba|uwcl)\b", c_text))
-        if m_women != c_women:
+        m_women = bool(re.search(r"\b(women(?:[’']s)?|femminile|femenino|ladies|frauen|w-|wta|wnba|uwcl)\b", m_text))
+        c_women = bool(re.search(r"\b(women(?:[’']s)?|femminile|femenino|ladies|frauen|w-|wta|wnba|uwcl)\b", c_text))
+
+        # Penalty if stream claimed Women (+) but candidate lacks it (=)
+        # When stream is neutral (=) and candidate is Women (+), penalty is 0.0 (inherits trait)
+        trait_penalty = 0.0
+        if m_women and not c_women:
+            trait_penalty += 0.30
             result["reason"] = "conflict_women"
-            return result
+        elif m_youth != c_youth:
+            trait_penalty += 0.30
+            result["reason"] = "conflict_youth"
 
         # 4. Bilateral Team Similarity Score (SequenceMatcher ponderato)
         h_score, a_score, is_inv = compare_teams_fuzzy(m_h, m_a, c_h, c_a, allow_inverted=True)
@@ -331,26 +338,27 @@ def calculate_match_score(
             if (alt_h + alt_a) > (h_score + a_score):
                 h_score, a_score, is_inv = alt_h, alt_a, alt_inv
 
-        avg_score = (h_score + a_score) / 2.0
+        avg_score = max(0.0, (h_score + a_score) / 2.0 - trait_penalty)
 
         # Strict bilateral threshold: both teams must have acceptable similarity
-        # (each >= 0.65 and average >= 0.75, or one exact >= 0.95 and other >= 0.60)
+        # (each >= 0.65 and average >= 0.75, or one exact >= 0.95 and other >= 0.60 and average >= 0.75)
         is_matched = (h_score >= 0.65 and a_score >= 0.65 and avg_score >= 0.75) or (
-            max(h_score, a_score) >= 0.95 and min(h_score, a_score) >= 0.60
+            max(h_score, a_score) >= 0.95 and min(h_score, a_score) >= 0.60 and avg_score >= 0.75
         )
 
-        # 5. Flashscore Match ID Bridge: +0.20 bonus on ID match, -0.20 penalty on mismatch
+        # 5. Flashscore Match ID Bridge: gentle +0.05 bonus on ID match, -0.05 penalty on mismatch
         m_fs_id = match.get("_flashscore_id")
         c_fs_id = candidate.get("flashscore_id") or candidate.get("id")
         if m_fs_id and c_fs_id:
             m_clean = str(m_fs_id).replace("diretta-", "").strip()
             c_clean = str(c_fs_id).replace("diretta-", "").strip()
             if m_clean == c_clean:
-                avg_score = min(1.0, avg_score + 0.20)
-                is_matched = True
+                avg_score = min(1.0, avg_score + 0.05)
+                if (h_score >= 0.60 and a_score >= 0.60):
+                    is_matched = True
             else:
-                avg_score = max(0.0, avg_score - 0.20)
-                if avg_score < 0.70:
+                avg_score = max(0.0, avg_score - 0.05)
+                if avg_score < 0.75:
                     is_matched = False
 
         # Optional Competition Bonus: if both have competition and they match, add small bonus
@@ -363,7 +371,10 @@ def calculate_match_score(
         result["matched"] = is_matched
         result["score"] = final_score
         result["is_inverted"] = is_inv
-        result["reason"] = "ok" if is_matched else f"low_similarity_h{h_score:.2f}_a{a_score:.2f}"
+        if is_matched:
+            result["reason"] = "ok"
+        elif not result.get("reason"):
+            result["reason"] = f"low_similarity_h{h_score:.2f}_a{a_score:.2f}"
         return result
 
     # --------------------------------------------------------------------------

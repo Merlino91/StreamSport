@@ -24,7 +24,7 @@ class TestDirettaService(unittest.TestCase):
         self.assertEqual(m1["sport"], "Calcio")
         self.assertEqual(m1["country"], "Italia")
         self.assertEqual(m1["league"], "Serie A")
-        self.assertEqual(m1["competition"], "Italia: Serie A")
+        self.assertEqual(m1["competition"], "Serie A")
         self.assertEqual(m1["home"], "Inter")
         self.assertEqual(m1["away"], "Juventus")
         self.assertEqual(m1["title"], "Inter vs Juventus")

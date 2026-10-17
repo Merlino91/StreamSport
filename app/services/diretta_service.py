@@ -101,11 +101,22 @@ class DirettaService:
 
     GENERIC_COMPETITIONS: Set[str] = {
         "", "other", "unknown", "altri sport", "live sports", "football", "soccer",
-        "calcio", "basket", "tennis", "undefined",
+        "calcio", "basket", "basketball", "pallacanestro", "tennis", "undefined",
         "americhe e leghe extra-ue", "altre leghe europee", "altri campionati europei",
         "calcio internazionale", "partite amichevoli", "campionati minori",
-        "leghe europee hockey", "leghe europee", "european leagues", "ice hockey", "hockey"
+        "leghe europee hockey", "leghe europee", "european leagues", "ice hockey", "hockey",
+        "volleyball", "volley", "pallavolo", "motor-sports", "motorsport",
+        "american-football", "american football", "baseball", "fight", "boxe", "mma"
     }
+
+    @classmethod
+    def is_generic_competition(cls, comp: Optional[str]) -> bool:
+        """Checks if a competition name is missing or generic (ignoring decorative emojis)."""
+        if not comp:
+            return True
+        c = re.sub(r"[\U0001F1E6-\U0001F1FF\U0001F300-\U0001F9FF]", "", comp).lower().strip()
+        c = re.sub(r"\s+", " ", c).strip(" :-–|")
+        return not c or c in cls.GENERIC_COMPETITIONS
 
     def __init__(self):
         self._cached_events: List[Dict[str, Any]] = []
@@ -354,7 +365,7 @@ class DirettaService:
                 m["_flashscore_id"] = best_en_cand.get("flashscore_id") or best_en_cand.get("id")
                 # DOMINANT: Adopt official English competition and country from Livesport (Flashscore EN)
                 en_comp = (best_en_cand.get("competition") or "").strip()
-                if en_comp and en_comp.lower() not in self.GENERIC_COMPETITIONS:
+                if en_comp and not self.is_generic_competition(en_comp):
                     m["competition"] = en_comp
                     m["_competition"] = en_comp
                     if best_en_cand.get("country"):
@@ -407,9 +418,16 @@ class DirettaService:
                     m["country"] = chosen["country"]
                     m["_country"] = chosen["country"]
 
+                # Inherit confirmed traits from chosen candidate
+                c_text = f"{chosen.get('competition', '')} {chosen.get('home', '')} {chosen.get('away', '')}".lower()
+                if re.search(r"\b(women(?:[’']s)?|femminile|femenino|ladies|frauen|w-|wta|wnba|uwcl)\b", c_text):
+                    m["_gender"] = "+"
+                if re.search(r"\b(u-?1[5-9]|u-?2[01]|under\s*1[5-9]|under\s*2[01]|youth|primavera|junior)\b", c_text):
+                    m["_age"] = "+"
+
                 # Adopt official Italian competition ONLY if missing or generic (Livesport English competition is dominant)
-                current_comp = (m.get("competition") or "").lower().strip()
-                if not current_comp or current_comp in self.GENERIC_COMPETITIONS:
+                current_comp = m.get("competition")
+                if self.is_generic_competition(current_comp):
                     m["competition"] = chosen["competition"]
                     m["_competition"] = chosen["competition"]
 
