@@ -127,24 +127,9 @@ class DaddyLiveAPI:
         if day_offset:
             base_date += datetime.timedelta(days=day_offset)
 
-        try:
-            import pytz
-            rome_tz = pytz.timezone("Europe/Rome")
-            naive_dt = datetime.datetime(base_date.year, base_date.month, base_date.day, h, m)
-            dt = rome_tz.localize(naive_dt)
-            return int(dt.timestamp() * 1000)
-        except Exception:
-            try:
-                from zoneinfo import ZoneInfo
-                rome_tz = ZoneInfo("Europe/Rome")
-                dt = datetime.datetime(base_date.year, base_date.month, base_date.day, h, m, tzinfo=rome_tz)
-                return int(dt.timestamp() * 1000)
-            except Exception:
-                # Manual Europe/Rome offset fallback (CEST UTC+2 in summer, CET UTC+1 in winter)
-                offset_hours = 2 if 4 <= base_date.month <= 10 else 1
-                tz_offset = datetime.timezone(datetime.timedelta(hours=offset_hours))
-                dt = datetime.datetime(base_date.year, base_date.month, base_date.day, h, m, tzinfo=tz_offset)
-                return int(dt.timestamp() * 1000)
+        # DaddyLive schedule times are explicitly published in UK GMT / UTC ("Schedule Time UK GMT")
+        dt = datetime.datetime(base_date.year, base_date.month, base_date.day, h, m, tzinfo=datetime.timezone.utc)
+        return int(dt.timestamp() * 1000)
 
     def _parse_upcoming_date(self, event_title: str) -> int:
         """Attempts to parse full date from upcoming title like '... | 26 September 2026'."""
@@ -154,16 +139,8 @@ class DaddyLiveAPI:
             month_str = m.group(2)
             year = int(m.group(3))
             month = _MONTHS.get(month_str, 9)
-            try:
-                import pytz
-                rome_tz = pytz.timezone("Europe/Rome")
-                dt = rome_tz.localize(datetime.datetime(year, month, daynum, 15, 0))
-                return int(dt.timestamp() * 1000)
-            except Exception:
-                offset_hours = 2 if 4 <= month <= 10 else 1
-                tz_offset = datetime.timezone(datetime.timedelta(hours=offset_hours))
-                dt = datetime.datetime(year, month, daynum, 15, 0, tzinfo=tz_offset)
-                return int(dt.timestamp() * 1000)
+            dt = datetime.datetime(year, month, daynum, 15, 0, tzinfo=datetime.timezone.utc)
+            return int(dt.timestamp() * 1000)
         return 0
 
     def _clean_title(self, raw_title: str) -> str:
