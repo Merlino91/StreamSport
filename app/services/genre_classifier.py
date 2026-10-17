@@ -40,9 +40,9 @@ class GenreClassifier:
         r"mls|major\s*league\s*soccer|usl|nwsl|cpl|canadian\s*premier|"
         r"liga\s*mx|mexico|mexican|asenso\s*mx|"
         r"libertadores|sudamericana|recopa|copa\s*libertadores|"
-        r"brazil|brasil|brasileir[ao]|serie\s*a\s*brazil|copa\s*do\s*brasil|paulista|carioca|"
+        r"brazil|brasil|brasile|brasileir[ao]|serie\s*a\s*brazil|copa\s*do\s*brasil|paulista|carioca|"
         r"argentina|primera\s*division\s*argentina|copa\s*de\s*la\s*liga|"
-        r"colombia|chile|peru|uruguay|ecuador|paraguay|venezuela|bolivia|costa\s*rica|"
+        r"colombia|chile|peru|perù|uruguay|ecuador|paraguay|venezuela|bolivia|costa\s*rica|"
         r"saudi|roshn|saudi\s*pro\s*league|king\s*cup\s*champions|"
         r"qatar|stars\s*league|uae|pro\s*league\s*uae|"
         r"j-?league|j1\s*league|k-?league|csl|chinese\s*super\s*league|"
@@ -682,109 +682,139 @@ class GenreClassifier:
             return "altri_sport", "Biliardo, Padel e Altri"
 
         # ------------------------------------------------------------------
+        # ------------------------------------------------------------------
         # 10. CALCIO (FOOTBALL / SOCCER)
         # ------------------------------------------------------------------
+        # Guard: non-soccer sports (surf, sailing, boating, water sports, padel, billiards) must never enter football
+        is_water_or_niche = bool(re.search(r"\b(surf|surfing|sailing|boating|water\s*sport|swimming|snooker|billiard|padel)\b", eval_text))
         is_explicit_other_cat = bool(cat and cat not in ("", "other", "unknown", "altri sport", "live sports", "football", "soccer"))
-        if not is_explicit_other_cat and (cat in ("football", "soccer") or silo == "football" or "vs" in title_lower or any(k in title_lower for k in ("fc ", "cf ", "sc ", "ac ", "league", "copa", "cup"))):
+        
+        # Candidate soccer match check: category/silo is football, or classic "vs" match with club indicators
+        is_soccer_candidate = (
+            not is_water_or_niche
+            and not is_explicit_other_cat
+            and (
+                cat in ("football", "soccer")
+                or silo == "football"
+                or (
+                    "vs" in title_lower
+                    and any(k in eval_text for k in ("fc", "cf", "calcio", "football", "soccer", "serie", "league", "cup", "copa", "championship"))
+                )
+            )
+        )
+
+        if is_soccer_candidate:
             has_extra_eu_flag = any(flag in eval_text for flag in ("🇧🇷", "🇦🇷", "🇨🇴", "🇺🇾", "🇵🇾", "🇨🇱", "🇵🇪", "🇪🇨", "🇲🇽", "🇺🇸", "🇸🇦", "🇯🇵", "🇰🇷", "🇦🇺"))
             is_extra_eu = bool(self._EXTRA_EU_CONFED_REGEX.search(eval_text) or self._EXTRA_EU_LEAGUES_REGEX.search(eval_text) or has_extra_eu_flag)
             is_foreign = bool(self._FOREIGN_LEAGUE_REGEX.search(eval_text)) or is_extra_eu or "inter miami" in title_lower
             is_extra_eu_confed = bool(self._EXTRA_EU_CONFED_REGEX.search(eval_text))
 
-            # Team match checks for Italian leagues (MUST use word boundaries to avoid 'kostroma' matching 'roma', and exclude 'inter miami')
-            home_ita_check = re.sub(r"\binter\s*miami\b", "", home).strip()
-            away_ita_check = re.sub(r"\binter\s*miami\b", "", away).strip()
-            all_ita_teams = self.SERIE_A_TEAMS | self.SERIE_B_TEAMS | self.SERIE_C_TEAMS
-            is_ita_home = bool(home_ita_check) and (home_ita_check in all_ita_teams or any(re.search(rf"\b{re.escape(t)}\b", home_ita_check) for t in all_ita_teams))
-            is_ita_away = bool(away_ita_check) and (away_ita_check in all_ita_teams or any(re.search(rf"\b{re.escape(t)}\b", away_ita_check) for t in all_ita_teams))
-            is_ita_by_team = is_ita_home or is_ita_away
-            is_explicit_italy = bool(re.search(r"\b(italy|italia)\b", eval_text))
-            has_explicit_ita_keyword = bool(re.search(r"\b(coppa\s*italia|supercoppa\s*italiana|primavera)\b", eval_text)) or "italy -" in eval_text or "italia -" in eval_text or is_explicit_italy
+            # --------------------------------------------------------------
+            # 1. EUROPEAN CUPS & UEFA TOURNAMENTS (Champions, Europa, Conference)
+            # Evaluated first because teams come from different nations
+            # --------------------------------------------------------------
+            is_uefa_cup = bool(re.search(r"\b(uefa\s*champions|champions\s*league|europa\s*league|conference\s*league|uefa\s*super\s*cup)\b", eval_text))
+            if is_uefa_cup and not is_extra_eu_confed:
+                if re.search(r"\b(champions\s*league|uefa\s*champions)\b", eval_text):
+                    return "calcio_estero", "Champions League"
+                return "calcio_estero", "Europa e Conference League"
 
-            # Homonym protection: generic "serie a", "serie b", "serie c" only qualify as Italian if
-            # at least one team is in the Italian league roster OR Italy is explicitly mentioned.
-            is_generic_serie = bool(re.search(r"\b(serie\s*a|serie\s*b|serie\s*c)\b", eval_text))
-            if is_generic_serie and not is_ita_by_team and not is_explicit_italy:
-                is_italian = False
-            else:
-                is_italian = (is_ita_by_team or has_explicit_ita_keyword) and not is_foreign and not is_extra_eu
-
-            top_leagues = [
-                ("Serie A", self.SERIE_A_TEAMS),
-                ("Premier League", self.PREMIER_LEAGUE_TEAMS),
-                ("LaLiga", self.LALIGA_TEAMS),
-                ("Bundesliga", self.BUNDESLIGA_TEAMS),
-                ("Ligue 1", self.LIGUE1_TEAMS),
-            ]
-            home_leagues = [name for name, teams in top_leagues if home in teams]
-            away_leagues = [name for name, teams in top_leagues if away in teams]
-
-            # Cross-league (e.g. Manchester City [Premier] vs Inter [Serie A]) -> Champions League / Coppe
-            is_cross_league = bool(home_leagues and away_leagues and home_leagues[0] != away_leagues[0])
-            is_euro_cup = (
-                (bool(re.search(r"\b(champions\s*league|europa\s*league|conference\s*league|uefa\s*super\s*cup|uefa)\b", eval_text)) or is_cross_league)
-                and not is_extra_eu_confed
-            )
-
-            # ---------------------------
-            # A) CALCIO ITALIANO
-            # ---------------------------
-            # Distinguish Italian club youth (Primavera, U23, Next Gen, Futuro) vs National Youth (Italy U21)
-            is_club_youth = bool(re.search(r"\b(primavera|u23|next\s*gen|futuro|allievi|giovanissimi)\b", eval_text))
-            is_national_youth = is_youth and not is_club_youth
-
-            if is_italian and not is_euro_cup and not is_national_youth and not self._FRIENDLY_REGEX.search(eval_text):
-                if is_women:
-                    return "calcio_italiano", "Calcio Femminile"
-                if is_youth:
-                    return "calcio_italiano", "Primavera e Giovanili"
-                if re.search(r"\b(coppa\s*italia|supercoppa\s*italiana)\b", eval_text):
-                    return "calcio_italiano", "Coppa Italia e Supercoppa"
-                is_c_team = home in self.SERIE_C_TEAMS or away in self.SERIE_C_TEAMS or any(re.search(rf"\b{re.escape(t)}\b", home) or re.search(rf"\b{re.escape(t)}\b", away) for t in self.SERIE_C_TEAMS)
-                is_b_team = home in self.SERIE_B_TEAMS or away in self.SERIE_B_TEAMS or any(re.search(rf"\b{re.escape(t)}\b", home) or re.search(rf"\b{re.escape(t)}\b", away) for t in self.SERIE_B_TEAMS)
-                is_a_team = home in self.SERIE_A_TEAMS or away in self.SERIE_A_TEAMS or any(re.search(rf"\b{re.escape(t)}\b", home) or re.search(rf"\b{re.escape(t)}\b", away) for t in self.SERIE_A_TEAMS)
-
-                if (re.search(r"\bserie\s*c\b", eval_text) and (is_c_team or is_explicit_italy)) or is_c_team or re.search(r"\bitaly\s*-\s*serie\s*c\b", eval_text):
-                    return "calcio_italiano", "Serie C"
-                if (re.search(r"\bserie\s*b\b", eval_text) and (is_b_team or is_explicit_italy)) or is_b_team or re.search(r"\bitaly\s*-\s*serie\s*b\b", eval_text):
-                    return "calcio_italiano", "Serie B"
-                if (re.search(r"\bserie\s*a\b", eval_text) and (is_a_team or is_explicit_italy)) or is_a_team or re.search(r"\bitaly\s*-\s*serie\s*a\b", eval_text):
-                    return "calcio_italiano", "Serie A"
-                # If neither Serie A, B nor C team matches, it is NOT Italian Serie A!
-                return "calcio_estero", "Altri Campionati Europei"
-
-            # ---------------------------
-            # B) CALCIO INTERNAZIONALE E COPPE
-            # ---------------------------
-            # 1. International Youth & Under-21 tournaments
-            if is_youth:
-                return "calcio_estero", "Europei Under 21 e Nazionali Giovanili"
-
-            # 2. National teams & friendlies
+            # --------------------------------------------------------------
+            # 2. NATIONAL TEAMS & AMICHEVOLI (e.g. Italia vs Spagna, Nations League, Qualificazioni)
+            # Evaluated before domestic leagues so "Italia vs Spagna" never enters Serie A
+            # --------------------------------------------------------------
             is_national_match = (
                 bool(self._FRIENDLY_REGEX.search(title_lower))
-                or bool(re.search(r"\b(nations\s*league|fifa|qualif|international|world\s*cup|european\s*championship|african\s*cup|afcon|copa\s*america|asian\s*cup|gold\s*cup|intercontinental)\b", title_lower))
+                or bool(re.search(r"\b(nations\s*league|fifa|qualif|international|world\s*cup|european\s*championship|african\s*cup|afcon|copa\s*america|asian\s*cup|gold\s*cup|intercontinental)\b", eval_text))
             )
             if is_national_match:
                 return "calcio_estero", "Nazionali e Amichevoli"
 
-            # 3. North/South American & Extra-EU Soccer Leagues
+            # Youth tournaments (international/club)
+            if is_youth and not bool(re.search(r"\b(primavera|u23|next\s*gen|futuro)\b", eval_text)):
+                return "calcio_estero", "Europei Under 21 e Nazionali Giovanili"
+
+            # --------------------------------------------------------------
+            # 3. EXTRA-EU & AMERICHE (CONMEBOL, AFC, CAF, MLS, Brasile, Perù, Argentina, ecc.)
+            # Evaluated before European domestic leagues so Peruvian/Brazilian leagues route cleanly
+            # --------------------------------------------------------------
             if is_extra_eu_confed or bool(self._EXTRA_EU_LEAGUES_REGEX.search(eval_text)) or has_extra_eu_flag:
                 return "calcio_estero", "Americhe e Leghe Extra-UE"
 
-            # 4. European Cups (UEFA Champions, Europa, Conference League)
-            if is_euro_cup or bool(re.search(r"\b(uefa\s*champions|champions\s*league)\b", eval_text)):
-                return "calcio_estero", "Champions League"
-            if re.search(r"\b(europa\s*league|conference\s*league)\b", eval_text):
-                return "calcio_estero", "Europa e Conference League"
-            if re.search(r"\b(premier\s*league|epl|england\s*-\s*premier)\b", eval_text) or home in self.PREMIER_LEAGUE_TEAMS or away in self.PREMIER_LEAGUE_TEAMS:
-                return "calcio_estero", "Premier League"
-            if re.search(r"\b(laliga|la\s*liga|spain\s*-\s*laliga|primera\s*division)\b", eval_text) or home in self.LALIGA_TEAMS or away in self.LALIGA_TEAMS:
-                return "calcio_estero", "La Liga"
-            if re.search(r"\b(bundesliga|germany\s*-\s*bundesliga|ligue\s*1|france\s*-\s*ligue\s*1)\b", eval_text) or home in self.BUNDESLIGA_TEAMS or away in self.BUNDESLIGA_TEAMS or home in self.LIGUE1_TEAMS or away in self.LIGUE1_TEAMS:
-                return "calcio_estero", "Bundesliga e Ligue 1"
+            # --------------------------------------------------------------
+            # 4. CALCIO ITALIANO (DOPPIO FILTRO: 1° Nazione -> 2° Torneo)
+            # --------------------------------------------------------------
+            is_ita_nation = (
+                country in ("italia", "italy")
+                or bool(re.search(r"\b(italy|italia|italian)\b", eval_text))
+                or bool(re.search(r"\b(coppa\s*italia|supercoppa\s*italiana|primavera)\b", eval_text))
+            )
+            if is_ita_nation and not is_foreign and not is_extra_eu:
+                if is_women:
+                    return "calcio_italiano", "Calcio Femminile"
+                if is_youth or bool(re.search(r"\b(primavera|allievi|giovanissimi|u23|next\s*gen|futuro)\b", eval_text)):
+                    return "calcio_italiano", "Primavera e Giovanili"
+                if re.search(r"\b(coppa\s*italia|supercoppa\s*italiana|supercoppa)\b", eval_text):
+                    return "calcio_italiano", "Coppa Italia e Supercoppa"
+                if re.search(r"\bserie\s*c\b", eval_text):
+                    return "calcio_italiano", "Serie C"
+                if re.search(r"\bserie\s*b\b", eval_text):
+                    return "calcio_italiano", "Serie B"
+                if re.search(r"\bserie\s*a\b", eval_text):
+                    return "calcio_italiano", "Serie A"
+                # Fallback for Italian clubs/derbies not in Serie A/B/C
+                return "calcio_italiano", "Serie A"
 
-            # 5. All other European and international club football defaults to "Altri Campionati Europei"
+            # --------------------------------------------------------------
+            # 4. PREMIER LEAGUE (DOPPIO FILTRO: 1° Nazione -> 2° Torneo)
+            # Gate 1: Country is England/UK OR explicit English indicator in text
+            # Gate 2: League is Premier League / FA Cup / Carabao
+            # --------------------------------------------------------------
+            is_england = (
+                country in ("inghilterra", "england", "uk")
+                or bool(re.search(r"\b(england|inghilterra|uk|epl)\b", eval_text))
+            )
+            if is_england and not is_extra_eu:
+                if re.search(r"\b(premier\s*league|epl|fa\s*cup|carabao|efl\s*cup)\b", eval_text):
+                    return "calcio_estero", "Premier League"
+
+            # --------------------------------------------------------------
+            # 5. LA LIGA (DOPPIO FILTRO: 1° Nazione -> 2° Torneo)
+            # Gate 1: Country is Spain OR explicit Spain indicator in text
+            # Gate 2: League is LaLiga / Primera Division / Copa del Rey
+            # --------------------------------------------------------------
+            is_spain = (
+                country in ("spagna", "spain")
+                or bool(re.search(r"\b(spain|spagna|espana|españa|laliga)\b", eval_text))
+            )
+            if is_spain and not is_extra_eu:
+                if re.search(r"\b(laliga|la\s*liga|primera\s*division|copa\s*del\s*rey)\b", eval_text):
+                    return "calcio_estero", "La Liga"
+
+            # --------------------------------------------------------------
+            # 6. BUNDESLIGA E LIGUE 1 (DOPPIO FILTRO)
+            # --------------------------------------------------------------
+            is_germany = (
+                country in ("germania", "germany")
+                or bool(re.search(r"\b(germany|germania|deutschland)\b", eval_text))
+            )
+            is_france = (
+                country in ("francia", "france")
+                or bool(re.search(r"\b(france|francia)\b", eval_text))
+            )
+            if (is_germany or is_france) and not is_extra_eu:
+                if re.search(r"\b(bundesliga|dfb\s*pokal|ligue\s*1|coupe\s*de\s*france)\b", eval_text):
+                    return "calcio_estero", "Bundesliga e Ligue 1"
+
+            # --------------------------------------------------------------
+            # 7. EXTRA-EU & AMERICHE
+            # --------------------------------------------------------------
+            if is_extra_eu_confed or bool(self._EXTRA_EU_LEAGUES_REGEX.search(eval_text)) or has_extra_eu_flag:
+                return "calcio_estero", "Americhe e Leghe Extra-UE"
+
+            # --------------------------------------------------------------
+            # 8. TUTTI GLI ALTRI CAMPIONATI EUROPEI (Fallback naturale europeo)
+            # --------------------------------------------------------------
             return "calcio_estero", "Altri Campionati Europei"
 
         # ------------------------------------------------------------------
