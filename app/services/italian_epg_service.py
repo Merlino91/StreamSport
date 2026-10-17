@@ -1109,6 +1109,10 @@ class ItalianEPGService:
 
                     # 1. Container / studio / multi-match broadcast?
                     if any(gen in ep_title_lower for gen in GENERIC_CONTAINERS):
+                        # DAZN linear channels safeguard: a specific 1v1 match cannot match a generic container like 'zona dazn'
+                        if canon_ita in ("dazn 1", "dazn 2", "dazn 3", "dazn 4") and not is_simulcast_event(m_title):
+                            conflicting_event = ep
+                            continue
                         has_matching_or_ambiguous = True
                         break
 

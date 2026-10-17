@@ -16,8 +16,8 @@ class TestTvVooService(unittest.IsolatedAsyncioTestCase):
     def test_canonical_key_mapping(self):
         self.assertEqual(self.service.get_canonical_key("Sky Sport 1"), "sky sport uno")
         self.assertEqual(self.service.get_canonical_key("Sky Sport Uno"), "sky sport uno")
-        self.assertEqual(self.service.get_canonical_key("Sky Sport Calcio HD"), "sky sport calcio")
-        self.assertEqual(self.service.get_canonical_key("DAZN"), "dazn 1")
+        self.assertIsNone(self.service.get_canonical_key("DAZN"))
+        self.assertIsNone(self.service.get_canonical_key("DAZN IT"))
         self.assertEqual(self.service.get_canonical_key("DAZN 1"), "dazn 1")
         self.assertEqual(self.service.get_canonical_key("Eurosport 1"), "eurosport 1")
         self.assertEqual(self.service.get_canonical_key("Rai Sport + HD"), "rai sport")
@@ -215,6 +215,13 @@ class TestTvVooService(unittest.IsolatedAsyncioTestCase):
                 "tag": "c",
                 "country": "Italy",
             }],
+            "dazn 1": [{
+                "canonical": "dazn 1",
+                "display_name": "DAZN 1",
+                "url": "https://vavoo.to/play/dazn1_c",
+                "tag": "c",
+                "country": "Italy",
+            }],
         }
 
         matches = [
@@ -227,6 +234,14 @@ class TestTvVooService(unittest.IsolatedAsyncioTestCase):
             },
             {
                 "id": "match_dl_2",
+                "title": "Mantova vs Palermo",
+                "sources": [
+                    {"source": "dlhd", "id": "214", "name": "DAZN it"},
+                    {"source": "dlhd", "id": "215", "name": "DAZN 1"},
+                ]
+            },
+            {
+                "id": "match_dl_3",
                 "title": "Unrelated Event",
                 "sources": [
                     {"source": "dlhd", "id": "999", "name": "Unknown Channel"},
@@ -245,9 +260,13 @@ class TestTvVooService(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(srcs[0]["url"], "https://vavoo.to/play/movistar_c")
         self.assertEqual(srcs[1]["source"], "dlhd")
 
-        # Second match remains untouched
-        self.assertEqual(len(matches[1]["sources"]), 1)
-        self.assertEqual(matches[1]["sources"][0]["source"], "dlhd")
+        # Second match (Mantova vs Palermo with DAZN it / DAZN 1 from DLHD) MUST NOT have TvVoo DAZN attached!
+        dazn_srcs = [s for s in matches[1]["sources"] if s.get("source") == "tvvoo"]
+        self.assertEqual(len(dazn_srcs), 0)
+
+        # Third match remains untouched
+        self.assertEqual(len(matches[2]["sources"]), 1)
+        self.assertEqual(matches[2]["sources"][0]["source"], "dlhd")
 
     @patch("app.services.tvvoo_service.httpx.AsyncClient")
     async def test_domain_mirrors_fallback(self, mock_client_cls):

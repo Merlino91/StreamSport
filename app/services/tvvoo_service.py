@@ -390,7 +390,7 @@ class TvVooService:
             "212": "supertennis",
 
             # DAZN Italia (LCN 214, 215)
-            "dazn": "dazn 1",
+            # NOTE: Generic unnumbered 'dazn' / 'dazn it' represents the OTT streaming platform, NOT linear DAZN 1!
             "dazn 1": "dazn 1",
             "dazn 1 it": "dazn 1",
             "dazn 1 hd": "dazn 1",
@@ -1470,6 +1470,12 @@ class TvVooService:
                 for st in streams:
                     u = st.get("url")
                     c_id = st.get("canonical")
+                    # DAZN Italia (DAZN 1, DAZN 2, DAZN 3, DAZN 4):
+                    # Prohibit external listings (DaddyLive, Streamed, etc.) from attaching DAZN linear streams.
+                    # DAZN in Italy is strictly authoritative through official Sky EPG (apid.sky.it)!
+                    if c_id in ("dazn 1", "dazn 2", "dazn 3", "dazn 4") or (c_id and c_id.startswith("dazn") and st.get("country") == "Italy"):
+                        continue
+
                     if u and u not in existing_urls and c_id not in existing_ids:
                         new_tvvoo_streams.append({
                             "source": "tvvoo",
