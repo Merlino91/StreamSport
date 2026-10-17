@@ -64,67 +64,6 @@ class GenreClassifier:
         re.IGNORECASE,
     )
 
-    # Serie A Teams
-    SERIE_A_TEAMS = {
-        "atalanta", "bologna", "cagliari", "como", "empoli", "fiorentina",
-        "genoa", "hellas verona", "verona", "inter", "internazionale",
-        "juventus", "lazio", "lecce", "milan", "ac milan", "monza",
-        "napoli", "parma", "roma", "as roma", "torino", "udinese", "venezia"
-    }
-
-    # Serie B Teams
-    SERIE_B_TEAMS = {
-        "bari", "brescia", "carrarese", "catanzaro", "cesena", "cittadella",
-        "cosenza", "cremonese", "frosinone", "juve stabia", "mantova",
-        "modena", "palermo", "pisa", "reggiana", "salernitana", "sampdoria",
-        "sassuolo", "spezia", "sudtirol", "virtus entella"
-    }
-
-    # Serie C Teams
-    SERIE_C_TEAMS = {
-        "avellino", "benevento", "catania", "foggia", "trapani", "padova", "vicenza",
-        "triestina", "spal", "perugia", "pescara", "torres", "monopoli", "audace cerignola",
-        "cerignola", "crotone", "casertana", "potenza", "picerno", "sorrento", "cavese",
-        "taranto", "turris", "latina", "messina", "team altamura", "altamura", "giugliano",
-        "atalanta u23", "juventus next gen", "milan futuro", "albinoleffe", "alcione milano",
-        "arzignano", "caldiero", "feralpisalo", "giana erminio", "lecco", "lumezzane",
-        "novara", "pro patria", "pro vercelli", "renate", "trento", "virtus verona",
-        "arezzo", "campobasso", "carpi", "gubbio", "legnago", "lucchese", "pianese",
-        "pineto", "pontedera", "rimini", "sestri levante", "ternana", "vis pesaro",
-        "clodiense"
-    }
-
-    # Top European Leagues
-    PREMIER_LEAGUE_TEAMS = {
-        "arsenal", "aston villa", "bournemouth", "brentford", "brighton",
-        "chelsea", "crystal palace", "everton", "fulham", "ipswich", "ipswich town",
-        "leicester", "leicester city", "liverpool", "manchester city", "man city",
-        "manchester united", "man united", "man utd", "newcastle", "newcastle united",
-        "nottingham forest", "southampton", "tottenham", "tottenham hotspur",
-        "spurs", "west ham", "west ham united", "wolverhampton", "wolves"
-    }
-
-    LALIGA_TEAMS = {
-        "alaves", "athletic bilbao", "athletic club", "atletico madrid", "barcelona",
-        "celta vigo", "celta", "espanyol", "getafe", "girona", "las palmas", "leganes",
-        "mallorca", "osasuna", "rayo vallecano", "real betis", "betis",
-        "real madrid", "real sociedad", "sevilla", "valencia", "valladolid", "villarreal"
-    }
-
-    BUNDESLIGA_TEAMS = {
-        "augsburg", "bayer leverkusen", "leverkusen", "bayern munich", "bayern munchen",
-        "bayern", "bochum", "borussia dortmund", "dortmund", "borussia monchengladbach",
-        "monchengladbach", "eintracht frankfurt", "frankfurt", "freiburg", "heidenheim",
-        "hoffenheim", "holstein kiel", "kiel", "mainz", "rb leipzig", "leipzig",
-        "st pauli", "st. pauli", "stuttgart", "union berlin", "werder bremen", "wolfsburg"
-    }
-
-    LIGUE1_TEAMS = {
-        "angers", "auxerre", "brest", "le havre", "lens", "lille", "lyon", "olympique lyonnais",
-        "marseille", "olympique marseille", "monaco", "as monaco", "montpellier",
-        "nantes", "nice", "psg", "paris saint-germain", "paris sg", "reims",
-        "rennes", "saint-etienne", "strasbourg", "toulouse"
-    }
 
     # NBA Franchises
     NBA_TEAMS = {
