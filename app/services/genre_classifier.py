@@ -135,30 +135,6 @@ class GenreClassifier:
         "spurs", "raptors", "jazz", "wizards"
     }
 
-    # WNBA Franchises
-    WNBA_TEAMS = {
-        "liberty", "new york liberty", "mercury", "phoenix mercury", "mystics", "washington mystics",
-        "sparks", "los angeles sparks", "chicago sky", "fever", "indiana fever", "minnesota lynx", "lynx",
-        "las vegas aces", "aces", "seattle storm", "storm", "valkyries", "golden state valkyries",
-        "dallas wings", "wings", "connecticut sun", "sun", "atlanta dream", "dream", "toronto tempo"
-    }
-
-    # NBL Franchises (Australia / NZ)
-    NBL_TEAMS = {
-        "adelaide 36ers", "36ers", "brisbane bullets", "bullets", "cairns taipans", "taipans",
-        "illawarra hawks", "melbourne united", "new zealand breakers", "breakers",
-        "perth wildcats", "wildcats", "south east melbourne phoenix", "sydney kings",
-        "tasmania jackjumpers", "jackjumpers"
-    }
-
-    # LBA Basket Italiano
-    LBA_BASKET_TEAMS = {
-        "olimpia milano", "ea7 milano", "virtus bologna", "segafredo bologna", "rewer venezia",
-        "venezia", "dinamo sassari", "sassari", "germani brescia", "brescia basket", "aquila trento",
-        "trento", "pallacanestro varese", "varese", "derthona", "tortona", "unahotels reggio emilia",
-        "reggiana", "pistoia", "givova scafati", "scafati", "vanoli cremona", "trapani shark",
-        "napoli basket", "gevi napoli", "pallacanestro trieste", "trieste", "cantù", "fortitudo"
-    }
 
     # Superlega Volley
     SUPERLEGA_VOLLEY_TEAMS = {
@@ -384,12 +360,20 @@ class GenreClassifier:
                 "football_club_world_cup": ("calcio_estero", "Nazionali e Amichevoli"),
                 "football_international_friendly": ("calcio_estero", "Nazionali e Amichevoli"),
                 "basketball_nba": ("basket", "NBA"),
+                "basketball_wnba": ("basket", "WNBA e Femminile"),
                 "basketball_euroleague": ("basket", "Eurolega ed Eurocup"),
                 "basketball_eurocup": ("basket", "Eurolega ed Eurocup"),
+                "basketball_bcl": ("basket", "Eurolega ed Eurocup"),
                 "basketball_lba_serie_a": ("basket", "LBA Serie A"),
-                "basketball_ncaa": ("basket", "NCAA e College Basket"),
                 "basketball_acb": ("basket", "Campionati Esteri ed NBL"),
-                "basketball_bcl": ("basket", "FIBA e Tornei Nazionali"),
+                "basketball_nbl": ("basket", "Campionati Esteri ed NBL"),
+                "basketball_bbl": ("basket", "Campionati Esteri ed NBL"),
+                "basketball_lnb": ("basket", "Campionati Esteri ed NBL"),
+                "basketball_greece": ("basket", "Campionati Esteri ed NBL"),
+                "basketball_turkey": ("basket", "Campionati Esteri ed NBL"),
+                "basketball_aba": ("basket", "Campionati Esteri ed NBL"),
+                "basketball_fiba": ("basket", "FIBA e Tornei Nazionali"),
+                "basketball_ncaa": ("basket", "NCAA e College Basket"),
                 "tennis_grand_slam": ("tennis", "Grandi Slam"),
                 "tennis_atp": ("tennis", "ATP"),
                 "tennis_wta": ("tennis", "WTA"),
@@ -452,8 +436,8 @@ class GenreClassifier:
             home = self._normalize_name(re.sub(r"[\(-].*$", "", parts[0]).strip())
             away = self._normalize_name(re.sub(r"[\(-].*$", "", parts[1]).strip())
 
-        is_women = bool(self._WOMEN_REGEX.search(title_lower))
-        is_youth = bool(self._YOUTH_REGEX.search(title_lower))
+        is_women = bool(self._WOMEN_REGEX.search(eval_text)) or match.get("_gender") == "+"
+        is_youth = bool(self._YOUTH_REGEX.search(eval_text)) or match.get("_age") == "+"
 
         # Guard: Cue sports (Snooker, Q Tour, Billiards) often mislabeled upstream
         if re.search(r"\b(snooker|q\s*tour|billiards|biliardo)\b", title_lower):
@@ -514,44 +498,47 @@ class GenreClassifier:
         if (
             cat in ("basketball", "basket")
             or silo == "basketball"
-            or "basketball" in title_lower
-            or "nba" in title_lower
-            or "euroleague" in title_lower
-            or "wnba" in title_lower
-            or "nbl" in title_lower
-            or any(t in title_lower for t in self.NBL_TEAMS)
-            or any(t in title_lower for t in self.LBA_BASKET_TEAMS)
+            or "basketball" in eval_text
+            or re.search(r"\b(nba|wnba|euroleague|eurocup|lba|nbl|fiba)\b", eval_text)
         ) and not is_football_context:
-            # A) WNBA & Basket Femminile
-            is_wnba_title = bool(re.search(r"\b(wnba)\b", title_lower)) or any(t in title_lower for t in self.WNBA_TEAMS)
-            if is_wnba_title or (is_women and "nba" not in title_lower):
+            # LIVELLO 1: Tornei Internazionali e Acronimi Globali
+
+            # 1. WNBA & Basket Femminile
+            if is_women or re.search(r"\b(wnba|liga\s*femenina|tauihi|wlb|women|femminile|femenino)\b", eval_text):
                 return "basket", "WNBA e Femminile"
 
-            # B) FIBA, Intercontinental Cup, Nazionali & 3x3
-            if re.search(r"\b(fiba|intercontinental\s*cup|coppa\s*intercontinentale|asian\s*games|mondiali|world\s*cup|eurobasket|qualif|national\s*team|3x3|caravan)\b", title_lower):
+            # 2. FIBA, 3x3, Tornei Nazionali
+            if re.search(r"\b(fiba|3x3|world\s*tour|world\s*cup|mondiali|eurobasket|qualif|national\s*team|intercontinental\s*cup)\b", eval_text):
                 return "basket", "FIBA e Tornei Nazionali"
 
-            # C) Eurolega & Eurocup (Coppe Europee)
+            # 3. Eurolega & Eurocup (Coppe Europee)
             if re.search(r"\b(euroleague|eurocup|eurolega|bcl|basketball\s*champions|fiba\s*europe\s*cup)\b", eval_text):
                 return "basket", "Eurolega ed Eurocup"
 
-            # D) LBA Serie A (Italiana)
-            if re.search(r"\b(lba|serie\s*a\s*basket|lega\s*a|coppa\s*italia\s*basket|serie\s*a2|italian\s*lega\s*basket)\b", eval_text) or any(t in home or t in away or t in eval_text for t in self.LBA_BASKET_TEAMS):
-                return "basket", "LBA Serie A"
-
-            # E) NCAA & College Basket
+            # 4. NCAA & College Basket
             if re.search(r"\b(ncaa|college\s*basketball|march\s*madness)\b", eval_text):
                 return "basket", "NCAA e College Basket"
 
-            # F) Campionati Esteri & NBL
-            if "nbl" in eval_text or any(t in eval_text for t in self.NBL_TEAMS) or re.search(r"\b(acb|endesa|cba|super\s*cup|skl|bsl|bbl|liga\s*femenina|pro\s*a|aba\s*league)\b", eval_text):
-                return "basket", "Campionati Esteri ed NBL"
-
-            # G) NBA (Men's professional USA league)
+            # 5. NBA (USA Men's Professional League)
             if re.search(r"\b(nba)\b", eval_text) or any(t in home or t in away or t in eval_text for t in self.NBA_TEAMS):
                 return "basket", "NBA"
 
-            # Default fallback for unlisted foreign basketball games
+            # LIVELLO 2: Campionati Nazionali (Country / Bandiere / Leghe Nazionali)
+
+            # A) LBA Serie A (Italia)
+            # Riconosce: country Italia, bandiera 🇮🇹, o sigle del basket italiano
+            is_italy_basket = (
+                country in ("italy", "italia")
+                or "🇮🇹" in title
+                or bool(re.search(r"\b(lba|serie\s*a\s*basket|lega\s*basket|serie\s*a2|coppa\s*italia\s*basket)\b", eval_text))
+            )
+            if is_italy_basket:
+                return "basket", "LBA Serie A"
+
+            # B) Campionati Esteri ed NBL (Tutti gli altri campionati nazionali)
+            # Spagna (ACB, FEB, 🇪🇸), Australia/NZ (NBL, 🇦🇺/🇳🇿), Germania (BBL, 🇩🇪),
+            # Francia (LNB, Pro A, 🇫🇷), Grecia (GBL, 🇬🇷), Turchia (BSL, 🇹🇷),
+            # Balcani (ABA League), Russia (VTB), Brasile (NBB), ecc.
             return "basket", "Campionati Esteri ed NBL"
 
         # ------------------------------------------------------------------

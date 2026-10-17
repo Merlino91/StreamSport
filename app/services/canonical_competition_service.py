@@ -400,6 +400,11 @@ CANONICAL_LEAGUES = {
         "silo": "basketball",
         "patterns": [r"\bnba\b", r"nba-preseason", r"nba\s*preseason"],
     },
+    "basketball_wnba": {
+        "display": "WNBA",
+        "silo": "basketball",
+        "patterns": [r"\bwnba\b", r"liga\s*femenina", r"tauihi"],
+    },
     "basketball_euroleague": {
         "display": "EuroLeague",
         "silo": "basketball",
@@ -410,25 +415,60 @@ CANONICAL_LEAGUES = {
         "silo": "basketball",
         "patterns": [r"eurocup"],
     },
+    "basketball_bcl": {
+        "display": "Basketball Champions League",
+        "silo": "basketball",
+        "patterns": [r"basketball\s*champions\s*league", r"\bbcl\b", r"fiba\s*europe\s*cup"],
+    },
     "basketball_lba_serie_a": {
         "display": "LBA Serie A",
         "silo": "basketball",
-        "patterns": [r"\blba\b", r"serie\s*a\s*basket", r"italy\s*-\s*lba", r"lega\s*basket"],
+        "patterns": [r"\blba\b", r"serie\s*a\s*basket", r"italy\s*-\s*lba", r"lega\s*basket", r"coppa\s*italia\s*basket", r"serie\s*a2"],
+    },
+    "basketball_acb": {
+        "display": "Liga ACB",
+        "silo": "basketball",
+        "patterns": [r"\bacb\b", r"liga\s*acb", r"liga\s*endesa", r"spagna:\s*acb", r"primera\s*feb"],
+    },
+    "basketball_nbl": {
+        "display": "NBL Australia",
+        "silo": "basketball",
+        "patterns": [r"\bnbl\b", r"australian\s*nbl"],
+    },
+    "basketball_bbl": {
+        "display": "BBL Germania",
+        "silo": "basketball",
+        "patterns": [r"\bbbl\b", r"german\s*cup", r"bbl-pokal"],
+    },
+    "basketball_lnb": {
+        "display": "LNB Pro A",
+        "silo": "basketball",
+        "patterns": [r"\blnb\b", r"betclic\s*elite", r"\bpro\s*a\b"],
+    },
+    "basketball_greece": {
+        "display": "GBL Grecia",
+        "silo": "basketball",
+        "patterns": [r"basket\s*league", r"greece\s*basket", r"\bgbl\b"],
+    },
+    "basketball_turkey": {
+        "display": "BSL Turchia",
+        "silo": "basketball",
+        "patterns": [r"s[üu]per\s*ligi", r"super\s*lig", r"\bbsl\b"],
+    },
+    "basketball_aba": {
+        "display": "ABA League",
+        "silo": "basketball",
+        "patterns": [r"aba\s*league", r"admiralbet\s*aba"],
+    },
+    "basketball_fiba": {
+        "display": "FIBA",
+        "silo": "basketball",
+        "patterns": [r"\bfiba\b", r"\b3x3\b", r"world\s*tour", r"eurobasket", r"world\s*cup"],
     },
     "basketball_ncaa": {
         "display": "NCAA Basketball",
         "silo": "basketball",
         "patterns": [r"ncaa\s*basketball", r"college\s*basketball", r"march\s*madness"],
-    },
-    "basketball_acb": {
-        "display": "Liga ACB",
-        "silo": "basketball",
-        "patterns": [r"liga\s*acb", r"liga\s*endesa", r"spagna:\s*acb"],
-    },
-    "basketball_bcl": {
-        "display": "Basketball Champions League",
-        "silo": "basketball",
-        "patterns": [r"basketball\s*champions\s*league", r"\bbcl\b"],
     },
 
     # --------------------------------------------------------------------------
