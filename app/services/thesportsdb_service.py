@@ -649,12 +649,19 @@ class TheSportsDBService:
 
             best_match = None
             for cal in candidates:
+                # Gatekeeper 1: Strict time window (max 90 minutes for team sports)
+                cal_date = cal.get("date_ms", 0)
+                if m_date and cal_date:
+                    diff_hours = abs(m_date - cal_date) / 3600000.0
+                    if diff_hours > 1.5:  # > 90 minutes
+                        continue
+
                 cal_home = self._clean_team_name(cal.get("home", ""))
                 cal_away = self._clean_team_name(cal.get("away", ""))
                 if not cal_home or not cal_away:
                     continue
 
-                # Gatekeeper 1: Bilateral team match is MANDATORY (Dual-Test: Raw stream teams OR Diretta normalized teams)
+                # Gatekeeper 2: Bilateral team match is MANDATORY (Dual-Test: Raw stream teams OR Diretta normalized teams)
                 h_direct = self._team_matches(m_home, cal_home) if (m_home and m_away) else False
                 a_direct = self._team_matches(m_away, cal_away) if (m_home and m_away) else False
                 h_inverted = self._team_matches(m_home, cal_away) if (m_home and m_away) else False
@@ -670,13 +677,6 @@ class TheSportsDBService:
 
                 if not teams_matched:
                     continue
-
-                # Gatekeeper 2: Strict time window (max 90 minutes for team sports)
-                cal_date = cal.get("date_ms", 0)
-                if m_date and cal_date:
-                    diff_hours = abs(m_date - cal_date) / 3600000.0
-                    if diff_hours > 1.5:  # > 90 minutes
-                        continue
 
                 # Gatekeeper 3: Youth & Women coherence check
                 cal_is_youth = cal.get("is_youth", False)
