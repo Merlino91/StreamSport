@@ -487,10 +487,10 @@ class StreamService:
 
         # 1. Process TvVoo (Vavoo) streams with top priority
         tvvoo_streams: List[Dict[str, Any]] = []
-        tvvoo_sources = [s for s in sources if s.get("source") == "tvvoo"]
+        tvvoo_sources = [s for s in sources if s.get("source") == "tvvoo" or "vavoo" in str(s.get("url", ""))]
         seen_tvvoo_channels: Dict[str, int] = {}
         for s in tvvoo_sources:
-            raw_name = s.get("name") or "Canale TV"
+            raw_name = s.get("name") or s.get("display_name") or "Canale TV"
             vavoo_url = s.get("url")
             if not vavoo_url:
                 continue

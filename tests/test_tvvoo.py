@@ -87,6 +87,15 @@ class TestTvVooService(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(self.service.get_canonical_key("DAZN RISE"))
         self.assertIsNone(self.service.get_canonical_key("DAZN EVENT INFO"))
 
+        # Strict DAZN ZONA IT isolation
+        self.assertEqual(self.service.get_canonical_key("DAZN ZONA IT"), "dazn 1")
+        self.assertEqual(self.service.get_canonical_key("ZONA DAZN"), "dazn 1")
+        self.assertIsNone(self.service.get_canonical_key("DAZN ZONA UK"))
+        self.assertIsNone(self.service.get_canonical_key("DAZN ZONA ES"))
+        self.assertIsNone(self.service.get_canonical_key("DAZN ZONA DE"))
+        self.assertIsNone(self.service.get_canonical_key("DAZN ZONA FR"))
+        self.assertIsNone(self.service.get_canonical_key("DAZN IT"))
+
         # Sky Sport 1 in Germany vs Sky Sport 1 in Italy
         self.assertEqual(self.service.get_canonical_key("Sky Sport 1", country="Germany"), "sky sport 1 de")
         self.assertEqual(self.service.get_canonical_key("Sky Sport 1", country="Italy"), "sky sport uno")

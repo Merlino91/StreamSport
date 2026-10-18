@@ -456,7 +456,14 @@ class DirettaService:
                             for st in tv_streams:
                                 if st.get("url") and st["url"] not in existing_urls:
                                     existing_urls.add(st["url"])
-                                    m.setdefault("sources", []).append(st)
+                                    m.setdefault("sources", []).append({
+                                        "source": "tvvoo",
+                                        "id": st.get("canonical", "tvvoo"),
+                                        "name": st.get("display_name", ch),
+                                        "url": st.get("url"),
+                                        "tag": st.get("tag", "c"),
+                                        "country": st.get("country", "Italy"),
+                                    })
 
         if reconciled_count > 0:
             logger.info("Diretta.it Convalidatore: convalidati e normalizzati %d match con successo.", reconciled_count)
