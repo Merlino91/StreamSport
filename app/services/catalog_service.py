@@ -27,6 +27,7 @@ from app.services.banner_service import banner_service, BANNER_VERSION
 from app.services.tennis_poster_service import tennis_poster_service
 from app.services.thesportsdb_service import thesportsdb_service
 from app.services.tvvoo_service import tvvoo_service
+from app.services.fctv33_service import fctv33_service
 from app.services.italian_epg_service import italian_epg_service
 from app.services.diretta_service import diretta_service
 from app.services.canonical_competition_service import (
@@ -709,6 +710,10 @@ class CatalogService:
                     existing["_competition"] = m2["_competition"]
                 if not existing.get("_silo") and m2.get("_silo"):
                     existing["_silo"] = m2["_silo"]
+                if not existing.get("_fctv33_id") and m2.get("_fctv33_id"):
+                    existing["_fctv33_id"] = m2["_fctv33_id"]
+                if not existing.get("_sport_type") and m2.get("_sport_type"):
+                    existing["_sport_type"] = m2["_sport_type"]
             else:
                 m2_dict = dict(m2)
                 if m2_dict.get("title") and "raw_titles" not in m2_dict:
@@ -1147,7 +1152,7 @@ class CatalogService:
 
             logger.info("Starting background sports schedule sync...")
             try:
-                # 1. Fetch live matches from StreamedAPI, DaddyLiveAPI, Italian EPG (Sky & Tivùsat), and official registries concurrently
+                # 1. Fetch live matches from StreamedAPI, DaddyLiveAPI, FCTV33, Italian EPG (Sky & Tivùsat), and official registries concurrently
                 tasks = [
                     streamed_api.get_all_matches(force_refresh=True),
                     daddylive_api.get_matches(force=True),
@@ -1155,6 +1160,7 @@ class CatalogService:
                     thesportsdb_service.fetch_multi_day_calendar(days_ahead=2, days_behind=1),
                     italian_epg_service.get_matches(),
                     diretta_service.get_events(),
+                    fctv33_service.get_matches(force=True),
                 ]
                 results = await asyncio.gather(*tasks, return_exceptions=True)
                 streamed_raw = results[0] if isinstance(results[0], list) else []
@@ -1162,13 +1168,17 @@ class CatalogService:
                 ocb_sessions = results[2] if isinstance(results[2], list) else []
                 epg_raw = results[4] if isinstance(results[4], list) else []
                 diretta_events = results[5] if isinstance(results[5], list) else []
+                fctv33_raw = results[6] if isinstance(results[6], list) else []
 
                 streamed_matches = [m for m in streamed_raw if self.is_real_match(m)]
                 daddylive_matches = [m for m in daddylive_raw if self.is_real_match(m)]
                 epg_matches = [m for m in epg_raw if self.is_real_match(m)]
+                fctv33_matches = [m for m in fctv33_raw if self.is_real_match(m)]
 
                 # Merge streamed and daddylive matches silo-by-silo into combined fresh
                 combined_fresh = self.merge_and_deduplicate_by_silos(streamed_matches, daddylive_matches)
+                if fctv33_matches:
+                    combined_fresh = self.merge_and_deduplicate_by_silos(combined_fresh, fctv33_matches)
 
                 # 2. Pull all active matches from DB to retain existing enriched posters
                 all_db_matches = [m for m in db_service.get_active_matches() if self.is_real_match(m)]

@@ -13,6 +13,7 @@ from app.services.db_service import db_service
 from app.services.genre_classifier import genre_classifier
 from app.services.sportvideo_service import sportvideo_service
 from app.services.streamed_api import streamed_api
+from app.services.fctv33_service import fctv33_service
 from app.services.youtube_service import youtube_service
 
 logger = logging.getLogger("streamsport.stream")
@@ -434,6 +435,14 @@ class StreamService:
                     match = m
                     break
 
+        # 5. Check FCTV33 (fallback)
+        if not match:
+            fctv_matches = await fctv33_service.get_matches()
+            for m in fctv_matches:
+                if m.get("id") == slug_id or slug_id in str(m.get("id", "")):
+                    match = m
+                    break
+
         if not match:
             return []
 
@@ -575,10 +584,44 @@ class StreamService:
                     "behaviorHints": {"notWebReady": False},
                 })
 
-        # 3. Process Streamed upstream sources (hotel, delta, etc.)
+        # 3. Process FCTV33 streams with TencentEdgeOne CDN format
+        fctv33_streams: List[Dict[str, Any]] = []
+        if ep_url:
+            fctv_sources = [s for s in sources if s.get("source") == "fctv33"]
+            fctv_mid = match.get("_fctv33_id") or (match.get("id", "").replace("fctv33:", "") if "fctv33:" in match.get("id", "") else None)
+            fctv_sport = match.get("_sport_type", 1)
+
+            # Live-refresh: if match has FCTV33 ID and streams aren't resolved yet, query /api/match/detail in real-time
+            has_concrete_streams = any(s.get("stream_id") for s in fctv_sources)
+            if fctv_mid and not has_concrete_streams:
+                fresh_fctv = await fctv33_service.get_streams_for_match(fctv_mid, sport_type=fctv_sport)
+                if fresh_fctv:
+                    fctv_sources = fresh_fctv
+                    sources.extend(fresh_fctv)
+
+            for idx, s in enumerate(fctv_sources, 1):
+                m_id = s.get("match_id") or fctv_mid
+                s_id = s.get("stream_id")
+                if not m_id or not s_id:
+                    continue
+                raw_name = s.get("name") or f"Canale {idx}"
+                flag = self.get_channel_flag(raw_name)
+                flag_prefix = f"{flag} " if flag else ""
+
+                target_d = f"{m_id}:{s_id}"
+                stream_url = self.build_easyproxy_url(ep_url, ep_pass, "fctv33", target_d)
+
+                fctv33_streams.append({
+                    "name": f"{flag_prefix}⚡ FCTV33 [{raw_name}]",
+                    "title": f"FCTV33 Live • 1080p 50fps • {raw_name}\n📡 Rete Edge Tencent",
+                    "url": stream_url,
+                    "behaviorHints": {"notWebReady": False},
+                })
+
+        # 4. Process Streamed upstream sources (hotel, delta, etc.)
         streamed_streams: List[Dict[str, Any]] = []
         if ep_url:
-            other_sources = [(s.get("source"), s.get("id")) for s in sources if s.get("source") not in ("dlhd", "tvvoo") and s.get("source") and s.get("id")]
+            other_sources = [(s.get("source"), s.get("id")) for s in sources if s.get("source") not in ("dlhd", "tvvoo", "fctv33") and s.get("source") and s.get("id")]
             if other_sources:
                 tasks = [streamed_api.get_streams_for_source(src_name, src_id) for src_name, src_id in other_sources]
                 results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -619,8 +662,8 @@ class StreamService:
                             })
                             stream_index += 1
 
-        # Sort non-TvVoo streams: Italian DaddyLive channels immediately below TvVoo
-        secondary_streams = dlhd_streams + streamed_streams
+        # Sort non-TvVoo streams: Italian channels immediately below TvVoo
+        secondary_streams = dlhd_streams + fctv33_streams + streamed_streams
         secondary_streams.sort(key=lambda s: 0 if "🇮🇹" in s.get("name", "") else 1)
 
         # Assemble final stream list: TvVoo strictly first!
