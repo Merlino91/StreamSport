@@ -104,6 +104,35 @@ class TestFCTV33Integration(unittest.IsolatedAsyncioTestCase):
         # Check that _fctv33_id is enriched
         self.assertEqual(res.get("_fctv33_id"), "4441287")
 
+    def test_anti_junk_filter(self):
+        """Verifies that is_junk_event correctly drops low-tier exotic/youth events while preserving motorsports, tennis, and top leagues."""
+        junk_items = [
+            {"title": "ps manado vs ps freeport indonesia", "_silo": "football", "competition": "piala soeratin u-13 2026 putaran nasional", "country": ""},
+            {"title": "YANGON UNITED FC vs SHAN UNITED FC", "_silo": "football", "competition": "Myanmar Women's League 2026-2027", "country": ""},
+            {"title": "AS Armee vs ASC Kedia", "_silo": "football", "competition": "Mauritania Ligue 1", "country": "Mauritania"},
+            {"title": "KPA Women vs Dynamo", "_silo": "basketball", "competition": "FIBA WBLA Qualifiers 2026 Zone 5", "country": ""},
+            {"title": "Meycauayan vs Pasay Voyagers", "_silo": "basketball", "competition": "Philippines MPBL", "country": "Philippines"},
+        ]
+        for item in junk_items:
+            self.assertTrue(fctv33_service.is_junk_event(item), f"Expected junk for {item['title']}")
+
+        valid_items = [
+            # Indonesian MotoGP should NEVER be filtered
+            {"title": "Indonesian MotoGP Grand Prix", "_silo": "motor-sports", "competition": "MotoGP Mandalika Indonesia", "country": "Indonesia"},
+            # Foreign ATP tennis should NEVER be filtered
+            {"title": "Mannarino vs Vukic", "_silo": "tennis", "competition": "ATP Almaty, Kazakhstan", "country": "Kazakhstan"},
+            # Italian Serie C should NEVER be filtered
+            {"title": "Juventus U23 vs Renate", "_silo": "football", "competition": "Italian Serie C", "country": "Italy"},
+            # Premier League should NEVER be filtered
+            {"title": "Tottenham vs Coventry", "_silo": "football", "competition": "English Premier League", "country": "England"},
+            # Official FIFA National tournament should NEVER be filtered
+            {"title": "USA U17 Women vs Samoa U17 Women", "_silo": "football", "competition": "U17 Women's World Cup", "country": "International"},
+            # NBA
+            {"title": "Boston Celtics vs LA Lakers", "_silo": "basketball", "competition": "NBA", "country": "USA"},
+        ]
+        for item in valid_items:
+            self.assertFalse(fctv33_service.is_junk_event(item), f"Expected valid for {item['title']}")
+
 
 if __name__ == "__main__":
     unittest.main()

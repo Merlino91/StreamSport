@@ -999,6 +999,12 @@ class CatalogService:
                     if m.get("_tsdb_matched"):
                         matched_target["_tsdb_matched"] = True
 
+                    if m.get("teams") and not matched_target.get("teams"):
+                        matched_target["teams"] = m["teams"]
+                    if m.get("_fctv33_id") and not matched_target.get("_fctv33_id"):
+                        matched_target["_fctv33_id"] = m["_fctv33_id"]
+                        matched_target["_sport_type"] = m.get("_sport_type", 1)
+
                     # 6. Combine stream sources without duplicate URLs
                     existing_urls = {
                         s.get("url") for s in matched_target.get("sources", [])

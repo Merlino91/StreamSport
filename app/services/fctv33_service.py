@@ -157,6 +157,57 @@ class FCTV33Service:
             if not title:
                 return None
 
+            # Team names and logos extraction from Field 30
+            home_name = ""
+            away_name = ""
+            home_logo = None
+            away_logo = None
+
+            if 30 in mf and len(mf[30]) >= 3:
+                # Team 1 (Home)
+                t1_fields = _read_fields(mf[30][1])
+                if 10 in t1_fields:
+                    sub10_1 = _read_fields(t1_fields[10][0])
+                    raw_name1 = sub10_1.get(3, [b""])[0]
+                    if isinstance(raw_name1, bytes):
+                        s1 = raw_name1.decode("utf-8", errors="replace")
+                        raw_h = s1.split("\x12")[-1] if "\x12" in s1 else s1
+                        home_name = re.sub(r"^[^a-zA-Z0-9]+", "", raw_h).strip()
+                    logo1_raw = sub10_1.get(4, [b""])[0]
+                    if isinstance(logo1_raw, bytes) and logo1_raw.startswith(b"http"):
+                        home_logo = logo1_raw.decode("utf-8", errors="replace")
+
+                # Team 2 (Away)
+                t2_fields = _read_fields(mf[30][2])
+                if 10 in t2_fields:
+                    sub10_2 = _read_fields(t2_fields[10][0])
+                    raw_name2 = sub10_2.get(3, [b""])[0]
+                    if isinstance(raw_name2, bytes):
+                        s2 = raw_name2.decode("utf-8", errors="replace")
+                        raw_a = s2.split("\x12")[-1] if "\x12" in s2 else s2
+                        away_name = re.sub(r"^[^a-zA-Z0-9]+", "", raw_a).strip()
+                    logo2_raw = sub10_2.get(4, [b""])[0]
+                    if isinstance(logo2_raw, bytes) and logo2_raw.startswith(b"http"):
+                        away_logo = logo2_raw.decode("utf-8", errors="replace")
+
+            # Fallback: if home/away not parsed from subfields, extract by splitting title
+            if (not home_name or not away_name) and title:
+                for sep in (" vs ", " - ", " v "):
+                    if sep in title:
+                        parts = title.split(sep, 1)
+                        if not home_name:
+                            home_name = parts[0].strip()
+                        if not away_name:
+                            away_name = parts[1].strip()
+                        break
+
+            teams_dict = None
+            if home_name and away_name:
+                teams_dict = {
+                    "home": {"name": home_name, "logo": home_logo},
+                    "away": {"name": away_name, "logo": away_logo},
+                }
+
             # League & Country extraction from Field 10
             league = ""
             country = ""
@@ -183,12 +234,20 @@ class FCTV33Service:
             silo_info = FCTV33_SPORT_TYPE_MAP.get(sport_type, {"silo": "other", "name": "Altri Sport"})
             canonical_silo = silo_info["silo"]
 
-            return {
+            # Optimal initial poster: league logo, or home team logo
+            initial_poster = logo_url or home_logo
+
+            match_dict = {
                 "id": f"fctv33:{mid_str}",
                 "title": title,
                 "category": canonical_silo,
                 "date": int(ts),
-                "poster": logo_url,
+                "poster": initial_poster,
+                "competition": league,
+                "_competition": league,
+                "country": country,
+                "_country": country,
+                "teams": teams_dict,
                 "sources": [
                     {
                         "source": "fctv33",
@@ -199,15 +258,86 @@ class FCTV33Service:
                     }
                 ],
                 "_silo": canonical_silo,
-                "_competition": league,
-                "_country": country,
                 "_fctv33_id": mid_str,
                 "_sport_type": sport_type,
                 "_provider": "fctv33",
             }
+
+            # Filter out foreign low-tier / irrelevant junk events before returning
+            if self.is_junk_event(match_dict):
+                return None
+
+            return match_dict
         except Exception as e:
             logger.debug("Error parsing FCTV33 match item: %s", e)
             return None
+
+    @staticmethod
+    def is_junk_event(item: Dict[str, Any]) -> bool:
+        """
+        Evaluates whether an FCTV33 event is low-tier / irrelevant junk for the Italian audience.
+        Uses structured competition and country metadata to avoid aggressive title false-positives.
+        Strictly preserves motorsports, tennis, combat sports, American sports, and all national team tournaments.
+        """
+        silo = (item.get("_silo") or item.get("category") or "").lower()
+        comp = (item.get("competition") or item.get("_competition") or "").lower().strip()
+        country = (item.get("country") or item.get("_country") or "").lower().strip()
+        title = (item.get("title") or "").lower()
+
+        # Never filter motorsports, tennis, combat sports, American football, hockey, or baseball
+        if silo in ("motor-sports", "tennis", "fight", "american-football", "hockey", "baseball"):
+            return False
+
+        # --- 1. CALCIO (Football) ---
+        if silo == "football":
+            # A. Youth / Giovanili non italiane e non top-tier internazionali
+            is_youth = bool(re.search(r"\b(u-?1[0-9]|u-?2[01]|under\s*1[0-9]|under\s*2[01]|sub-?1[0-9]|sub-?20|soeratin|juvenil|cadete)\b", comp))
+            if is_youth:
+                is_it_youth = bool(re.search(r"\b(italia|italy|primavera|juventus|milan|inter|roma|atalanta|fiorentina|lazio)\b", f"{comp} {title}"))
+                is_uefa_fifa = bool(re.search(r"\b(uefa|fifa|champions|euro|world cup)\b", comp))
+                if not is_it_youth and not is_uefa_fifa:
+                    return True
+
+            # B. Tornei Nazionali ufficiali (AFCON, Qualifiers Mondiali/Europei, Nations League, ecc.) -> Sempre ammessi
+            is_national_tournament = bool(re.search(r"\b(afcon|world cup|qualifier|nations league|copa america|asian cup|gold cup|futsal afcon)\b", comp))
+            if is_national_tournament:
+                return False
+
+            # C. Femminile non italiano e non top
+            is_women = bool(re.search(r"\b(women(?:['']s)?|femminile|femenil|dames|frauen|ladies)\b", comp))
+            if is_women:
+                is_top_women = bool(re.search(r"\b(serie a|coppa italia|italia|italy|champions|uwcl|world cup|nations league|euro)\b", comp))
+                is_it_team = bool(re.search(r"\b(juventus|roma|inter|milan|fiorentina|sassuolo|como|lazio|sampdoria)\b", title))
+                if not is_top_women and not is_it_team:
+                    return True
+
+            # D. Campionati nazionali minori / esotici di club non europei
+            EXOTIC_CLUB_COUNTRIES = {
+                "myanmar", "vietnam", "cambodia", "laos", "indonesia", "thailand",
+                "mauritania", "antigua", "antigua and barbuda", "suriname", "st. kitts", "st. kitts and nevis", "saint kitts",
+                "maldives", "nepal", "bangladesh", "bhutan", "mongolia", "fiji", "tahiti",
+                "uganda", "rwanda", "burundi", "somalia", "djibouti", "eritrea", "sudan", "south sudan",
+                "gambia", "liberia", "sierra leone", "guinea-bissau", "tanzania", "kenya", "zambia", "zimbabwe"
+            }
+            if country in EXOTIC_CLUB_COUNTRIES:
+                return True
+
+            for ex in EXOTIC_CLUB_COUNTRIES:
+                if re.search(rf"\b{re.escape(ex)}\b", comp):
+                    return True
+
+        # --- 2. BASKET (Basketball) ---
+        if silo == "basketball":
+            # A. Youth foreign
+            is_youth = bool(re.search(r"\b(u-?1[0-9]|u-?2[01]|under\s*1[0-9]|under\s*2[01])\b", comp))
+            if is_youth:
+                return True
+
+            # B. Tornei zonali / regionali amatoriali o leghe minori
+            if re.search(r"\b(wbla|mpbl|zone\s*5|division\s*[2-9]|regional)\b", comp):
+                return True
+
+        return False
 
     async def get_matches(self, force: bool = False, sport_types: Optional[List[int]] = None) -> List[Dict[str, Any]]:
         """
