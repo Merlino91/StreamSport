@@ -564,20 +564,32 @@ class StreamService:
 
         # 2. Process Freeshot streams (Positioned immediately below TvVoo as requested!)
         freeshot_streams: List[Dict[str, Any]] = []
-        if ep_url:
-            freeshot_sources = [s for s in sources if s.get("source") == "freeshot" or s.get("code")]
-            seen_freeshot_codes: Set[str] = set()
-            for s in freeshot_sources:
-                f_code = s.get("code") or s.get("id")
-                if not f_code or f_code in seen_freeshot_codes:
-                    continue
-                seen_freeshot_codes.add(f_code)
+        freeshot_sources = [s for s in sources if s.get("source") == "freeshot" or s.get("code")]
+        seen_freeshot_codes: Set[str] = set()
+        for s in freeshot_sources:
+            f_code = s.get("code") or s.get("id")
+            if not f_code or f_code in seen_freeshot_codes:
+                continue
+            seen_freeshot_codes.add(f_code)
 
-                raw_name = s.get("name") or f_code
+            raw_name = s.get("name") or f_code
+
+            # 1. Native No-Freeze stream (Internal Manifest Manager: auto-refresh, 0% video bandwidth, eliminates 3s loops)
+            if base_url:
+                no_freeze_fs_url = f"{base_url.rstrip('/')}/live/freeshot/manifest.m3u8?channel={urllib.parse.quote(f_code, safe='')}"
+                freeshot_streams.append({
+                    "name": f"🇮🇹 {raw_name} [Freeshot] ⚡ No-Freeze",
+                    "title": f"🇮🇹 Italia • ⚡ Fonte: Freeshot (No-Freeze) • Anti-Loop Buffer",
+                    "url": no_freeze_fs_url,
+                    "behaviorHints": {"isLive": True, "notWebReady": False},
+                })
+
+            # 2. EasyProxy fallback stream (if configured)
+            if ep_url:
                 stream_url = self.build_easyproxy_url(ep_url, ep_pass, "freeshot", f_code)
                 freeshot_streams.append({
                     "name": f"🇮🇹 {raw_name} [Freeshot]",
-                    "title": f"🇮🇹 Italia • ⚡ Fonte: Freeshot • Qualità FHD 1080p 50fps",
+                    "title": f"🇮🇹 Italia • ⚡ Fonte: Freeshot • Stream Standard",
                     "url": stream_url,
                     "behaviorHints": {"notWebReady": False},
                 })

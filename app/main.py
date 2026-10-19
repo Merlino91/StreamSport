@@ -385,6 +385,31 @@ async def live_manifest_proxy(request: Request, url: str):
     )
 
 
+@app.get("/live/freeshot/manifest.m3u8")
+@app.get("/{config}/live/freeshot/manifest.m3u8")
+async def live_freeshot_manifest_proxy(request: Request, channel: str):
+    """
+    Live M3U8 Manifest Proxy for Freeshot / WideIPTV (Auto token renewal, 0% video bandwidth).
+    Prevents player loop stalls by resolving fresh tokens and rewriting chunks to direct CDN edge URLs.
+    """
+    if not channel:
+        raise HTTPException(status_code=400, detail="Parametro channel mancante")
+
+    from app.services.freeshot_service import freeshot_service
+    manifest_content = await freeshot_service.get_live_manifest(channel)
+    if not manifest_content:
+        raise HTTPException(status_code=502, detail="Impossibile generare il manifest live di Freeshot")
+
+    return Response(
+        content=manifest_content,
+        media_type="application/vnd.apple.mpegurl",
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+        },
+    )
+
+
 @app.get("/dailymotion/stream/{video_id}.m3u8")
 async def dailymotion_stream_proxy(video_id: str):
     """
