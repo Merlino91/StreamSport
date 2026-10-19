@@ -12,7 +12,6 @@ from app.config import (
     ITALIAN_EPG_CACHE_INTERVAL,
 )
 from app.services.tvvoo_service import tvvoo_service
-from app.services.freeshot_service import freeshot_service
 from app.services.canonical_competition_service import (
     is_simulcast_event,
     get_simulcast_info,
@@ -491,17 +490,6 @@ class ItalianEPGService:
                             "country": "Italy",
                         })
 
-                # Freeshot Stream Target Resolution (backup FHD stream)
-                fs_info = freeshot_service.get_channel_info(sky_id=ch_id)
-                if fs_info:
-                    sources.append({
-                        "source": "freeshot",
-                        "id": fs_info["code"],
-                        "name": fs_info["name"],
-                        "code": fs_info["code"],
-                        "country": "Italy",
-                    })
-
                 slug_title = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")
                 match_id = f"sky_{ch_id}_{slug_title}_{int(date_ms / 1000)}"
 
@@ -637,17 +625,6 @@ class ItalianEPGService:
                             "tag": st.get("tag", "c"),
                             "country": "Italy",
                         })
-
-                # Freeshot Stream Target Resolution (backup FHD stream)
-                fs_info = freeshot_service.get_channel_info(tivusat_id=ch_id)
-                if fs_info:
-                    sources.append({
-                        "source": "freeshot",
-                        "id": fs_info["code"],
-                        "name": fs_info["name"],
-                        "code": fs_info["code"],
-                        "country": "Italy",
-                    })
 
                 slug_title = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")
                 match_id = f"tivusat_{ch_id}_{slug_title}_{int(date_ms / 1000)}"

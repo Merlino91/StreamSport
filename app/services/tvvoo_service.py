@@ -1494,19 +1494,6 @@ class TvVooService:
                         existing_urls.add(u)
                         existing_ids.add(c_id)
 
-                    # Also attach Freeshot stream if it's an Italian channel and present on Freeshot
-                    from app.services.freeshot_service import freeshot_service
-                    fs_info = freeshot_service.get_channel_info(canonical_key=c_id)
-                    if fs_info and fs_info["code"] not in existing_ids:
-                        new_tvvoo_streams.append({
-                            "source": "freeshot",
-                            "id": fs_info["code"],
-                            "name": fs_info["name"],
-                            "code": fs_info["code"],
-                            "country": "Italy",
-                        })
-                        existing_ids.add(fs_info["code"])
-
             if new_tvvoo_streams:
                 # Prepend TvVoo streams at index 0 of match sources
                 for tv_s in reversed(new_tvvoo_streams):
