@@ -44,7 +44,7 @@ ITALIAN_EPG_CACHE_INTERVAL = int(os.getenv("ITALIAN_EPG_CACHE_INTERVAL", "7200")
 # FCTV33 (RBTV / TCPWE) Provider Settings
 ENABLE_FCTV33 = os.getenv("ENABLE_FCTV33", "true").lower() in ("true", "1", "yes")
 FCTV33_API_BASE = os.getenv("FCTV33_API_BASE", "https://apis-data10.tcpwe138stya.ru")
-FCTV33_CACHE_TTL = int(os.getenv("FCTV33_CACHE_TTL", "600"))  # 10 minutes (in seconds)
+FCTV33_CACHE_TTL = int(os.getenv("FCTV33_CACHE_TTL", "3600"))  # 1 hour (in seconds)
 
 
 
