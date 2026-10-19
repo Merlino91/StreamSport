@@ -204,14 +204,13 @@ class FCTV33Service:
             teams_dict = None
             if home_name and away_name:
                 teams_dict = {
-                    "home": {"name": home_name, "logo": home_logo},
-                    "away": {"name": away_name, "logo": away_logo},
+                    "home": {"name": home_name},
+                    "away": {"name": away_name},
                 }
 
             # League & Country extraction from Field 10
             league = ""
             country = ""
-            logo_url = None
             if 10 in mf:
                 l_sub = _read_fields(mf[10][0])
                 l_name = l_sub.get(3, [b""])[0]
@@ -219,10 +218,6 @@ class FCTV33Service:
                     s = l_name.decode("utf-8", errors="replace")
                     raw_l = s.split("\x12")[-1].strip() if "\x12" in s else s.strip()
                     league = re.sub(r"^[^a-zA-Z0-9]+", "", raw_l).strip()
-
-                l_logo = l_sub.get(4, [b""])[0]
-                if isinstance(l_logo, bytes) and l_logo.startswith(b"http"):
-                    logo_url = l_logo.decode("utf-8", errors="replace")
 
                 if 80 in l_sub:
                     c_raw = l_sub[80][0]
@@ -234,15 +229,12 @@ class FCTV33Service:
             silo_info = FCTV33_SPORT_TYPE_MAP.get(sport_type, {"silo": "other", "name": "Altri Sport"})
             canonical_silo = silo_info["silo"]
 
-            # Optimal initial poster: league logo, or home team logo
-            initial_poster = logo_url or home_logo
-
             match_dict = {
                 "id": f"fctv33:{mid_str}",
                 "title": title,
                 "category": canonical_silo,
                 "date": int(ts),
-                "poster": initial_poster,
+                "poster": None,
                 "competition": league,
                 "_competition": league,
                 "country": country,
@@ -276,42 +268,96 @@ class FCTV33Service:
     def is_junk_event(item: Dict[str, Any]) -> bool:
         """
         Evaluates whether an FCTV33 event is low-tier / irrelevant junk for the Italian audience.
-        Uses structured competition and country metadata to avoid aggressive title false-positives.
-        Strictly preserves motorsports, tennis, combat sports, American sports, and all national team tournaments.
+        Uses structured 2-level regex inspection primarily on `competition` (with fallback on `title`).
+        - Level 1: Motors, tennis, combat sports are completely immune from tournament/geography filtering.
+        - Level 2: Strict regex filtering across football, basketball, american-football, baseball, hockey, and volley.
         """
         silo = (item.get("_silo") or item.get("category") or "").lower()
         comp = (item.get("competition") or item.get("_competition") or "").lower().strip()
         country = (item.get("country") or item.get("_country") or "").lower().strip()
-        title = (item.get("title") or "").lower()
+        title = (item.get("title") or "").lower().strip()
+        comp_or_title = comp or title
 
-        # Never filter motorsports, tennis, combat sports, American football, hockey, or baseball
-        if silo in ("motor-sports", "tennis", "fight", "american-football", "hockey", "baseball"):
+        # --- LEVEL 1: Immune Silos (Global circuits, international tournaments) ---
+        if silo in ("motor-sports", "tennis", "fight"):
             return False
 
-        # --- 1. CALCIO (Football) ---
+        # --- LEVEL 2: Sport-Specific Structural Filtering ---
+
+        # 1. AMERICAN FOOTBALL
+        # Keep: NFL, CFL, UFL, and strictly NCAA Division I FBS.
+        # Discard: Lower college divisions (FCS, D-II, D-III, NAIA, JuCo) and high school.
+        if silo == "american-football":
+            if re.search(r"\b(fcs|ncaa\s*fcs|division\s*(?:ii|iii|1-aa|i-aa)|d-?[23]|naia|juco|high\s*school)\b", comp_or_title):
+                return True
+            return False
+
+        # 2. BASEBALL
+        # Keep: MLB, NPB, KBO, Italian/European leagues, World Baseball Classic.
+        # Discard: Minor leagues (MiLB, Triple-A, Double-A, Single-A, Rookie), college baseball, exotic development circuits.
+        if silo == "baseball":
+            if re.search(r"\b(milb|triple-a|double-a|single-a|class\s*a|rookie|minor\s*league|phoenix\s*league|college\s*baseball|ncaa)\b", comp_or_title):
+                return True
+            return False
+
+        # 3. HOCKEY
+        # Keep: NHL, KHL, SHL, Liiga, DEL, Swiss National League, Italian/Alpine leagues, IIHF World Championship.
+        # Discard: American minor leagues (AHL, ECHL), major junior leagues (OHL, WHL, QMJHL, USHL), college ice hockey.
+        if silo == "hockey":
+            if re.search(r"\b(ahl|echl|ohl|whl|qmjhl|ushl|junior|college\s*hockey|ncaa)\b", comp_or_title):
+                return True
+            return False
+
+        # 4. VOLLEYBALL
+        # Keep: SuperLega, Serie A1/A2/A3, Coppa Italia, CEV, VNL, World/Euro Championships, top national leagues.
+        # Discard: College volleyball, regional/district tournaments.
+        if silo == "volley":
+            is_it_volley = bool(re.search(r"\b(italia|italy|superlega|serie\s*a[123]?|coppa\s*italia)\b", f"{comp} {title}"))
+            if not is_it_volley:
+                if re.search(r"\b(college\s*volleyball|ncaa|district|universiade)\b", comp_or_title):
+                    return True
+            return False
+
+        # 5. BASKETBALL
+        # Keep: NBA, WNBA, EuroLeague, EuroCup, LBA Serie A, A2, FIBA, NCAA Division I.
+        # Discard: Youth (U14-U21), lower college divisions (D-II, D-III, NAIA, JuCo), minor amateur/regional circuits.
+        if silo == "basketball":
+            # Youth
+            if re.search(r"\b(u-?1[0-9]|u-?2[01]|under\s*1[0-9]|under\s*2[01])\b", comp_or_title):
+                return True
+            # Lower college divisions & amateur circuits
+            if re.search(r"\b(division\s*(?:ii|iii|1-aa|i-aa)|d-?[23]|naia|juco|wbla|mpbl|zone\s*5|regional)\b", comp_or_title):
+                return True
+            return False
+
+        # 6. FOOTBALL (Calcio)
         if silo == "football":
             # A. Youth / Giovanili non italiane e non top-tier internazionali
-            is_youth = bool(re.search(r"\b(u-?1[0-9]|u-?2[01]|under\s*1[0-9]|under\s*2[01]|sub-?1[0-9]|sub-?20|soeratin|juvenil|cadete)\b", comp))
+            is_youth = bool(re.search(r"\b(u-?1[0-9]|u-?2[01]|under\s*1[0-9]|under\s*2[01]|sub-?1[0-9]|sub-?20|soeratin|juvenil|cadete)\b", comp_or_title))
             if is_youth:
                 is_it_youth = bool(re.search(r"\b(italia|italy|primavera|juventus|milan|inter|roma|atalanta|fiorentina|lazio)\b", f"{comp} {title}"))
-                is_uefa_fifa = bool(re.search(r"\b(uefa|fifa|champions|euro|world cup)\b", comp))
+                is_uefa_fifa = bool(re.search(r"\b(uefa|fifa|champions|euro|world cup)\b", comp_or_title))
                 if not is_it_youth and not is_uefa_fifa:
                     return True
 
             # B. Tornei Nazionali ufficiali (AFCON, Qualifiers Mondiali/Europei, Nations League, ecc.) -> Sempre ammessi
-            is_national_tournament = bool(re.search(r"\b(afcon|world cup|qualifier|nations league|copa america|asian cup|gold cup|futsal afcon)\b", comp))
+            is_national_tournament = bool(re.search(r"\b(afcon|world cup|qualifier|nations league|copa america|asian cup|gold cup|futsal afcon)\b", comp_or_title))
             if is_national_tournament:
                 return False
 
-            # C. Femminile non italiano e non top
-            is_women = bool(re.search(r"\b(women(?:['']s)?|femminile|femenil|dames|frauen|ladies)\b", comp))
+            # C. Riserve e leghe di sviluppo amatoriali
+            if re.search(r"\b(reserve|reserves|amateur|development\s*league)\b", comp_or_title):
+                return True
+
+            # D. Femminile non italiano e non top internazionale
+            is_women = bool(re.search(r"\b(women(?:['']s)?|femminile|femenil|dames|frauen|ladies)\b", comp_or_title))
             if is_women:
-                is_top_women = bool(re.search(r"\b(serie a|coppa italia|italia|italy|champions|uwcl|world cup|nations league|euro)\b", comp))
+                is_top_women = bool(re.search(r"\b(serie a|coppa italia|italia|italy|champions|uwcl|world cup|nations league|euro)\b", comp_or_title))
                 is_it_team = bool(re.search(r"\b(juventus|roma|inter|milan|fiorentina|sassuolo|como|lazio|sampdoria)\b", title))
                 if not is_top_women and not is_it_team:
                     return True
 
-            # D. Campionati nazionali minori / esotici di club non europei
+            # E. Campionati nazionali minori / esotici di club non europei
             EXOTIC_CLUB_COUNTRIES = {
                 "myanmar", "vietnam", "cambodia", "laos", "indonesia", "thailand",
                 "mauritania", "antigua", "antigua and barbuda", "suriname", "st. kitts", "st. kitts and nevis", "saint kitts",
@@ -323,19 +369,8 @@ class FCTV33Service:
                 return True
 
             for ex in EXOTIC_CLUB_COUNTRIES:
-                if re.search(rf"\b{re.escape(ex)}\b", comp):
+                if re.search(rf"\b{re.escape(ex)}\b", comp_or_title):
                     return True
-
-        # --- 2. BASKET (Basketball) ---
-        if silo == "basketball":
-            # A. Youth foreign
-            is_youth = bool(re.search(r"\b(u-?1[0-9]|u-?2[01]|under\s*1[0-9]|under\s*2[01])\b", comp))
-            if is_youth:
-                return True
-
-            # B. Tornei zonali / regionali amatoriali o leghe minori
-            if re.search(r"\b(wbla|mpbl|zone\s*5|division\s*[2-9]|regional)\b", comp):
-                return True
 
         return False
 

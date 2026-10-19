@@ -112,6 +112,17 @@ class TestFCTV33Integration(unittest.IsolatedAsyncioTestCase):
             {"title": "AS Armee vs ASC Kedia", "_silo": "football", "competition": "Mauritania Ligue 1", "country": "Mauritania"},
             {"title": "KPA Women vs Dynamo", "_silo": "basketball", "competition": "FIBA WBLA Qualifiers 2026 Zone 5", "country": ""},
             {"title": "Meycauayan vs Pasay Voyagers", "_silo": "basketball", "competition": "Philippines MPBL", "country": "Philippines"},
+            # American football junk: FCS, Division II, Division III, NAIA
+            {"title": "North Dakota State vs South Dakota State", "_silo": "american-football", "competition": "NCAA FCS Football", "country": "USA"},
+            {"title": "Valdosta State vs West Florida", "_silo": "american-football", "competition": "NCAA Division II", "country": "USA"},
+            # Baseball junk: MiLB, Triple-A, College baseball
+            {"title": "Toledo Mud Hens vs Louisville Bats", "_silo": "baseball", "competition": "MiLB Triple-A", "country": "USA"},
+            {"title": "Vanderbilt vs Florida", "_silo": "baseball", "competition": "College Baseball NCAA", "country": "USA"},
+            # Hockey junk: AHL, ECHL, junior hockey
+            {"title": "Chicago Wolves vs Rockford IceHogs", "_silo": "hockey", "competition": "AHL", "country": "USA"},
+            {"title": "London Knights vs Guelph Storm", "_silo": "hockey", "competition": "OHL Junior Hockey", "country": "Canada"},
+            # Volleyball junk: foreign college / district volleyball
+            {"title": "Stanford vs Penn State", "_silo": "volley", "competition": "College Volleyball NCAA", "country": "USA"},
         ]
         for item in junk_items:
             self.assertTrue(fctv33_service.is_junk_event(item), f"Expected junk for {item['title']}")
@@ -129,6 +140,18 @@ class TestFCTV33Integration(unittest.IsolatedAsyncioTestCase):
             {"title": "USA U17 Women vs Samoa U17 Women", "_silo": "football", "competition": "U17 Women's World Cup", "country": "International"},
             # NBA
             {"title": "Boston Celtics vs LA Lakers", "_silo": "basketball", "competition": "NBA", "country": "USA"},
+            # American football: NFL and NCAA Division I FBS must pass
+            {"title": "Kansas City Chiefs vs Baltimore Ravens", "_silo": "american-football", "competition": "NFL", "country": "USA"},
+            {"title": "Alabama vs Georgia", "_silo": "american-football", "competition": "NCAA Football FBS", "country": "USA"},
+            # Baseball: MLB, NPB must pass
+            {"title": "NY Yankees vs LA Dodgers", "_silo": "baseball", "competition": "MLB", "country": "USA"},
+            {"title": "Yomiuri Giants vs Hanshin Tigers", "_silo": "baseball", "competition": "NPB", "country": "Japan"},
+            # Hockey: NHL, KHL, Italian leagues must pass
+            {"title": "Edmonton Oilers vs Florida Panthers", "_silo": "hockey", "competition": "NHL", "country": "USA"},
+            {"title": "Asiago Hockey vs Bolzano Foxes", "_silo": "hockey", "competition": "ICE Hockey League", "country": "Italy"},
+            # Volleyball: SuperLega, Serie A1, CEV, VNL must pass
+            {"title": "Sir Safety Perugia vs Trentino Volley", "_silo": "volley", "competition": "SuperLega Credem Banca", "country": "Italy"},
+            {"title": "Conegliano vs Milano", "_silo": "volley", "competition": "Serie A1 Femminile", "country": "Italy"},
         ]
         for item in valid_items:
             self.assertFalse(fctv33_service.is_junk_event(item), f"Expected valid for {item['title']}")
