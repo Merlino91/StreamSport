@@ -3,7 +3,7 @@ import logging
 import re
 import time
 import urllib.parse
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from app.config import ENABLE_REPLAYS
 from app.services.catalog_service import CatalogService
@@ -562,7 +562,27 @@ class StreamService:
         # Keep Italian TvVoo streams at index 0, followed by international TvVoo streams
         tvvoo_streams.sort(key=lambda s: 0 if "🇮🇹" in s.get("name", "") else 1)
 
-        # 2. Process DaddyLive (dlhd) streams with StreamViX / MediaFlow Proxy format
+        # 2. Process Freeshot streams (Positioned immediately below TvVoo as requested!)
+        freeshot_streams: List[Dict[str, Any]] = []
+        if ep_url:
+            freeshot_sources = [s for s in sources if s.get("source") == "freeshot" or s.get("code")]
+            seen_freeshot_codes: Set[str] = set()
+            for s in freeshot_sources:
+                f_code = s.get("code") or s.get("id")
+                if not f_code or f_code in seen_freeshot_codes:
+                    continue
+                seen_freeshot_codes.add(f_code)
+
+                raw_name = s.get("name") or f_code
+                stream_url = self.build_easyproxy_url(ep_url, ep_pass, "freeshot", f_code)
+                freeshot_streams.append({
+                    "name": f"🇮🇹 {raw_name} [Freeshot]",
+                    "title": f"🇮🇹 Italia • ⚡ Fonte: Freeshot • Qualità FHD 1080p 50fps",
+                    "url": stream_url,
+                    "behaviorHints": {"notWebReady": False},
+                })
+
+        # 3. Process DaddyLive (dlhd) streams with StreamViX / MediaFlow Proxy format
         dlhd_streams: List[Dict[str, Any]] = []
         if ep_url:
             dlhd_sources = [s for s in sources if s.get("source") == "dlhd"]
@@ -584,7 +604,7 @@ class StreamService:
                     "behaviorHints": {"notWebReady": False},
                 })
 
-        # 3. Process FCTV33 streams with TencentEdgeOne CDN format
+        # 4. Process FCTV33 streams with TencentEdgeOne CDN format
         fctv33_streams: List[Dict[str, Any]] = []
         if ep_url:
             fctv_sources = [s for s in sources if s.get("source") == "fctv33"]
@@ -618,10 +638,10 @@ class StreamService:
                     "behaviorHints": {"notWebReady": False},
                 })
 
-        # 4. Process Streamed upstream sources (hotel, delta, etc.)
+        # 5. Process Streamed upstream sources (hotel, delta, etc.)
         streamed_streams: List[Dict[str, Any]] = []
         if ep_url:
-            other_sources = [(s.get("source"), s.get("id")) for s in sources if s.get("source") not in ("dlhd", "tvvoo", "fctv33") and s.get("source") and s.get("id")]
+            other_sources = [(s.get("source"), s.get("id")) for s in sources if s.get("source") not in ("dlhd", "tvvoo", "fctv33", "freeshot") and s.get("source") and s.get("id")]
             if other_sources:
                 tasks = [streamed_api.get_streams_for_source(src_name, src_id) for src_name, src_id in other_sources]
                 results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -662,12 +682,12 @@ class StreamService:
                             })
                             stream_index += 1
 
-        # Sort non-TvVoo streams: Italian channels immediately below TvVoo
+        # Sort other streams: Italian channels first
         secondary_streams = dlhd_streams + fctv33_streams + streamed_streams
         secondary_streams.sort(key=lambda s: 0 if "🇮🇹" in s.get("name", "") else 1)
 
-        # Assemble final stream list: TvVoo strictly first!
-        final_streams = tvvoo_streams + secondary_streams
+        # Assemble final stream list: TvVoo first, immediately followed by Freeshot, then others
+        final_streams = tvvoo_streams + freeshot_streams + secondary_streams
 
         if not final_streams:
             if not ep_url:
