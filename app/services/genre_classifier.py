@@ -66,24 +66,6 @@ class GenreClassifier:
 
 
 
-    # Superlega Volley
-    SUPERLEGA_VOLLEY_TEAMS = {
-        "sir safety perugia", "perugia volley", "perugia", "itas trentino", "trentino volley",
-        "trento", "cucine lube civitanova", "civitanova", "lube", "valsa group modena", "modena volley",
-        "modena", "allianz milano", "milano volley", "mint vero volley monza", "monza volley",
-        "gas sales piacenza", "piacenza volley", "rana verona", "verona volley", "sonepar padova",
-        "padova volley", "cisterna volley", "cisterna", "gioiella prisma taranto", "taranto volley",
-        "yuasa battery grottazzolina", "grottazzolina", "imoco conegliano", "conegliano",
-        "savino del bene scandicci", "scandicci", "igor gorgonzola novara", "novara volley",
-        "reale mutua fenera chieri", "chieri"
-    }
-
-    # CFL Franchises (Canadian Football League)
-    CFL_TEAMS = {
-        "blue bombers", "winnipeg", "roughriders", "saskatchewan", "stampeders", "calgary",
-        "bc lions", "elks", "edmonton elks", "tiger-cats", "ticats", "hamilton tiger-cats",
-        "argonauts", "toronto argonauts", "redblacks", "ottawa redblacks", "alouettes", "montreal alouettes"
-    }
 
     # NFL Full Franchise Names
     NFL_FULL_TEAMS = {
@@ -155,22 +137,6 @@ class GenreClassifier:
         "delaware", "howard", "tuskegee", "benedict", "central arkansas", "incarnate word"
     }
 
-    # MLB Teams
-    MLB_TEAMS = {
-        "yankees", "red sox", "dodgers", "cubs", "astros", "mets", "braves", "phillies",
-        "giants", "cardinals", "blue jays", "orioles", "rays", "white sox", "guardians",
-        "tigers", "royals", "twins", "angels", "athletics", "mariners", "rangers",
-        "marlins", "nationals", "reds", "brewers", "pirates", "diamondbacks", "rockies", "padres"
-    }
-
-    # NHL Teams
-    NHL_TEAMS = {
-        "bruins", "sabres", "red wings", "panthers", "canadiens", "senators", "lightning",
-        "maple leafs", "hurricanes", "blue jackets", "devils", "islanders", "rangers",
-        "flyers", "penguins", "capitals", "blackhawks", "avalanche", "stars", "wild",
-        "predators", "blues", "coyotes", "flames", "oilers", "kings", "sharks", "kraken",
-        "canucks", "golden knights", "jets", "utah hockey club"
-    }
 
     # AFL / AFLW Teams (Australian Football League)
     AFL_TEAMS = {
@@ -386,37 +352,43 @@ class GenreClassifier:
             or silo == "football"
             or bool(re.search(r"\b(afc\s*wimbledon|wimbledon\s*fc)\b", title_lower))
         )
+        eval_tennis = f"{title_lower} {comp}".strip()
         if not is_football_context and (
             cat == "tennis"
             or silo == "tennis"
-            or "tennis" in title_lower
-            or any(k in title_lower for k in ("atp", "wta", "bjk", "davis cup", "wimbledon", "us open", "roland garros", "australian open"))
+            or "tennis" in eval_tennis
+            or bool(re.search(r"\b(atp|wta|bjk|davis\s*cup|wimbledon|us\s*open|roland\s*garros|australian\s*open|french\s*open)\b", eval_tennis))
         ):
-            if re.search(r"\b(wimbledon|us\s*open|roland\s*garros|australian\s*open|slam)\b", title_lower):
+            if re.search(r"\b(wimbledon|us\s*open|roland\s*garros|australian\s*open|french\s*open|slam)\b", eval_tennis):
                 return "tennis", "Grandi Slam"
-            if re.search(r"\b(davis|bjk|billie\s*jean|laver\s*cup)\b", title_lower):
+            if re.search(r"\b(davis|bjk|billie\s*jean|laver\s*cup|united\s*cup|hopman\s*cup)\b", eval_tennis):
                 return "tennis", "Coppa Davis e BJK Cup"
-            if "atp" in title_lower and "wta" in title_lower:
+            if "atp" in eval_tennis and "wta" in eval_tennis:
                 return "tennis", "Challenger e Altri"
-            if is_women or "wta" in title_lower:
+            if is_women or "wta" in eval_tennis or re.search(r"\b(women|femminile|femenino)\b", eval_tennis):
                 return "tennis", "WTA"
-            if "atp" in title_lower:
+            if "atp" in eval_tennis:
                 return "tennis", "ATP"
-            if re.search(r"\b(challenger|itf|exhibition|esibizione)\b", title_lower):
+            if re.search(r"\b(challenger|itf|exhibition|esibizione|uts|ultimate\s*tennis)\b", eval_tennis):
                 return "tennis", "Challenger e Altri"
             return "tennis", "ATP"
 
         # ------------------------------------------------------------------
         # 2. MOTORI (Dedicated Catalog: 'motori')
         # ------------------------------------------------------------------
-        if cat in ("motor-sports", "motorsports", "motorsport") or any(k in title_lower for k in ("formula 1", "motogp", "nascar", "rally", "f1")):
-            if re.search(r"\b(f1|formula\s*1|formula\s*one)\b", title_lower) or "formula 1" in title_lower:
+        eval_motor = f"{title_lower} {comp}".strip()
+        if (
+            cat in ("motor-sports", "motorsports", "motorsport")
+            or silo == "motor-sports"
+            or bool(re.search(r"\b(formula\s*1|formula\s*one|f1|motogp|moto\s*gp|moto2|moto3|superbike|wsbk|nascar|indycar|rally|wrc|dakar)\b", eval_motor))
+        ):
+            if re.search(r"\b(f1|formula\s*1|formula\s*one)\b", eval_motor):
                 return "motori", "Formula 1"
-            if re.search(r"\b(motogp|moto\s*gp|moto2|moto3|superbike|wsbk)\b", title_lower):
+            if re.search(r"\b(motogp|moto\s*gp|moto2|moto3|superbike|wsbk|worldsbk|civ)\b", eval_motor):
                 return "motori", "MotoGP e Superbike"
-            if re.search(r"\b(rally|wrc|dakar)\b", title_lower):
+            if re.search(r"\b(rally|wrc|dakar|erc)\b", eval_motor):
                 return "motori", "Rally e WRC"
-            if re.search(r"\b(nascar|indycar|indy\s*500|supercars|dtm|le\s*mans)\b", title_lower):
+            if re.search(r"\b(nascar|indycar|indy\s*500|supercars|dtm|le\s*mans|wec|imsa|gt\s*world|bathurst)\b", eval_motor):
                 return "motori", "NASCAR e IndyCar"
             # Default fallback for grassroots/unclassified motor racing (dirt tracks, local ovals)
             return "motori", "NASCAR e IndyCar"
@@ -532,127 +504,271 @@ class GenreClassifier:
         # ------------------------------------------------------------------
         # 4. VOLLEY (Dedicated Catalog: 'volley')
         # ------------------------------------------------------------------
-        if cat in ("volleyball", "volley") or any(k in eval_text for k in ("volleyball", "pallavolo", "superlega")):
-            if is_women or "femminile" in eval_text:
+        eval_volley = f"{title_lower} {comp}".strip()
+        if (
+            cat in ("volleyball", "volley")
+            or silo == "volleyball"
+            or bool(re.search(r"\b(volleyball|volley|pallavolo|superlega|cev|plusliga)\b", eval_volley))
+        ):
+            # 1. Volley Femminile
+            if is_women or bool(re.search(r"\b(women(?:['’]s)?|femminile|femenil|dames|frauen|ladies|a1\s*femm|serie\s*a1\s*f)\b", eval_text)):
                 return "volley", "Volley Femminile"
-            if re.search(r"\b(champions|cev)\b", eval_text):
+
+            # 2. Champions League Volley (Coppe Europee per Club)
+            if re.search(r"\b(cev|champions\s*league|cev\s*cup|challenge\s*cup)\b", eval_text):
                 return "volley", "Champions League Volley"
-            if re.search(r"\b(superlega|serie\s*a1|italy\s*-\s*superlega)\b", eval_text) or any(t in home or t in away or t in eval_text for t in self.SUPERLEGA_VOLLEY_TEAMS):
-                return "volley", "Superlega e Serie A1"
-            if re.search(r"\b(nazionale|vnl|mondiali|europei)\b", eval_text):
+
+            # 3. Nazionali e Internazionale (VNL, Mondiali, Europei, tornei per nazioni)
+            if re.search(r"\b(vnl|nations\s*league|mondiali|europei|olympics|world\s*championship|world\s*cup|qualif|national\s*team)\b", eval_text):
                 return "volley", "Nazionali e Internazionale"
-            return "volley", "Superlega e Serie A1"
+
+            # 4. Superlega e Serie A1 (Campionato Italiano Maschile)
+            is_italy_volley = (
+                country in ("italy", "italia")
+                or "🇮🇹" in eval_text
+                or bool(re.search(r"\b(italy|italia|italian|trentino|trento|perugia|civitanova|lube|modena|piacenza|verona|padova|cisterna|taranto|grottazzolina|superlega)\b", eval_text))
+            )
+            is_superlega_comp = bool(re.search(r"\b(superlega|serie\s*a[123]|coppa\s*italia\s*volley|supercoppa\s*volley)\b", eval_text))
+            if is_superlega_comp or (is_italy_volley and not bool(re.search(r"\b(plusliga|pro\s*a|bundesliga|superliga\s*russia)\b", eval_text))):
+                return "volley", "Superlega e Serie A1"
+
+            # 5. Fallback per campionati esteri maschili (PlusLiga polacca, Francia, Brasile, ecc.)
+            return "volley", "Nazionali e Internazionale"
 
         # ------------------------------------------------------------------
         # 5. FOOTBALL AMERICANO (Dedicated Catalog: 'football_americano')
         # ------------------------------------------------------------------
-        if cat == "american-football" or ("football" in cat and cat != "football") or "nfl" in title_lower or "cfl" in title_lower:
-            # 1. CFL (Canadian Football League)
-            if "cfl" in title_lower or "grey cup" in title_lower or any(t in title_lower for t in self.CFL_TEAMS):
+        eval_am = f"{title_lower} {comp}".strip()
+        if (
+            (
+                cat in ("american-football", "american_football")
+                or silo == "american-football"
+                or ("football" in cat and cat != "football")
+                or bool(re.search(r"\b(nfl|cfl|ufl|cfb|college\s*football|american\s*football|super\s*bowl)\b", eval_am))
+            )
+            and cat not in ("baseball", "basketball", "basket", "hockey", "tennis", "motor-sports", "volleyball")
+        ):
+            # 1. CFL (Canadian Football League) & Altre Leghe (UFL, ELF, ecc.)
+            if re.search(r"\b(cfl|grey\s*cup|ufl|elf|european\s*league\s*of\s*football|xfl|arena\s*football|indoor\s*football|roughriders|blue\s*bombers|stampeders|tiger-cats|argonauts|alouettes|edmonton\s*elks)\b", eval_am):
                 return "football_americano", "CFL e Altre Leghe"
 
-            # 2. UFL & Altre Leghe minori
-            if re.search(r"\b(ufl|elf|european\s*league\s*of\s*football|stallions|renegades|defenders|roughnecks|showboats|brahmas|battlehawks)\b", title_lower):
-                return "football_americano", "CFL e Altre Leghe"
-
-            # 3. NFL (Strict: full franchise names, unambiguous NFL keywords, or ESPN certification)
+            # 2. NCAA College Football (FBS, FCS, College)
             m_id = str(match.get("id") or "").lower()
             sources = match.get("sources") or []
             source_ids = " ".join(str(s.get("id", "")) for s in sources if isinstance(s, dict)).lower()
-            comp_lower = comp.lower()
 
             is_explicit_college = (
-                bool(re.search(r"\b(cfb|ncaa|college|univ|university|d-?iii|d-?ii|d-?1|fbs|fcs)\b", title_lower))
-                or bool(re.search(r"\b(cfb|ncaa|college)\b", comp_lower))
+                bool(re.search(r"\b(cfb|ncaa|college|univ|university|d-?iii|d-?ii|d-?1|fbs|fcs)\b", eval_am))
                 or "_cfb_" in m_id
                 or m_id.startswith("live_cfb_")
                 or "_cfb_" in source_ids
             )
 
-            has_nfl_keyword = bool(re.search(r"\b(nfl|redzone|super\s*bowl|manningcast|pro\s*bowl)\b", title_lower)) or "nfl" in comp_lower
-            nfl_full = any(team in title_lower for team in self.NFL_FULL_TEAMS)
+            # 3. NFL (NFL keyword, franchigie con vincolo geografico o moniker univoci, o ESPN cert)
+            has_nfl_keyword = bool(re.search(r"\b(nfl|redzone|super\s*bowl|manningcast|pro\s*bowl)\b", eval_am))
+            NFL_FRANCHISE_REGEX = (
+                r"\b("
+                r"arizona\s*cardinals|atlanta\s*falcons|baltimore\s*ravens|buffalo\s*bills|"
+                r"carolina\s*panthers|chicago\s*bears|cincinnati\s*bengals|bengals|cleveland\s*browns|"
+                r"dallas\s*cowboys|denver\s*broncos|detroit\s*lions|green\s*bay\s*packers|packers|"
+                r"houston\s*texans|indianapolis\s*colts|jacksonville\s*jaguars|kansas\s*city\s*chiefs|chiefs|"
+                r"las\s*vegas\s*raiders|oakland\s*raiders|la\s*chargers|los\s*angeles\s*chargers|"
+                r"la\s*rams|los\s*angeles\s*rams|miami\s*dolphins|dolphins|"
+                r"minnesota\s*vikings|vikings|new\s*england\s*patriots|patriots|new\s*orleans\s*saints|"
+                r"ny\s*giants|new\s*york\s*giants|ny\s*jets|new\s*york\s*jets|philadelphia\s*eagles|"
+                r"pittsburgh\s*steelers|steelers|san\s*francisco\s*49ers|sf\s*49ers|49ers|"
+                r"seattle\s*seahawks|seahawks|tampa\s*bay\s*buccaneers|buccaneers|tennessee\s*titans|titans|"
+                r"washington\s*commanders|commanders"
+                r")\b"
+            )
+            nfl_match = bool(re.search(NFL_FRANCHISE_REGEX, title_lower))
             is_espn_nfl = bool(match.get("_espn_matched") and match.get("_genre") == "NFL")
 
             if not is_explicit_college:
-                if has_nfl_keyword or nfl_full or is_espn_nfl:
+                if has_nfl_keyword or nfl_match or is_espn_nfl:
                     return "football_americano", "NFL"
 
-            # 4. All other American Football (including Division I/II/III and regional colleges) belongs to NCAA!
+            # 4. Fallback: NCAA College Football
             return "football_americano", "NCAA College Football"
 
         # ------------------------------------------------------------------
         # 6. BASEBALL (Dedicated Catalog: 'baseball')
         # ------------------------------------------------------------------
-        if cat == "baseball" or "baseball" in title_lower or "mlb" in title_lower:
-            if (
-                re.search(r"\b(college|ncaa|cws|college\s*world\s*series)\b", title_lower)
-                or any(c in title_lower for c in self.NCAA_COLLEGES)
-            ):
+        eval_base = f"{title_lower} {comp}".strip()
+        if cat == "baseball" or silo == "baseball" or bool(re.search(r"\b(baseball|mlb|npb|kbo|lmb)\b", eval_base)):
+            # 1. NCAA College Baseball
+            if re.search(r"\b(college|ncaa|cws|college\s*world\s*series)\b", eval_base) or any(c in title_lower for c in self.NCAA_COLLEGES):
                 return "baseball", "NCAA College Baseball"
-            if re.search(r"\b(mlb)\b", title_lower) or any(t in home or t in away or t in title_lower for t in self.MLB_TEAMS):
+
+            # 2. Campionati Internazionali (Giappone NPB, Corea KBO, Messico LMB, Taiwan, WBC)
+            has_baseball_foreign_flag = any(flag in eval_text for flag in ("🇯🇵", "🇰🇷", "🇲🇽", "🇹🇼", "🇨🇺"))
+            is_foreign_baseball = (
+                country in ("japan", "giappone", "jp", "korea", "corea", "kr", "mexico", "messico", "mx", "taiwan", "tw", "cuba", "cu", "dominican", "república dominicana")
+                or bool(re.search(r"\b(npb|kbo|lmb|cpbl|wbc|world\s*baseball|serie\s*del\s*caribe|japan|korea|mexican)\b", eval_base))
+                or has_baseball_foreign_flag
+            )
+            if is_foreign_baseball:
+                return "baseball", "Campionati Internazionali"
+
+            # 3. MLB (Franchigie MLB con prefisso cittadino o moniker univoci MLB)
+            MLB_FRANCHISE_REGEX = (
+                r"\b("
+                r"ny\s*yankees|new\s*york\s*yankees|yankees|"
+                r"boston\s*red\s*sox|red\s*sox|"
+                r"la\s*dodgers|los\s*angeles\s*dodgers|dodgers|"
+                r"chicago\s*cubs|cubs|"
+                r"houston\s*astros|astros|"
+                r"ny\s*mets|new\s*york\s*mets|mets|"
+                r"atlanta\s*braves|braves|"
+                r"philadelphia\s*phillies|phillies|"
+                r"sf\s*giants|san\s*francisco\s*giants|"
+                r"st\s*louis\s*cardinals|"
+                r"toronto\s*blue\s*jays|blue\s*jays|"
+                r"baltimore\s*orioles|orioles|"
+                r"tampa\s*bay\s*rays|tampa\s*bay|"
+                r"chicago\s*white\s*sox|white\s*sox|"
+                r"cleveland\s*guardians|guardians|"
+                r"detroit\s*tigers|"
+                r"kansas\s*city\s*royals|"
+                r"minnesota\s*twins|"
+                r"la\s*angels|los\s*angeles\s*angels|"
+                r"oakland\s*athletics|athletics|"
+                r"seattle\s*mariners|mariners|"
+                r"texas\s*rangers|"
+                r"miami\s*marlins|marlins|"
+                r"washington\s*nationals|"
+                r"cincinnati\s*reds|"
+                r"milwaukee\s*brewers|brewers|"
+                r"pittsburgh\s*pirates|"
+                r"arizona\s*diamondbacks|diamondbacks|d-backs|"
+                r"colorado\s*rockies|"
+                r"san\s*diego\s*padres|padres"
+                r")\b"
+            )
+            if bool(re.search(r"\b(mlb|world\s*series)\b", eval_base)) or (not is_foreign_baseball and re.search(MLB_FRANCHISE_REGEX, title_lower)):
                 return "baseball", "MLB"
+
+            # 4. Fallback per qualsiasi altro baseball
             return "baseball", "Campionati Internazionali"
 
         # ------------------------------------------------------------------
         # 7. HOCKEY (Dedicated Catalog: 'hockey')
         # ------------------------------------------------------------------
+        eval_hockey = f"{title_lower} {comp}".strip()
         if (
             cat in ("hockey", "ice-hockey", "ice hockey")
             or silo == "hockey"
-            or any(k in title_lower for k in ("hockey", "nhl", "khl", "shl", "ohl", "ushl"))
+            or any(k in eval_hockey for k in ("hockey", "nhl", "khl", "shl", "ohl", "ushl"))
         ) and not is_football_context:
-            if re.search(r"\b(nhl|stanley\s*cup)\b", eval_text) or any(t in home or t in away or t in title_lower for t in self.NHL_TEAMS):
-                return "hockey", "NHL"
-            if re.search(r"\b(khl|del|liiga|shl|extraliga|tipsport|allsvenskan|national\s*league|icehl|ebel|alps|leghe\s*europee|sweden|svezia|czech|cechia|finland|germany|deutsch|swiss|svizzera|austria)\b", eval_text):
-                return "hockey", "KHL e Leghe Europee"
-            if re.search(r"\b(iihf|mondiali|olympics|world\s*championship|roller|field)\b", eval_text):
+            # 1. Mondiali e Nazionali
+            if re.search(r"\b(iihf|mondiali|olympics|world\s*championship|national\s*team|four\s*nations)\b", eval_hockey):
                 return "hockey", "Mondiali e Nazionali"
+
+            # 2. Leghe Europee (KHL, SHL svedese, Liiga finlandese, DEL tedesca, Extraliga ceca, Swiss NL, ecc.)
+            has_hockey_eu_flag = any(flag in eval_text for flag in ("🇸🇪", "🇫🇮", "🇩🇪", "🇨🇿", "🇨🇭", "🇷🇺", "🇦🇹", "🇸🇰", "🇳🇴"))
+            is_european_hockey = (
+                country in ("sweden", "svezia", "se", "finland", "finlandia", "fi", "germany", "germania", "de", "czech", "cechia", "cz", "swiss", "switzerland", "svizzera", "ch", "russia", "ru", "austria", "at", "slovakia", "sk", "norway", "norvegia", "no", "uk", "great britain")
+                or bool(re.search(r"\b(khl|del|liiga|shl|extraliga|tipsport|allsvenskan|national\s*league|icehl|ebel|alps|chl|champions\s*hockey|leghe\s*europee|eihl)\b", eval_hockey))
+                or has_hockey_eu_flag
+            )
+            if is_european_hockey:
+                return "hockey", "KHL e Leghe Europee"
+
+            # 3. NHL (Franchigie NHL con prefisso cittadino o moniker univoci NHL)
+            NHL_FRANCHISE_REGEX = (
+                r"\b("
+                r"boston\s*bruins|bruins|"
+                r"buffalo\s*sabres|sabres|"
+                r"detroit\s*red\s*wings|red\s*wings|"
+                r"florida\s*panthers|"
+                r"montreal\s*canadiens|canadiens|habs|"
+                r"ottawa\s*senators|senators|"
+                r"tampa\s*bay\s*lightning|lightning|"
+                r"toronto\s*maple\s*leafs|maple\s*leafs|"
+                r"carolina\s*hurricanes|hurricanes|"
+                r"columbus\s*blue\s*jackets|blue\s*jackets|"
+                r"new\s*jersey\s*devils|nj\s*devils|"
+                r"ny\s*islanders|new\s*york\s*islanders|islanders|"
+                r"ny\s*rangers|new\s*york\s*rangers|"
+                r"philadelphia\s*flyers|flyers|"
+                r"pittsburgh\s*penguins|penguins|"
+                r"washington\s*capitals|capitals|caps|"
+                r"chicago\s*blackhawks|blackhawks|"
+                r"colorado\s*avalanche|avalanche|"
+                r"dallas\s*stars|"
+                r"minnesota\s*wild|"
+                r"nashville\s*predators|predators|"
+                r"st\s*louis\s*blues|"
+                r"utah\s*hockey\s*club|"
+                r"anaheim\s*ducks|"
+                r"calgary\s*flames|"
+                r"edmonton\s*oilers|"
+                r"la\s*kings|los\s*angeles\s*kings|"
+                r"san\s*jose\s*sharks|"
+                r"seattle\s*kraken|kraken|"
+                r"vancouver\s*canucks|canucks|"
+                r"vegas\s*golden\s*knights|golden\s*knights|"
+                r"winnipeg\s*jets"
+                r")\b"
+            )
+            if bool(re.search(r"\b(nhl|stanley\s*cup)\b", eval_hockey)) or (not is_european_hockey and re.search(NHL_FRANCHISE_REGEX, title_lower)):
+                return "hockey", "NHL"
+
+            # 4. Fallback per qualsiasi altro hockey
             return "hockey", "KHL e Leghe Europee"
 
         # ------------------------------------------------------------------
         # 8. SPORT DA COMBATTIMENTO (Dedicated Catalog: 'combattimento')
         # ------------------------------------------------------------------
-        if cat in ("fight", "mma", "ufc", "boxing", "wrestling") or any(k in title_lower for k in ("ufc", "wwe", "aew", "bellator", "boxing")):
-            if re.search(r"\b(wwe|aew|nxt|smackdown|raw|tna|wrestling|wrestlemania)\b", title_lower):
+        eval_fight = f"{title_lower} {comp}".strip()
+        if (
+            cat in ("fight", "mma", "ufc", "boxing", "wrestling")
+            or silo == "fight"
+            or bool(re.search(r"\b(ufc|wwe|aew|bellator|boxing|boxe|mma|pfl|one\s*championship)\b", eval_fight))
+        ):
+            if re.search(r"\b(wwe|aew|nxt|smackdown|raw|tna|wrestling|wrestlemania|royal\s*rumble|summerslam|survivor\s*series)\b", eval_fight):
                 return "combattimento", "Wrestling e WWE"
-            if re.search(r"\b(ufc|dwcs|dana\s*white)\b", title_lower):
+            if re.search(r"\b(ufc|dwcs|dana\s*white)\b", eval_fight):
                 return "combattimento", "UFC"
-            if re.search(r"\b(mma|bellator|pfl|one\s*championship|ksw|lfc)\b", title_lower):
+            if re.search(r"\b(mma|bellator|pfl|one\s*championship|ksw|lfc|cage\s*warriors|combate|oktagon|rizin|invicta)\b", eval_fight):
                 return "combattimento", "MMA"
-            if re.search(r"\b(boxing|pugilato|bout|heavyweight|title\s*fight)\b", title_lower):
+            if re.search(r"\b(boxing|boxe|pugilato|bout|heavyweight|title\s*fight|wba|wbc|wbo|ibf|top\s*rank|matchroom|golden\s*boy|queensberry|boxxer)\b", eval_fight):
                 return "combattimento", "Boxe"
-            return "combattimento", "UFC"
+            if "box" in eval_fight:
+                return "combattimento", "Boxe"
+            return "combattimento", "MMA"
 
         # ------------------------------------------------------------------
         # 9. ALTRI SPORT (Dedicated Catalog: 'altri_sport')
         # ------------------------------------------------------------------
+        eval_altri = f"{title_lower} {comp}".strip()
         is_afl_match = (
             cat == "afl"
-            or bool(re.search(r"\b(afl|aflw|australian\s*rules|footy)\b", title_lower))
+            or bool(re.search(r"\b(afl|aflw|australian\s*rules|footy)\b", eval_altri))
             or (any(t in eval_text for t in ("carlton blues", "hawthorn hawks", "collingwood magpies", "richmond tigers", "geelong cats", "fremantle dockers", "essendon bombers", "sydney swans", "brisbane lions", "adelaide crows", "st kilda", "port adelaide power", "western bulldogs", "gold coast suns", "gws giants", "north melbourne kangaroos", "west coast eagles", "melbourne demons")))
         )
 
         if (
             cat in ("golf", "darts", "rugby", "afl", "cricket", "handball", "waterpolo", "table-tennis", "badminton", "billiards", "cycling", "altri_sport")
             or is_afl_match
-            or any(k in title_lower for k in (
+            or any(k in eval_altri for k in (
                 "golf", "pga", "darts", "freccette", "rugby", "ciclismo", "cycling", "uci", "road race", "time trial", "snooker", "padel",
                 "handball", "dhb pokal", "pallamano", "ihf", "ehf", "table tennis", "ping pong", "waterpolo", "pallanuoto", "badminton",
                 "cricket", "test match", "one day international", "the hundred", "big bash", "ashes"
             ))
-            or re.search(r"\b(cricket|odi|t20|twenty20|ipl|ashes|uci|ihf|ehf)\b", title_lower)
+            or re.search(r"\b(cricket|odi|t20|twenty20|ipl|ashes|uci|ihf|ehf)\b", eval_altri)
         ):
-            if is_afl_match or re.search(r"\b(rugby|afl|aflw|six\s*nations|nrl|top\s*14|premiership\s*rugby)\b", title_lower) or cat in ("rugby", "afl"):
+            if is_afl_match or re.search(r"\b(rugby|afl|aflw|six\s*nations|sei\s*nazioni|nrl|top\s*14|premiership\s*rugby|urc|super\s*rugby|champions\s*cup\s*rugby)\b", eval_altri) or cat in ("rugby", "afl"):
                 return "altri_sport", "Rugby e AFL"
-            if re.search(r"\b(cricket|odi|t20|twenty20|test\s*match|ipl|one\s*day\s*international|the\s*hundred|big\s*bash|ashes)\b", title_lower) or cat == "cricket":
+            if re.search(r"\b(cricket|odi|t20|twenty20|test\s*match|ipl|one\s*day\s*international|the\s*hundred|big\s*bash|ashes)\b", eval_altri) or cat == "cricket":
                 return "altri_sport", "Cricket"
-            if re.search(r"\b(golf|pga|ryder\s*cup|presidents\s*cup|liv)\b", title_lower) or cat == "golf":
+            if re.search(r"\b(golf|pga|lpga|ryder\s*cup|presidents\s*cup|liv|dp\s*world|masters\s*tournament)\b", eval_altri) or cat == "golf":
                 return "altri_sport", "Golf"
-            if re.search(r"\b(darts|freccette|pdc)\b", title_lower):
+            if re.search(r"\b(darts|freccette|pdc|world\s*darts)\b", eval_altri):
                 return "altri_sport", "Freccette / Darts"
-            if (re.search(r"\b(ciclismo|cycling|tour\s*de\s*france|giro\s*d['’]italia|vuelta|uci|road\s*race|time\s*trial)\b", title_lower) or cat == "cycling") and "hockey" not in title_lower:
+            if (re.search(r"\b(ciclismo|cycling|tour\s*de\s*france|giro\s*d['’]italia|vuelta|uci|road\s*race|time\s*trial)\b", eval_altri) or cat == "cycling") and "hockey" not in title_lower:
                 return "altri_sport", "Ciclismo"
-            if re.search(r"\b(handball|pallamano|ihf|ehf|dhb\s*pokal)\b", title_lower) or cat == "handball":
+            if re.search(r"\b(handball|pallamano|ihf|ehf|dhb\s*pokal|bundesliga\s*handball)\b", eval_altri) or cat == "handball":
                 return "altri_sport", "Pallamano"
             return "altri_sport", "Biliardo, Padel e Altri"
 
@@ -685,17 +801,7 @@ class GenreClassifier:
             is_extra_eu_confed = bool(self._EXTRA_EU_CONFED_REGEX.search(eval_text))
 
             # --------------------------------------------------------------
-            # 1. EUROPEAN CUPS & UEFA TOURNAMENTS (Champions, Europa, Conference)
-            # Evaluated first because teams come from different nations
-            # --------------------------------------------------------------
-            is_uefa_cup = bool(re.search(r"\b(uefa\s*champions|champions\s*league|europa\s*league|conference\s*league|uefa\s*super\s*cup)\b", eval_text))
-            if is_uefa_cup and not is_extra_eu_confed:
-                if re.search(r"\b(champions\s*league|uefa\s*champions)\b", eval_text):
-                    return "calcio_estero", "Champions League"
-                return "calcio_estero", "Europa e Conference League"
-
-            # --------------------------------------------------------------
-            # 2. NATIONAL TEAMS & AMICHEVOLI (e.g. Italia vs Spagna, Nations League, Qualificazioni)
+            # 1. NATIONAL TEAMS & AMICHEVOLI (e.g. Italia vs Spagna, Nations League, Qualificazioni)
             # Evaluated before domestic leagues so "Italia vs Spagna" never enters Serie A
             # --------------------------------------------------------------
             is_national_match = (
@@ -704,6 +810,28 @@ class GenreClassifier:
             )
             if is_national_match:
                 return "calcio_estero", "Nazionali e Amichevoli"
+
+            # --------------------------------------------------------------
+            # 2. EUROPEAN CUPS & UEFA TOURNAMENTS (Champions, Europa, Conference)
+            # Evaluated first because teams come from different nations
+            # --------------------------------------------------------------
+            is_uefa_cup = bool(re.search(r"\b(uefa\s*champions|champions\s*league|europa\s*league|conference\s*league|uefa\s*super\s*cup)\b", eval_text))
+            is_cross_national_clash = any(clash in title_lower for clash in (
+                "manchester city vs inter", "inter vs manchester city",
+                "real madrid vs bayern", "bayern vs real madrid",
+                "barcelona vs psg", "psg vs barcelona",
+                "liverpool vs real madrid", "real madrid vs liverpool",
+                "arsenal vs bayern", "bayern vs arsenal",
+                "milan vs liverpool", "liverpool vs milan",
+                "inter vs arsenal", "arsenal vs inter",
+                "juventus vs manchester", "manchester vs juventus",
+                "psg vs real madrid", "real madrid vs psg",
+                "bayern vs psg", "psg vs bayern"
+            ))
+            if (is_uefa_cup or is_cross_national_clash) and not is_extra_eu_confed:
+                if is_cross_national_clash or re.search(r"\b(champions\s*league|uefa\s*champions)\b", eval_text):
+                    return "calcio_estero", "Champions League"
+                return "calcio_estero", "Europa e Conference League"
 
             # Youth tournaments (international/club)
             if is_youth and not bool(re.search(r"\b(primavera|u23|next\s*gen|futuro)\b", eval_text)):
@@ -719,10 +847,17 @@ class GenreClassifier:
             # --------------------------------------------------------------
             # 4. CALCIO ITALIANO (DOPPIO FILTRO: 1° Nazione -> 2° Torneo)
             # --------------------------------------------------------------
+            is_ita_derby = any(derby in title_lower for derby in (
+                "inter vs milan", "milan vs inter", "roma vs lazio", "lazio vs roma",
+                "juventus vs torino", "torino vs juventus", "inter vs juventus", "juventus vs inter",
+                "napoli vs roma", "roma vs napoli", "palermo vs bari", "bari vs palermo",
+                "genoa vs sampdoria", "sampdoria vs genoa"
+            ))
             is_ita_nation = (
                 country in ("italia", "italy")
-                or bool(re.search(r"\b(italy|italia|italian)\b", eval_text))
-                or bool(re.search(r"\b(coppa\s*italia|supercoppa\s*italiana|primavera)\b", eval_text))
+                or "🇮🇹" in eval_text
+                or is_ita_derby
+                or bool(re.search(r"\b(italy|italia|italian|serie\s*a|serie\s*b|serie\s*c|coppa\s*italia|supercoppa\s*italiana|primavera)\b", eval_text))
             )
             if is_ita_nation and not is_foreign and not is_extra_eu:
                 if is_women:
@@ -733,7 +868,7 @@ class GenreClassifier:
                     return "calcio_italiano", "Coppa Italia e Supercoppa"
                 if re.search(r"\bserie\s*c\b", eval_text):
                     return "calcio_italiano", "Serie C"
-                if re.search(r"\bserie\s*b\b", eval_text):
+                if re.search(r"\bserie\s*b\b", eval_text) or any(d in title_lower for d in ("palermo vs bari", "bari vs palermo", "pisa vs spezia", "cosenza vs brescia")):
                     return "calcio_italiano", "Serie B"
                 if re.search(r"\bserie\s*a\b", eval_text):
                     return "calcio_italiano", "Serie A"
@@ -745,12 +880,15 @@ class GenreClassifier:
             # Gate 1: Country is England/UK OR explicit English indicator in text
             # Gate 2: League is Premier League / FA Cup / Carabao
             # --------------------------------------------------------------
+            is_epl_derby = any(d in title_lower for d in ("arsenal vs liverpool", "liverpool vs arsenal", "chelsea vs liverpool", "arsenal vs chelsea", "tottenham vs arsenal"))
             is_england = (
                 country in ("inghilterra", "england", "uk")
-                or bool(re.search(r"\b(england|inghilterra|uk|epl)\b", eval_text))
+                or "🏴󠁧󠁢󠁥󠁮󠁧󠁿" in eval_text
+                or is_epl_derby
+                or bool(re.search(r"\b(england|inghilterra|uk|epl|premier\s*league)\b", eval_text))
             )
             if is_england and not is_extra_eu:
-                if re.search(r"\b(premier\s*league|epl|fa\s*cup|carabao|efl\s*cup)\b", eval_text):
+                if re.search(r"\b(premier\s*league|epl|fa\s*cup|carabao|efl\s*cup)\b", eval_text) or is_epl_derby:
                     return "calcio_estero", "Premier League"
 
             # --------------------------------------------------------------
@@ -758,12 +896,15 @@ class GenreClassifier:
             # Gate 1: Country is Spain OR explicit Spain indicator in text
             # Gate 2: League is LaLiga / Primera Division / Copa del Rey
             # --------------------------------------------------------------
+            is_liga_derby = any(d in title_lower for d in ("real madrid vs barcelona", "barcelona vs real madrid", "el clasico", "real madrid vs atletico", "atletico vs real madrid"))
             is_spain = (
                 country in ("spagna", "spain")
-                or bool(re.search(r"\b(spain|spagna|espana|españa|laliga)\b", eval_text))
+                or "🇪🇸" in eval_text
+                or is_liga_derby
+                or bool(re.search(r"\b(spain|spagna|espana|españa|laliga|la\s*liga)\b", eval_text))
             )
             if is_spain and not is_extra_eu:
-                if re.search(r"\b(laliga|la\s*liga|primera\s*division|copa\s*del\s*rey)\b", eval_text):
+                if re.search(r"\b(laliga|la\s*liga|primera\s*division|copa\s*del\s*rey)\b", eval_text) or is_liga_derby:
                     return "calcio_estero", "La Liga"
 
             # --------------------------------------------------------------
