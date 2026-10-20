@@ -162,31 +162,43 @@ class BannerService:
             base_url = m.get("poster")
             base_im = await self._fetch_base_image(base_url)
 
-            if base_im:
-                # Fit and center-crop to native 889x500
-                im = self._fit_cover(base_im, CANVAS_WIDTH, CANVAS_HEIGHT)
-            else:
-                # Sleek dark background canvas
-                im = self._create_dark_canvas(m)
-
-            draw = ImageDraw.Draw(im)
-
-            # 1. Top-Left: Status Badge (LIVE / Upcoming Time / Replay) with 12px font
-            if status not in ("none", "empty", "info"):
-                self._draw_status_badge(draw, status, time_str)
-
-            # 2. Top-Right: TvVoo Bookmark Ribbon (Lightning bolt only)
-            if has_tvvoo:
-                self._draw_tvvoo_bookmark(draw)
-
-            # Encode as progressive JPEG with quality=88
-            out_buf = io.BytesIO()
-            im.save(out_buf, format="JPEG", quality=88, optimize=True)
-            return out_buf.getvalue()
+            # Offload CPU-intensive Pillow rendering and JPEG compression to thread pool
+            return await asyncio.to_thread(self._render_poster_sync, base_im, m, status, time_str, has_tvvoo)
 
         except Exception as e:
             logger.error("Error generating banner poster for match: %s", e, exc_info=True)
             return None
+
+    def _render_poster_sync(
+        self,
+        base_im: Optional[Image.Image],
+        m: Dict[str, Any],
+        status: str,
+        time_str: str,
+        has_tvvoo: bool,
+    ) -> Optional[bytes]:
+        """Synchronous CPU-bound image manipulation and JPEG encoding executed in thread pool."""
+        if base_im:
+            # Fit and center-crop to native 889x500
+            im = self._fit_cover(base_im, CANVAS_WIDTH, CANVAS_HEIGHT)
+        else:
+            # Sleek dark background canvas
+            im = self._create_dark_canvas(m)
+
+        draw = ImageDraw.Draw(im)
+
+        # 1. Top-Left: Status Badge (LIVE / Upcoming Time / Replay) with 12px font
+        if status not in ("none", "empty", "info"):
+            self._draw_status_badge(draw, status, time_str)
+
+        # 2. Top-Right: TvVoo Bookmark Ribbon (Lightning bolt only)
+        if has_tvvoo:
+            self._draw_tvvoo_bookmark(draw)
+
+        # Encode as progressive JPEG with quality=88
+        out_buf = io.BytesIO()
+        im.save(out_buf, format="JPEG", quality=88, optimize=True)
+        return out_buf.getvalue()
 
     def _create_dark_canvas(self, match: Dict[str, Any]) -> Image.Image:
         """Creates an elegant dark canvas with centered match title and competition subtitle, free of emojis."""

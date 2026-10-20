@@ -579,7 +579,11 @@ class CatalogService:
         secondary_matches: List[Dict[str, Any]],
     ) -> List[Dict[str, Any]]:
         merged_list: List[Dict[str, Any]] = [dict(m) for m in primary_matches]
-        for m in merged_list:
+        id_to_idx: Dict[str, int] = {}
+        for idx, m in enumerate(merged_list):
+            m_id = m.get("id")
+            if m_id:
+                id_to_idx[str(m_id)] = idx
             if m.get("title") and "raw_titles" not in m:
                 m["raw_titles"] = [m["title"]]
             if m.get("teams") and "alt_teams" not in m:
@@ -595,12 +599,9 @@ class CatalogService:
 
             matched_idx = -1
 
-            # 0. Direct ID matching: identical ID is 100% the exact same match!
-            if m2_id:
-                for idx, existing in enumerate(merged_list):
-                    if existing.get("id") == m2_id:
-                        matched_idx = idx
-                        break
+            # 0. Direct ID matching: identical ID is 100% the exact same match! (O(1) instant hash lookup)
+            if m2_id and str(m2_id) in id_to_idx:
+                matched_idx = id_to_idx[str(m2_id)]
 
             # 1. Similarity and weighted scoring matching within the same silo
             if matched_idx < 0:
@@ -735,6 +736,8 @@ class CatalogService:
                     m2_dict["raw_titles"] = [m2_dict["title"]]
                 if m2_dict.get("teams") and "alt_teams" not in m2_dict:
                     m2_dict["alt_teams"] = [m2_dict["teams"]]
+                if m2_id:
+                    id_to_idx[str(m2_id)] = len(merged_list)
                 merged_list.append(m2_dict)
 
 
