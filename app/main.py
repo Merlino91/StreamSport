@@ -21,7 +21,10 @@ from app.config import (
     CATALOG_ID,
     CATALOG_NAME,
     CATALOG_TYPE,
+    HOST,
     ID_PREFIXES,
+    PORT,
+    PUBLIC_URL,
     SPORT_GENRES,
     STREAMED_API_HOST,
 )
@@ -101,12 +104,30 @@ def decode_config(config_str: Optional[str]) -> Tuple[Optional[str], Optional[st
         return None, None, "Europe/Rome"
 
 
+_HOST_REGEX = re.compile(r"^[a-zA-Z0-9.\-_]+(?::\d{1,5})?$")
+
+
 def get_base_url(request: Request) -> str:
     """
-    Extracts the correct public base URL respecting reverse proxy headers.
+    Extracts the correct public base URL respecting reverse proxy headers,
+    with PUBLIC_URL priority and anti-host-spoofing validation.
     """
-    proto = request.headers.get("x-forwarded-proto") or request.url.scheme
-    host = request.headers.get("x-forwarded-host") or request.headers.get("host") or request.url.netloc
+    if PUBLIC_URL:
+        return PUBLIC_URL
+
+    # 1. Scheme validation (strictly http or https)
+    raw_proto = (request.headers.get("x-forwarded-proto") or request.url.scheme or "http").strip().lower()
+    proto = "https" if raw_proto == "https" else "http"
+
+    # 2. Host validation and sanitization
+    raw_host = request.headers.get("x-forwarded-host") or request.headers.get("host") or request.url.netloc or ""
+    candidate_host = raw_host.split(",")[0].strip()
+
+    if candidate_host and _HOST_REGEX.match(candidate_host):
+        host = candidate_host
+    else:
+        host = request.url.netloc or f"{HOST}:{PORT}"
+
     return f"{proto}://{host}"
 
 

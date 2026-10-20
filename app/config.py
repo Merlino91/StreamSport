@@ -15,6 +15,7 @@ load_dotenv(PROJECT_DIR / ".env")
 HOST = os.getenv("STREAMSPORT_HOST", "0.0.0.0")
 PORT = int(os.getenv("STREAMSPORT_PORT", os.getenv("EASYSPORTS_PORT", "7002")))
 DEBUG = os.getenv("STREAMSPORT_DEBUG", "false").lower() in ("true", "1", "yes")
+PUBLIC_URL = os.getenv("PUBLIC_URL", os.getenv("BASE_URL", "")).strip().rstrip("/")
 
 # Upstream API settings
 STREAMED_API_HOST = os.getenv("STREAMED_API_HOST", "streamed.pk")
