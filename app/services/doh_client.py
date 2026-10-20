@@ -68,7 +68,16 @@ class DoHClient:
             "https://cloudflare-dns.com/dns-query",
             "https://dns.google/resolve",
         ]
-        # Insecure SSL context for upstream routing
+        # 1. Secure DoH Client: Strict TLS/SSL verification for Cloudflare & Google DNS resolvers
+        self._doh_limits = httpx.Limits(max_keepalive_connections=20, max_connections=40, keepalive_expiry=60.0)
+        self._doh_client = httpx.AsyncClient(
+            verify=True,
+            limits=self._doh_limits,
+            timeout=httpx.Timeout(6.0, connect=3.0)
+        )
+
+        # 2. Upstream Client: Direct IP / CDN fetching with custom SNI support
+        # Allows routing via direct numerical IP when local ISP DNS blocks hostnames
         self._ssl_context = ssl.create_default_context()
         self._ssl_context.check_hostname = False
         self._ssl_context.verify_mode = ssl.CERT_NONE
@@ -85,8 +94,10 @@ class DoHClient:
         self._resolve_lock: Optional[asyncio.Lock] = None
 
     async def close(self):
-        """Closes the underlying shared HTTP client."""
-        if self._client and not self._client.is_closed:
+        """Closes the underlying HTTP clients."""
+        if hasattr(self, "_doh_client") and self._doh_client and not self._doh_client.is_closed:
+            await self._doh_client.aclose()
+        if hasattr(self, "_client") and self._client and not self._client.is_closed:
             await self._client.aclose()
 
     async def resolve(self, hostname: str) -> Optional[str]:
@@ -113,7 +124,7 @@ class DoHClient:
                 try:
                     params = {"name": hostname, "type": "A"}
                     headers = {"accept": "application/dns-json"}
-                    res = await self._client.get(endpoint, params=params, headers=headers)
+                    res = await self._doh_client.get(endpoint, params=params, headers=headers)
                     if res.status_code == 200:
                         data = res.json()
                         answers = data.get("Answer", [])

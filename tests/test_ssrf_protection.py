@@ -119,6 +119,23 @@ class TestSSRFProtection(unittest.TestCase):
         self.assertIsNone(content)
         self.assertIsNone(ctype)
 
+    def test_doh_client_ssl_verification_isolation(self):
+        import asyncio
+        import ssl
+
+        # 1. Verify that DoH client has strict TLS verification (NOT CERT_NONE)
+        self.assertIsNotNone(doh_client._doh_client)
+        # In httpx, verify=True creates an SSL context with CERT_REQUIRED
+        ssl_ctx = getattr(doh_client._doh_client._transport, "_ssl_context", None)
+        if ssl_ctx:
+            self.assertEqual(ssl_ctx.verify_mode, ssl.CERT_REQUIRED)
+            self.assertTrue(ssl_ctx.check_hostname)
+
+        # 2. Test live DoH resolution through verified TLS endpoint
+        resolved = asyncio.run(doh_client.resolve("google.com"))
+        self.assertIsNotNone(resolved)
+        self.assertTrue(len(resolved.split(".")) == 4)
+
 
 if __name__ == "__main__":
     unittest.main()
