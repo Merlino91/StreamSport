@@ -1,6 +1,7 @@
 from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
+import ipaddress
 import logging
 import re
 import time
@@ -12,6 +13,17 @@ import httpx
 from app.config import ENABLE_TVVOO, TVVOO_CACHE_INTERVAL
 
 logger = logging.getLogger("streamsport.tvvoo_service")
+
+
+def sanitize_ip(ip_str: Optional[str]) -> Optional[str]:
+    """Validates and returns normalized IPv4 or IPv6 string, or None if invalid/spoofed."""
+    if not ip_str or not isinstance(ip_str, str):
+        return None
+    candidate = ip_str.split(",")[0].strip()
+    try:
+        return str(ipaddress.ip_address(candidate))
+    except ValueError:
+        return None
 
 
 @dataclass
@@ -43,7 +55,8 @@ class LiveManifestManager:
         self._lock = asyncio.Lock()
 
     def _get_key(self, play_url: str, client_ip: Optional[str]) -> str:
-        return f"{play_url}:{client_ip or 'default'}"
+        valid_ip = sanitize_ip(client_ip)
+        return f"{play_url}:{valid_ip or 'default'}"
 
     def cleanup(self) -> None:
         now = time.time()
@@ -1209,7 +1222,7 @@ class TvVooService:
             "castConnected": False,
             "package": "net.vypn.app",
             "version": "1.4.1",
-            "ipLocation": client_ip,
+            "ipLocation": sanitize_ip(client_ip),
         }
 
         headers = {
@@ -1227,7 +1240,7 @@ class TvVooService:
                     if sig:
                         self._addon_sig = sig
                         self._sig_time = now
-                        self._sig_ip = client_ip
+                        self._sig_ip = sanitize_ip(client_ip)
                         logger.info("Successfully acquired new Vavoo session signature.")
                         return sig
         except Exception as e:
@@ -1511,7 +1524,8 @@ class TvVooService:
         if not play_url or "vavoo" not in play_url:
             return None
 
-        sig = await self.get_vavoo_signature(client_ip)
+        valid_ip = sanitize_ip(client_ip)
+        sig = await self.get_vavoo_signature(valid_ip)
         if not sig:
             return None
 
@@ -1522,9 +1536,9 @@ class TvVooService:
             "accept-encoding": "gzip",
             "mediahubmx-signature": sig,
         }
-        if client_ip:
-            headers["x-forwarded-for"] = client_ip
-            headers["x-real-ip"] = client_ip
+        if valid_ip:
+            headers["x-forwarded-for"] = valid_ip
+            headers["x-real-ip"] = valid_ip
 
         payload = {
             "language": "de",

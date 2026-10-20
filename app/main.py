@@ -1,5 +1,6 @@
 import base64
 from contextlib import asynccontextmanager
+import ipaddress
 import json
 import logging
 from pathlib import Path
@@ -129,6 +130,28 @@ def get_base_url(request: Request) -> str:
         host = request.url.netloc or f"{HOST}:{PORT}"
 
     return f"{proto}://{host}"
+
+
+def extract_clean_client_ip(request: Request) -> Optional[str]:
+    """
+    Extracts and formally validates client IP address.
+    Prioritizes Cloudflare's CF-Connecting-IP, then X-Forwarded-For, then direct client host.
+    Ensures candidate is a valid IPv4 or IPv6 address to prevent header spoofing / upstream injection.
+    """
+    raw_ip = (
+        request.headers.get("cf-connecting-ip")
+        or request.headers.get("x-forwarded-for")
+        or (request.client.host if request.client else None)
+    )
+    if not raw_ip:
+        return None
+
+    candidate = raw_ip.split(",")[0].strip()
+    try:
+        return str(ipaddress.ip_address(candidate))
+    except ValueError:
+        logger.debug("Discarded invalid client IP format: %s", candidate[:50])
+        return None
 
 
 def build_manifest(configured: bool = True) -> dict:
@@ -390,9 +413,7 @@ async def live_manifest_proxy(request: Request, url: str, config: Optional[str] 
     if not url:
         raise HTTPException(status_code=400, detail="Parametro url mancante")
 
-    client_ip = request.headers.get("x-forwarded-for") or (request.client.host if request.client else None)
-    if client_ip and "," in client_ip:
-        client_ip = client_ip.split(",")[0].strip()
+    client_ip = extract_clean_client_ip(request)
 
     manifest_content = None
     try:
