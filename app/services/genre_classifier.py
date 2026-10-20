@@ -65,15 +65,6 @@ class GenreClassifier:
     )
 
 
-    # NBA Franchises
-    NBA_TEAMS = {
-        "hawks", "celtics", "nets", "hornets", "bulls", "cavaliers", "mavericks",
-        "nuggets", "pistons", "warriors", "rockets", "pacers", "clippers", "lakers",
-        "grizzlies", "heat", "bucks", "timberwolves", "pelicans", "knicks", "thunder",
-        "magic", "76ers", "sixers", "suns", "trail blazers", "blazers", "kings",
-        "spurs", "raptors", "jazz", "wizards"
-    }
-
 
     # Superlega Volley
     SUPERLEGA_VOLLEY_TEAMS = {
@@ -305,6 +296,7 @@ class GenreClassifier:
                 "basketball_bcl": ("basket", "Eurolega ed Eurocup"),
                 "basketball_lba_serie_a": ("basket", "LBA Serie A"),
                 "basketball_acb": ("basket", "Campionati Esteri ed NBL"),
+                "basketball_cba": ("basket", "Campionati Esteri ed NBL"),
                 "basketball_nbl": ("basket", "Campionati Esteri ed NBL"),
                 "basketball_bbl": ("basket", "Campionati Esteri ed NBL"),
                 "basketball_lnb": ("basket", "Campionati Esteri ed NBL"),
@@ -438,7 +430,7 @@ class GenreClassifier:
             cat in ("basketball", "basket")
             or silo == "basketball"
             or "basketball" in eval_text
-            or re.search(r"\b(nba|wnba|euroleague|eurocup|lba|nbl|fiba)\b", eval_text)
+            or re.search(r"\b(nba|wnba|euroleague|eurocup|lba|nbl|fiba|cba)\b", eval_text)
         ) and not is_football_context:
             # LIVELLO 1: Tornei Internazionali e Acronimi Globali
 
@@ -458,8 +450,27 @@ class GenreClassifier:
             if re.search(r"\b(ncaa|college\s*basketball|march\s*madness)\b", eval_text):
                 return "basket", "NCAA e College Basket"
 
-            # 5. NBA (USA Men's Professional League)
-            if re.search(r"\b(nba)\b", eval_text) or any(t in home or t in away or t in eval_text for t in self.NBA_TEAMS):
+            # 5. CBA Cina ed Altri Campionati Esteri Noti (Priorità su squadre omonime)
+            is_cba_or_foreign = (
+                country in ("china", "cina", "cn")
+                or bool(re.search(r"\b(cba|chinese\s*cba|china\s*cba|chinese\s*basketball|acb|endesa|bbl|lnb|gbl|bsl|aba\s*league|nbl|vtb|nbb)\b", eval_text))
+                or bool(re.search(r"\b(ningbo|zhejiang|nanjing|shanghai|beijing|guangdong|liaoning|xinjiang|jilin|shandong|qingdao|jiangsu|guangzhou|tianjin|fujian|shenzhen|sichuan)\b", eval_text))
+            )
+            if is_cba_or_foreign:
+                return "basket", "Campionati Esteri ed NBL"
+
+            # 6. NBA (USA Men's Professional League: acronimo NBA o franchigie)
+            NBA_REGEX = (
+                r"\b(nba|trail\s*blazers|timberwolves|76ers|sixers|cavaliers|mavericks|"
+                r"boston\s*celtics|celtics|chicago\s*bulls|houston\s*rockets|la\s*lakers|los\s*angeles\s*lakers|lakers|"
+                r"golden\s*state\s*warriors|golden\s*state|warriors|sacramento\s*kings|la\s*clippers|los\s*angeles\s*clippers|clippers|"
+                r"ny\s*knicks|new\s*york\s*knicks|knicks|okc\s*thunder|oklahoma\s*city\s*thunder|thunder|"
+                r"orlando\s*magic|miami\s*heat|milwaukee\s*bucks|bucks|san\s*antonio\s*spurs|spurs|toronto\s*raptors|raptors|"
+                r"utah\s*jazz|jazz|washington\s*wizards|wizards|brooklyn\s*nets|nets|charlotte\s*hornets|hornets|"
+                r"atlanta\s*hawks|hawks|denver\s*nuggets|nuggets|detroit\s*pistons|pistons|indiana\s*pacers|pacers|"
+                r"memphis\s*grizzlies|grizzlies|phoenix\s*suns|suns|new\s*orleans\s*pelicans|pelicans)\b"
+            )
+            if re.search(NBA_REGEX, eval_text):
                 return "basket", "NBA"
 
             # LIVELLO 2: Campionati Nazionali (Country / Bandiere / Leghe Nazionali)

@@ -398,7 +398,18 @@ CANONICAL_LEAGUES = {
     "basketball_nba": {
         "display": "NBA",
         "silo": "basketball",
-        "patterns": [r"\bnba\b", r"nba-preseason", r"nba\s*preseason"],
+        "patterns": [
+            r"\bnba\b",
+            r"nba-preseason",
+            r"nba\s*preseason",
+            r"\b(trail\s*blazers|timberwolves|76ers|sixers|cavaliers|mavericks)\b",
+            r"\b(boston\s*celtics|chicago\s*bulls|houston\s*rockets|los\s*angeles\s*lakers|la\s*lakers|golden\s*state|sacramento\s*kings|la\s*clippers|los\s*angeles\s*clippers|ny\s*knicks|new\s*york\s*knicks|okc\s*thunder|oklahoma\s*city\s*thunder|orlando\s*magic|miami\s*heat|milwaukee\s*bucks|san\s*antonio\s*spurs|toronto\s*raptors|utah\s*jazz|washington\s*wizards|brooklyn\s*nets|charlotte\s*hornets|atlanta\s*hawks|denver\s*nuggets|detroit\s*pistons|indiana\s*pacers|memphis\s*grizzlies|phoenix\s*suns|new\s*orleans\s*pelicans)\b",
+        ],
+    },
+    "basketball_cba": {
+        "display": "CBA Cina",
+        "silo": "basketball",
+        "patterns": [r"\bcba\b", r"chinese\s*basketball", r"chinese\s*cba", r"china\s*cba"],
     },
     "basketball_wnba": {
         "display": "WNBA",
