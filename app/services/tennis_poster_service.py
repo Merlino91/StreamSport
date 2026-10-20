@@ -900,7 +900,7 @@ class TennisPosterService:
                     rel_poster = await self.generate_poster(m_id, title, genre)
                     if rel_poster:
                         m["poster"] = rel_poster
-                        db_service.save_matches([m])
+                        await db_service.save_matches_async([m])
                 except Exception as e:
                     logger.debug("Failed generating tennis poster for '%s': %s", title, e)
 

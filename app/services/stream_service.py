@@ -421,7 +421,7 @@ class StreamService:
 
         # 2. Check SQLite DB (persisted merged sources)
         if not match:
-            match = db_service.get_match_by_id(slug_id)
+            match = await db_service.get_match_by_id_async(slug_id)
 
         # 3. Check StreamedAPI (fallback)
         if not match:

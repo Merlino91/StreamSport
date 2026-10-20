@@ -1029,13 +1029,13 @@ class TheSportsDBService:
                 continue
 
             q_key = f"{m_home} vs {m_away}"
-            cached = db_service.get_poster_from_cache(q_key)
+            cached = await db_service.get_poster_from_cache_async(q_key)
             if cached:
                 status, thumb_url, _ = cached
                 if status == "found" and thumb_url:
                     m["poster"] = thumb_url
                     m["background"] = thumb_url
-                    db_service.update_match_poster(m["id"], thumb_url)
+                    await db_service.update_match_poster_async(m["id"], thumb_url)
                     found_count += 1
                 continue
 
@@ -1045,12 +1045,12 @@ class TheSportsDBService:
             if thumb:
                 m["poster"] = thumb
                 m["background"] = thumb
-                db_service.update_match_poster(m["id"], thumb)
-                db_service.save_poster_to_cache(q_key, thumb, "found")
+                await db_service.update_match_poster_async(m["id"], thumb)
+                await db_service.save_poster_to_cache_async(q_key, thumb, "found")
                 found_count += 1
                 logger.info("TheSportsDB Level 2 Fallback: trovata locandina per '%s vs %s' -> %s", m_home, m_away, thumb)
             else:
-                db_service.save_poster_to_cache(q_key, None, "not_found")
+                await db_service.save_poster_to_cache_async(q_key, None, "not_found")
 
             # Polite throttle (1.2s) between external requests
             await asyncio.sleep(1.2)

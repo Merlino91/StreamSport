@@ -1,4 +1,5 @@
 from __future__ import annotations
+import asyncio
 import json
 import logging
 from pathlib import Path
@@ -345,9 +346,37 @@ class DBService:
         except Exception as e:
             logger.error("Failed to delete matches from DB: %s", e)
             return 0
-            if total_deleted > 0:
-                logger.info("Purged %d ineligible concluded matches from SQLite database.", total_deleted)
-            return total_deleted
+
+    # Asynchronous non-blocking wrappers using asyncio.to_thread
+    async def upsert_matches_async(self, matches: List[Dict[str, Any]]) -> None:
+        return await asyncio.to_thread(self.upsert_matches, matches)
+
+    async def save_matches_async(self, matches: List[Dict[str, Any]]) -> None:
+        return await asyncio.to_thread(self.save_matches, matches)
+
+    async def get_active_matches_async(self, max_age_hours: Optional[int] = None) -> List[Dict[str, Any]]:
+        return await asyncio.to_thread(self.get_active_matches, max_age_hours)
+
+    async def get_match_by_id_async(self, match_id: str) -> Optional[Dict[str, Any]]:
+        return await asyncio.to_thread(self.get_match_by_id, match_id)
+
+    async def purge_expired_matches_async(self, max_age_hours: Optional[int] = None) -> int:
+        return await asyncio.to_thread(self.purge_expired_matches, max_age_hours)
+
+    async def delete_matches_by_ids_async(self, match_ids: List[str]) -> int:
+        return await asyncio.to_thread(self.delete_matches_by_ids, match_ids)
+
+    async def update_match_poster_async(self, match_id: str, poster_url: str) -> None:
+        return await asyncio.to_thread(self.update_match_poster, match_id, poster_url)
+
+    async def get_poster_from_cache_async(self, query_key: str) -> Optional[Tuple[str, Optional[str], int]]:
+        return await asyncio.to_thread(self.get_poster_from_cache, query_key)
+
+    async def save_poster_to_cache_async(self, query_key: str, thumb_url: Optional[str], status: str) -> None:
+        return await asyncio.to_thread(self.save_poster_to_cache, query_key, thumb_url, status)
+
+    async def clear_failed_poster_cache_async(self) -> None:
+        return await asyncio.to_thread(self.clear_failed_poster_cache)
 
     def _row_to_match(self, row: sqlite3.Row) -> Dict[str, Any]:
         sources = []

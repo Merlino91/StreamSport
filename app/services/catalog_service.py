@@ -1188,7 +1188,7 @@ class CatalogService:
                     combined_fresh = self.merge_and_deduplicate_by_silos(combined_fresh, fctv33_matches)
 
                 # 2. Pull all active matches from DB to retain existing enriched posters
-                all_db_matches = [m for m in db_service.get_active_matches() if self.is_real_match(m)]
+                all_db_matches = [m for m in await db_service.get_active_matches_async() if self.is_real_match(m)]
                 # Transfer existing DB posters to fresh matches if missing
                 db_posters = {m["id"]: m["poster"] for m in all_db_matches if m.get("id") and m.get("poster")}
                 for m in combined_fresh:
@@ -1241,7 +1241,7 @@ class CatalogService:
 
                 # 6. FASE 4: DEDUPLICAZIONE POST-VALIDAZIONE & PERSISTENZA
                 # Purge matches older than retention window from DB (6h if ENABLE_REPLAYS=False, 72h if True)
-                db_service.purge_expired_matches()
+                await db_service.purge_expired_matches_async()
                 banner_service.purge_stale_banners(max_age_hours=24)
 
                 # LEVEL 2e: Post-Validation Multi-Signal Deduplication (in RAM and cleans absorbed IDs from DB)
@@ -1249,7 +1249,7 @@ class CatalogService:
 
                 # Persist ONLY clean, deduplicated matches into SQLite!
                 if all_matches:
-                    db_service.save_matches(all_matches)
+                    await db_service.save_matches_async(all_matches)
 
                 # 5. LEVEL 3: Pre-classify every match into catalog and genre
                 # Matches with _tsdb_matched have competition set, enabling exact genre matching;
@@ -1292,7 +1292,7 @@ class CatalogService:
                         filtered_matches.append(m)
 
                 if ids_to_purge:
-                    db_service.delete_matches_by_ids(ids_to_purge)
+                    await db_service.delete_matches_by_ids_async(ids_to_purge)
                     logger.info("Purged %d concluded events from SQLite (ENABLE_REPLAYS=%s).", len(ids_to_purge), ENABLE_REPLAYS)
 
                 all_matches = filtered_matches
@@ -1508,7 +1508,7 @@ class CatalogService:
         # 3. Check SQLite DB
         if not match:
             try:
-                match = db_service.get_match_by_id(clean_id)
+                match = await db_service.get_match_by_id_async(clean_id)
             except Exception as e:
                 logger.warning("DB lookup failed for %s: %s", clean_id, e)
 

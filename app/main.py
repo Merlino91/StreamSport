@@ -544,7 +544,7 @@ async def get_dynamic_poster(
     clean_id = match_id.replace("streamsport:", "")
     match = catalog_service.get_cached_match(clean_id)
     if not match:
-        match = db_service.get_match_by_id(clean_id)
+        match = await db_service.get_match_by_id_async(clean_id)
 
     content = await banner_service.get_or_create_poster(
         match=match,
