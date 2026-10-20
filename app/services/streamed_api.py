@@ -204,18 +204,28 @@ class StreamedAPI:
 
     async def find_match_by_slug_and_id(self, slug_or_id: str) -> Optional[Dict[str, Any]]:
         """
-        Finds a match in the active match list by full ID or suffix.
+        Finds a match in the active match list by exact ID, exact slug, or delimited suffix.
+        Guards against substring false positives (e.g. "5" matching "105" or "258").
         """
+        if not slug_or_id:
+            return None
         matches = await self.get_all_matches()
-        # Direct ID match
-        for m in matches:
-            if m.get("id") == slug_or_id:
-                return m
+        clean = slug_or_id.replace("streamsport:", "").strip()
 
-        # Match by ending ID number or substring
+        # 1. Exact match (full id, clean id, or slug)
         for m in matches:
             mid = str(m.get("id", ""))
-            if mid.endswith(slug_or_id) or slug_or_id in mid:
+            mslug = str(m.get("slug", ""))
+            if mid == slug_or_id or mid == clean:
+                return m
+            if mslug and (mslug == slug_or_id or mslug == clean):
+                return m
+
+        # 2. Delimited suffix match (e.g. "-123", ":123", or "_123")
+        delimiters = ("-", ":", "_")
+        for m in matches:
+            mid = str(m.get("id", ""))
+            if any(mid.endswith(f"{delim}{clean}") for delim in delimiters):
                 return m
 
         return None

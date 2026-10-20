@@ -422,10 +422,12 @@ class StreamService:
             match = await streamed_api.find_match_by_slug_and_id(slug_id)
 
         # 4. Check DaddyLive (fallback)
+        delimiters = ("-", ":", "_")
         if not match:
             dl_matches = await daddylive_api.get_matches()
             for m in dl_matches:
-                if m.get("id") == slug_id or slug_id in str(m.get("id", "")):
+                mid = str(m.get("id", ""))
+                if mid == slug_id or any(mid.endswith(f"{d}{slug_id}") for d in delimiters):
                     match = m
                     break
 
@@ -433,7 +435,8 @@ class StreamService:
         if not match:
             fctv_matches = await fctv33_service.get_matches()
             for m in fctv_matches:
-                if m.get("id") == slug_id or slug_id in str(m.get("id", "")):
+                mid = str(m.get("id", ""))
+                if mid == slug_id or any(mid.endswith(f"{d}{slug_id}") for d in delimiters):
                     match = m
                     break
 

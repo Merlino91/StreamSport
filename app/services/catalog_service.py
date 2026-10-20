@@ -1506,8 +1506,10 @@ class CatalogService:
         # 2. Check DaddyLive
         if not match:
             dl_matches = await daddylive_api.get_matches()
+            delimiters = ("-", ":", "_")
             for m in dl_matches:
-                if m.get("id") == clean_id or clean_id in str(m.get("id", "")):
+                mid = str(m.get("id", ""))
+                if mid == clean_id or any(mid.endswith(f"{d}{clean_id}") for d in delimiters):
                     match = m
                     break
 
@@ -1541,11 +1543,12 @@ class CatalogService:
         m = self._matches_by_id.get(match_id) or self._matches_by_id.get(clean_id)
         if m:
             return m
-        # 2. Snapshot iteration fallback (supports fuzzy matches, unit test mocks)
+        # 2. Snapshot iteration fallback (exact match or delimited suffix; prevents false positive substring collisions)
         snapshot = self._cached_matches
+        delimiters = ("-", ":", "_")
         for item in snapshot:
             mid = str(item.get("id", ""))
-            if mid == clean_id or mid == match_id or clean_id in mid or mid.endswith(clean_id):
+            if mid == clean_id or mid == match_id or any(mid.endswith(f"{d}{clean_id}") for d in delimiters):
                 return item
         return None
 
