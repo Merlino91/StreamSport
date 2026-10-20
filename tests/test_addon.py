@@ -697,7 +697,7 @@ class StreamSportTestCase(unittest.TestCase):
             self.assertIn("🇬🇧 Sky Sports Premier League UK", stream_names)
             self.assertIn("🇷🇺 Match Premier Russia", stream_names)
 
-            # 3. Test empty streams behavior
+            # 3. Test empty streams behavior for a live event without streams
             empty_match = {
                 "id": "test-empty-streams",
                 "title": "Unbroadcasted Event",
@@ -710,7 +710,9 @@ class StreamSportTestCase(unittest.TestCase):
                 ep_url="https://ep.example.com",
                 user_tz="Europe/Rome"
             ))
-            self.assertEqual(empty_res, [])
+            self.assertEqual(len(empty_res), 1)
+            self.assertIn("Partita in corso", empty_res[0]["name"])
+            self.assertTrue(empty_res[0].get("behaviorHints", {}).get("notWebReady"))
         finally:
             catalog_service._cached_matches = orig_cached
 

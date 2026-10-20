@@ -363,6 +363,7 @@ class StreamService:
                 "url": "",
                 "behaviorHints": {"notWebReady": True},
             }]
+        else:
             live_window = CatalogService.get_live_window_minutes(match) if match else 240
             if diff_mins >= -live_window:
                 return [{
@@ -669,7 +670,7 @@ class StreamService:
         final_streams = tvvoo_streams + secondary_streams
 
         if not final_streams:
-            if not ep_url:
+            if not ep_url and any(s.get("source") in ("dlhd", "fctv33", "streamed") for s in sources):
                 return [
                     {
                         "name": "⚠️ EasyProxy non configurato",
@@ -679,7 +680,7 @@ class StreamService:
                         "behaviorHints": {"notWebReady": True},
                     }
                 ]
-            return []
+            return self.generate_status_card(match, user_tz)
 
         return final_streams
 
