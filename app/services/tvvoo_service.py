@@ -52,35 +52,58 @@ class LiveManifestManager:
     def __init__(self, service: "TvVooService"):
         self.service = service
         self.sessions: Dict[str, LiveStreamSession] = {}
+        self._in_flight: Dict[str, asyncio.Task] = {}
         self._lock = asyncio.Lock()
+        self._last_cleanup: float = 0.0
 
     def _get_key(self, play_url: str, client_ip: Optional[str]) -> str:
         valid_ip = sanitize_ip(client_ip)
         return f"{play_url}:{valid_ip or 'default'}"
 
     def cleanup(self) -> None:
+        """Periodic cleanup of sessions stale for > 45 minutes (throttled to at most once per 5 min)."""
         now = time.time()
-        stale_keys = [k for k, s in self.sessions.items() if (now - s.last_fetched_at) > 2700]  # 45 minutes
+        if now - self._last_cleanup < 300:
+            return
+        self._last_cleanup = now
+        stale_keys = [k for k, s in list(self.sessions.items()) if (now - s.last_fetched_at) > 2700]  # 45 minutes
         for k in stale_keys:
             self.sessions.pop(k, None)
 
     async def get_live_manifest(self, play_url: str, client_ip: Optional[str] = None) -> Optional[str]:
-        self.cleanup()
         key = self._get_key(play_url, client_ip)
         now = time.time()
+        task_to_await = None
 
         async with self._lock:
+            self.cleanup()
             session = self.sessions.get(key)
-            if not session or session.valid_until <= now:
-                session = await self._refresh_session(session, play_url, client_ip)
-            elif (session.valid_until - now) < 300 and (not session.refresh_task or session.refresh_task.done()):
-                # Proactive non-blocking background token renewal when < 5 mins left
-                session.refresh_task = asyncio.create_task(self._refresh_session(session, play_url, client_ip))
+            if session and session.valid_until > now:
+                session.last_fetched_at = now
+                if (session.valid_until - now) < 300 and (not session.refresh_task or session.refresh_task.done()):
+                    # Proactive non-blocking background token renewal when < 5 mins left
+                    session.refresh_task = asyncio.create_task(self._refresh_session(session, play_url, client_ip))
+            else:
+                # Initial resolution or token renewal required; coalesce concurrent requests
+                if key in self._in_flight and not self._in_flight[key].done():
+                    task_to_await = self._in_flight[key]
+                else:
+                    task_to_await = asyncio.create_task(self._refresh_session(session, play_url, client_ip))
+                    self._in_flight[key] = task_to_await
+
+        if task_to_await:
+            try:
+                session = await task_to_await
+            finally:
+                async with self._lock:
+                    if self._in_flight.get(key) is task_to_await:
+                        self._in_flight.pop(key, None)
 
         if not session:
             return None
 
-        session.last_fetched_at = now
+        async with self._lock:
+            session.last_fetched_at = now
 
         # 3. Fast throttle for rapid repeated manifest requests (< 1.5 seconds)
         if session.last_manifest and (now - session.last_manifest_time) < 1.5:
@@ -104,8 +127,9 @@ class LiveManifestManager:
             raw_m3u8 = await self._fetch_upstream(session.stream_url)
 
         rewritten = self._rewrite_manifest(raw_m3u8, session.base_url)
-        session.last_manifest = rewritten
-        session.last_manifest_time = time.time()
+        async with self._lock:
+            session.last_manifest = rewritten
+            session.last_manifest_time = time.time()
         return rewritten
 
     async def _fetch_upstream(self, stream_url: str) -> str:
@@ -144,7 +168,8 @@ class LiveManifestManager:
             refresh_task=None,
         )
         key = self._get_key(play_url, client_ip)
-        self.sessions[key] = updated
+        async with self._lock:
+            self.sessions[key] = updated
         logger.info("[LiveManifest] Session refreshed for %s (valid for ~%ds)", play_url[:60], int(valid_until - time.time()))
         return updated
 

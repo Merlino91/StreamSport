@@ -410,14 +410,8 @@ class StreamService:
             ]
 
         # 1. Check Catalog in-memory cache first (contains merged sources from both providers!)
-        match = None
         from app.services.catalog_service import catalog_service
-        if catalog_service._cached_matches:
-            for m in catalog_service._cached_matches:
-                mid = str(m.get("id", ""))
-                if mid == slug_id or slug_id in mid or mid.endswith(slug_id):
-                    match = m
-                    break
+        match = catalog_service.get_cached_match(slug_id)
 
         # 2. Check SQLite DB (persisted merged sources)
         if not match:

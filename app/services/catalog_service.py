@@ -51,6 +51,7 @@ class CatalogService:
 
     def __init__(self):
         self._cached_matches: List[Dict[str, Any]] = []
+        self._matches_by_id: Dict[str, Dict[str, Any]] = {}
         self._last_sync_time: float = 0.0
         self._sync_lock: asyncio.Lock = asyncio.Lock()
         self._background_task: Optional[asyncio.Task] = None
@@ -1303,7 +1304,17 @@ class CatalogService:
                 except Exception as e:
                     logger.debug("Tennis cache cleanup error: %s", e)
 
-                self._cached_matches = all_matches
+                # Build indexed dictionary for instant O(1) lookups
+                index_by_id: Dict[str, Dict[str, Any]] = {}
+                for m in all_matches:
+                    mid = str(m.get("id", ""))
+                    if mid:
+                        index_by_id[mid] = m
+                        if mid.startswith("streamsport:"):
+                            index_by_id[mid.split(":", 1)[1]] = m
+
+                self._matches_by_id = index_by_id
+                self._cached_matches = list(all_matches)
                 self._last_sync_time = time.time()
                 logger.info("Background sports sync complete. %d active events indexed in RAM.", len(all_matches))
 
@@ -1485,13 +1496,8 @@ class CatalogService:
         """
         clean_id = slug_id.split(":", 1)[1] if ":" in slug_id else slug_id
 
-        # 1. Check in-memory cached matches first (instant!)
-        match = None
-        if self._cached_matches:
-            for m in self._cached_matches:
-                if m.get("id") == clean_id or clean_id in str(m.get("id", "")):
-                    match = m
-                    break
+        # 1. Check in-memory cached matches first (instant O(1) indexed lookup!)
+        match = self.get_cached_match(clean_id)
 
         # 1. Check Streamed
         if not match:
@@ -1522,12 +1528,25 @@ class CatalogService:
         meta["background"] = meta.get("poster")
         return meta
 
+    def get_cached_matches(self) -> List[Dict[str, Any]]:
+        """Returns an immutable snapshot copy of cached matches."""
+        return list(self._cached_matches)
+
     def get_cached_match(self, match_id: str) -> Optional[Dict[str, Any]]:
-        """Retrieves a match from the in-memory cache by ID."""
+        """Retrieves a match from the in-memory cache by ID with O(1) index and fallback."""
+        if not match_id:
+            return None
         clean_id = match_id.replace("streamsport:", "")
-        for m in self._cached_matches:
-            if m.get("id") == clean_id or m.get("id") == match_id:
-                return m
+        # 1. Fast O(1) dictionary index lookup
+        m = self._matches_by_id.get(match_id) or self._matches_by_id.get(clean_id)
+        if m:
+            return m
+        # 2. Snapshot iteration fallback (supports fuzzy matches, unit test mocks)
+        snapshot = self._cached_matches
+        for item in snapshot:
+            mid = str(item.get("id", ""))
+            if mid == clean_id or mid == match_id or clean_id in mid or mid.endswith(clean_id):
+                return item
         return None
 
 

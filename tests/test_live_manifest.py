@@ -124,3 +124,52 @@ chunk_102.ts
         })
         req3.client = None
         self.assertIsNone(extract_clean_client_ip(req3))
+
+    @patch.object(tvvoo_service, "resolve_clean_stream_url")
+    @patch.object(LiveManifestManager, "_fetch_upstream")
+    async def test_concurrent_get_live_manifest_coalescing(self, mock_fetch, mock_resolve):
+        """Verifies 20 concurrent requests for the same URL are coalesced into 1 upstream resolution."""
+        import asyncio
+
+        mock_resolve.return_value = {
+            "url": "https://edge.vavoo.to/hls/concurrent.m3u8",
+            "valid_until": 9999999999.0,
+        }
+        mock_fetch.return_value = "#EXTM3U\n#EXTINF:8.0,\nseg1.ts\n"
+
+        play_url = "https://vavoo.to/play/concurrent_channel"
+        # Run 20 concurrent requests
+        results = await asyncio.gather(*[
+            self.manager.get_live_manifest(play_url, client_ip="1.2.3.4")
+            for _ in range(20)
+        ])
+
+        for res in results:
+            self.assertIsNotNone(res)
+            self.assertIn("https://edge.vavoo.to/hls/seg1.ts", res)
+
+        # Ensure resolve was called only once thanks to task coalescing
+        self.assertEqual(mock_resolve.call_count, 1)
+
+    @patch.object(tvvoo_service, "resolve_clean_stream_url")
+    @patch.object(LiveManifestManager, "_fetch_upstream")
+    async def test_concurrent_cleanup_no_runtime_error(self, mock_fetch, mock_resolve):
+        """Verifies that simultaneous cleanup and manifest requests under load never raise RuntimeError."""
+        import asyncio
+
+        mock_resolve.return_value = {
+            "url": "https://edge.vavoo.to/hls/load.m3u8",
+            "valid_until": 9999999999.0,
+        }
+        mock_fetch.return_value = "#EXTM3U\n#EXTINF:8.0,\nseg.ts\n"
+
+        async def worker(i: int):
+            url = f"https://vavoo.to/play/ch_{i % 5}"
+            if i % 3 == 0:
+                self.manager.cleanup()
+            return await self.manager.get_live_manifest(url, client_ip=f"192.168.1.{i % 10}")
+
+        results = await asyncio.gather(*[worker(i) for i in range(30)])
+        self.assertEqual(len(results), 30)
+        for r in results:
+            self.assertIsNotNone(r)
