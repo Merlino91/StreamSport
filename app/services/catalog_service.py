@@ -9,6 +9,7 @@ import urllib.parse
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from app.config import (
+    CATALOG_DEFINITIONS,
     CATALOG_ID,
     CATALOG_NAME,
     CATALOG_SYNC_INTERVAL,
@@ -1464,13 +1465,89 @@ class CatalogService:
             unique_filtered.append(meta_item)
         filtered = unique_filtered
 
-        # 7. Pagination & Schema Cleanup
+        # 7. Placeholder for empty catalogs/genres (Anti-crash for Nuvio and Android clients)
+        if not filtered and skip == 0:
+            placeholder = self.build_empty_placeholder(
+                catalog_id=catalog_id,
+                genre_filter=genre_filter,
+                search_query=search_query,
+                base_url=base_url,
+            )
+            return [placeholder]
+
+        # 8. Pagination & Schema Cleanup
         page = filtered[skip : skip + limit]
         for item in page:
             item.pop("_date_ms", None)
             item.pop("_live_window", None)
 
         return page
+
+    def build_empty_placeholder(
+        self,
+        catalog_id: Optional[str] = None,
+        genre_filter: Optional[str] = None,
+        search_query: Optional[str] = None,
+        base_url: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Builds a synthetic placeholder meta item for empty catalogs/genres.
+        Prevents crashes in Nuvio and Android Jetpack Compose list views.
+        """
+        target_genre = (genre_filter or "").strip()
+        is_all_genre = not target_genre or target_genre.lower() in (
+            "tutti gli eventi", "all", "all sports", "tutti i generi", "tutti", "tutti i generi"
+        )
+
+        cat_name = ""
+        for cat in CATALOG_DEFINITIONS:
+            if cat["id"] == catalog_id:
+                cat_name = re.sub(r"[\U00010000-\U0010ffff\u2600-\u27bf\ufe00-\ufe0f]\s*", "", cat["name"]).strip()
+                break
+
+        if search_query:
+            clean_q = search_query.strip()
+            title = f"Nessun evento trovato per '{clean_q}'"
+            safe_slug = re.sub(r"[^a-zA-Z0-9_-]+", "_", clean_q).strip("_")[:24].lower()
+            placeholder_id = f"streamsport:empty:search:{safe_slug or 'query'}"
+            genre_tag = "Ricerca"
+        elif not is_all_genre and target_genre:
+            title = f"Nessun evento di {target_genre} in programma oggi"
+            safe_cat = re.sub(r"[^a-zA-Z0-9_-]+", "_", catalog_id or "all").strip("_").lower()
+            safe_gen = re.sub(r"[^a-zA-Z0-9_-]+", "_", target_genre).strip("_").lower()
+            placeholder_id = f"streamsport:empty:{safe_cat}:{safe_gen}"
+            genre_tag = target_genre
+        elif cat_name:
+            title = f"Nessun evento di {cat_name} in programma oggi"
+            safe_cat = re.sub(r"[^a-zA-Z0-9_-]+", "_", catalog_id or "all").strip("_").lower()
+            placeholder_id = f"streamsport:empty:{safe_cat}:all"
+            genre_tag = cat_name
+        else:
+            title = "Nessun evento sportivo in programma oggi"
+            placeholder_id = "streamsport:empty:all:all"
+            genre_tag = CATALOG_NAME
+
+        poster_endpoint = f"/poster/{placeholder_id}.jpg?s=empty"
+        dynamic_poster_url = f"{base_url}{poster_endpoint}" if base_url else poster_endpoint
+
+        return {
+            "id": placeholder_id,
+            "type": CATALOG_TYPE,
+            "name": title,
+            "genres": [genre_tag],
+            "posterShape": "landscape",
+            "description": (
+                "Al momento non ci sono eventi disponibili o programmati per questa categoria. "
+                "Il palinsesto viene sincronizzato e aggiornato automaticamente non appena i flussi diventano disponibili."
+            ),
+            "releaseInfo": "Nessun evento",
+            "poster": dynamic_poster_url,
+            "background": dynamic_poster_url,
+            "behaviorHints": {
+                "defaultVideoId": None,
+                "hasScheduledVideos": False,
+            },
+        }
 
     async def get_meta_detail(
         self,
@@ -1483,7 +1560,31 @@ class CatalogService:
         """
         clean_id = slug_id.split(":", 1)[1] if ":" in slug_id else slug_id
 
-        # 0. Check in-memory cached matches first (instant!)
+        # 0. Check placeholder for empty lists
+        if slug_id.startswith("streamsport:empty:") or clean_id.startswith("empty:"):
+            parts = slug_id.split(":")
+            cat_part = parts[2] if len(parts) > 2 else "all"
+            gen_part = parts[3] if len(parts) > 3 else "all"
+
+            real_genre = None
+            if cat_part != "search":
+                for cat in CATALOG_DEFINITIONS:
+                    if cat["id"] == cat_part:
+                        for g in cat["genres"]:
+                            if re.sub(r"[^a-zA-Z0-9_-]+", "_", g).strip("_").lower() == gen_part:
+                                real_genre = g
+                                break
+                        break
+
+            search_q = gen_part if cat_part == "search" else None
+            return self.build_empty_placeholder(
+                catalog_id=cat_part if cat_part != "search" else None,
+                genre_filter=real_genre or (gen_part if gen_part != "all" else None),
+                search_query=search_q,
+                base_url=base_url,
+            )
+
+        # 1. Check in-memory cached matches first (instant!)
         match = None
         if self._cached_matches:
             for m in self._cached_matches:

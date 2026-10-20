@@ -172,7 +172,8 @@ class BannerService:
             draw = ImageDraw.Draw(im)
 
             # 1. Top-Left: Status Badge (LIVE / Upcoming Time / Replay) with 12px font
-            self._draw_status_badge(draw, status, time_str)
+            if status not in ("none", "empty", "info"):
+                self._draw_status_badge(draw, status, time_str)
 
             # 2. Top-Right: TvVoo Bookmark Ribbon (Lightning bolt only)
             if has_tvvoo:
