@@ -1,10 +1,60 @@
+import asyncio
+import ipaddress
 import logging
+import socket
 import ssl
 import time
-import httpx
+import urllib.parse
 from typing import Dict, Optional, Tuple
+import httpx
 
 logger = logging.getLogger("easysports.doh")
+
+
+def is_ip_private_or_reserved(ip_str: str) -> bool:
+    """Checks whether an IP address is private, loopback, link-local, multicast, or reserved."""
+    try:
+        ip = ipaddress.ip_address(ip_str.strip())
+        if (
+            ip.is_private
+            or ip.is_loopback
+            or ip.is_link_local
+            or ip.is_multicast
+            or ip.is_reserved
+            or ip.is_unspecified
+        ):
+            return True
+        if getattr(ip, "ipv4_mapped", None) and (
+            ip.ipv4_mapped.is_private
+            or ip.ipv4_mapped.is_loopback
+            or ip.ipv4_mapped.is_link_local
+            or ip.ipv4_mapped.is_reserved
+        ):
+            return True
+        return False
+    except ValueError:
+        return True
+
+
+def parse_ip_safe(host: str) -> Optional[ipaddress._BaseAddress]:
+    """Attempts to parse standard, decimal, octal or hex IP addresses."""
+    clean_host = host.strip().strip("[]")
+    try:
+        return ipaddress.ip_address(clean_host)
+    except ValueError:
+        pass
+    if clean_host.isdigit():
+        try:
+            return ipaddress.ip_address(int(clean_host))
+        except ValueError:
+            pass
+    try:
+        raw_bytes = socket.inet_aton(clean_host)
+        return ipaddress.ip_address(raw_bytes)
+    except (OSError, ValueError):
+        pass
+    return None
+
 
 class DoHClient:
     """
@@ -70,6 +120,9 @@ class DoHClient:
                         for ans in answers:
                             if ans.get("type") == 1 and "data" in ans:
                                 ip = ans["data"]
+                                if is_ip_private_or_reserved(ip):
+                                    logger.warning("DoH lookup blocked: %s resolved to private/reserved IP %s", hostname, ip)
+                                    return None
                                 ttl = ans.get("TTL", 300)
                                 self._dns_cache[hostname] = (ip, now + min(ttl, 600))
                                 logger.debug("DoH resolved %s -> %s (TTL: %ds)", hostname, ip, ttl)
@@ -116,6 +169,53 @@ class DoHClient:
 
         return None
 
+    @staticmethod
+    def is_safe_image_target(url: str) -> Tuple[bool, str]:
+        """
+        Validates whether a target URL is safe to proxy (Anti-SSRF guard).
+        Disallows private, loopback, link-local, multicast, and cloud metadata targets.
+        """
+        if not url or not isinstance(url, str):
+            return False, "URL non valida o vuota"
+
+        try:
+            parsed = urllib.parse.urlsplit(url.strip())
+        except Exception:
+            return False, "Formato URL malformato"
+
+        scheme = (parsed.scheme or "").lower()
+        if scheme not in ("http", "https"):
+            return False, f"Schema non consentito: '{scheme}' (ammessi solo http e https)"
+
+        hostname = (parsed.hostname or "").strip().lower()
+        if not hostname:
+            return False, "Hostname mancante nella richiesta"
+
+        # Explicit forbidden hostnames
+        if hostname in ("localhost", "0.0.0.0", "metadata.google.internal") or hostname.endswith(
+            (".localhost", ".local", ".internal", ".lan")
+        ):
+            return False, f"Accesso all'host locale o interno vietato ({hostname})"
+
+        # Check if hostname represents an IP literal (IPv4, IPv6, decimal, octal, hex)
+        parsed_ip = parse_ip_safe(hostname)
+        if parsed_ip is not None:
+            if is_ip_private_or_reserved(str(parsed_ip)):
+                return False, f"Accesso all'indirizzo IP privato o riservato vietato ({parsed_ip})"
+
+        # Verify system DNS resolution if available
+        try:
+            addr_info = socket.getaddrinfo(hostname, None, proto=socket.IPPROTO_TCP)
+            for entry in addr_info:
+                resolved_addr = entry[4][0]
+                if is_ip_private_or_reserved(resolved_addr):
+                    return False, f"L'hostname {hostname} risolve su un indirizzo interno vietato ({resolved_addr})"
+        except Exception:
+            # If system DNS resolution fails (e.g. ISP censorship), DoH will handle resolution
+            pass
+
+        return True, "OK"
+
     async def get_raw(
         self,
         url: str,
@@ -139,8 +239,20 @@ class DoHClient:
 
         parsed = httpx.URL(url)
         hostname = parsed.host
+        if not hostname:
+            return None, None
+
+        # Verify host itself is not a private IP
+        parsed_host_ip = parse_ip_safe(hostname)
+        if parsed_host_ip and is_ip_private_or_reserved(str(parsed_host_ip)):
+            logger.warning("Blocked raw request to private/reserved IP host: %s", hostname)
+            return None, None
 
         resolved_ip = await self.resolve(hostname)
+        if resolved_ip and is_ip_private_or_reserved(resolved_ip):
+            logger.warning("Blocked raw request: %s resolved to private/reserved IP %s", hostname, resolved_ip)
+            return None, None
+
         target_url = url
         req_headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -186,7 +298,21 @@ class DoHClient:
         return None, None
 
     async def proxy_image(self, url: str) -> Tuple[Optional[bytes], Optional[str]]:
-        """Proxies an image URL and returns (content_bytes, content_type)."""
-        return await self.get_raw(url)
+        """Proxies an image URL and returns (content_bytes, content_type) with anti-SSRF validation."""
+        is_safe, reason = self.is_safe_image_target(url)
+        if not is_safe:
+            logger.warning("Blocked unsafe image proxy request to %s: %s", url, reason)
+            return None, None
+
+        content, content_type = await self.get_raw(url)
+        if content and content_type:
+            # Enforce that only image content types are proxied
+            clean_ct = content_type.split(";")[0].strip().lower()
+            if not clean_ct.startswith("image/"):
+                logger.warning("Rejected non-image Content-Type '%s' for URL %s", content_type, url)
+                return None, None
+            return content, content_type
+
+        return None, None
 
 doh_client = DoHClient()

@@ -453,13 +453,17 @@ async def youtube_stream_proxy(video_id: str):
 
 @app.get("/image-proxy")
 async def image_proxy(url: str):
-    """Proxies upstream images through DoH to prevent ISP blockades."""
+    """Proxies upstream images through DoH to prevent ISP blockades with anti-SSRF protection."""
     if not url:
         raise HTTPException(status_code=400, detail="Missing url parameter")
 
+    is_safe, reason = doh_client.is_safe_image_target(url)
+    if not is_safe:
+        raise HTTPException(status_code=403, detail=f"Access denied: {reason}")
+
     content, content_type = await doh_client.proxy_image(url)
     if not content:
-        raise HTTPException(status_code=502, detail="Failed to proxy image")
+        raise HTTPException(status_code=502, detail="Failed to proxy image or invalid image content")
 
     return Response(content=content, media_type=content_type, headers={"Cache-Control": "public, max-age=86400"})
 
