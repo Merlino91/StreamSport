@@ -18,7 +18,7 @@ class GenreClassifier:
         re.IGNORECASE,
     )
     _YOUTH_REGEX = re.compile(
-        r"\b(u-?1[5-9]|under\s*1[5-9]|u-?2[01]|under\s*2[01]|primavera|youth)\b",
+        r"\b(u-?\d{1,2}|under\s*\d{1,2}|sub-?\d{1,2}|primavera|youth|giovanili|allievi|juniores|cadete|juvenil|college(?:\s*soccer)?|ncaa)\b",
         re.IGNORECASE,
     )
 
@@ -43,18 +43,57 @@ class GenreClassifier:
         r"brazil|brasil|brasile|brasileir[ao]|serie\s*a\s*brazil|copa\s*do\s*brasil|paulista|carioca|"
         r"argentina|primera\s*division\s*argentina|copa\s*de\s*la\s*liga|"
         r"colombia|chile|peru|perù|uruguay|ecuador|paraguay|venezuela|bolivia|costa\s*rica|"
+        r"betplay|dimayor|torneo\s*betplay|liga\s*betplay|"
         r"saudi|roshn|saudi\s*pro\s*league|king\s*cup\s*champions|"
         r"qatar|stars\s*league|uae|pro\s*league\s*uae|"
-        r"j-?league|j1\s*league|k-?league|csl|chinese\s*super\s*league|"
+        r"j-?league|j[123]?\s*league|k-?league(?:\s*[1234])?|csl|chinese\s*super\s*league|"
         r"a-?league|australia|indian\s*super\s*league|isl|"
         r"egypt|morocco|botola|south\s*africa|psl"
         r")\b",
         re.IGNORECASE,
     )
 
+    # European recognized countries (Italian and English variants)
+    _EUROPEAN_COUNTRIES = {
+        "portogallo", "portugal", "olanda", "netherlands", "paesi bassi", "belgio", "belgium",
+        "scozia", "scotland", "turchia", "turkey", "grecia", "greece", "austria", "svizzera", "switzerland",
+        "danimarca", "denmark", "svezia", "sweden", "norvegia", "norway", "polonia", "poland",
+        "repubblica ceca", "czech republic", "czech", "cechia", "croazia", "croatia", "serbia",
+        "romania", "bulgaria", "ungheria", "hungary", "ucraina", "ukraine", "irlanda", "ireland",
+        "irlanda del nord", "northern ireland", "galles", "wales", "finlandia", "finland",
+        "cipro", "cyprus", "san marino", "malta", "islanda", "iceland", "slovenia", "slovacchia", "slovakia",
+        "bosnia", "bosnia ed erzegovina", "bosnia and herzegovina", "albania", "macedonia", "north macedonia",
+        "macedonia del nord", "montenegro", "kosovo", "lussemburgo", "luxembourg", "estonia", "lettonia", "latvia",
+        "lituania", "lithuania", "bielorussia", "belarus", "moldavia", "moldova", "georgia", "armenia",
+        "azerbaigian", "azerbaijan", "kazakistan", "kazakhstan", "isole far oer", "faroe islands", "faroe",
+        "gibilterra", "gibraltar", "andorra", "liechtenstein"
+    }
+
+    # European emoji flags
+    _EUROPEAN_FLAGS = (
+        "🇵🇹", "🇳🇱", "🇧🇪", "🏴󠁧󠁢󠁳󠁣󠁴󠁿", "🇹🇷", "🇬🇷", "🇦🇹", "🇨🇭", "🇩🇰", "🇸🇪",
+        "🇳🇴", "🇵🇱", "🇨🇿", "🇭🇷", "🇷🇸", "🇷🇴", "🇧🇬", "🇭🇺", "🇺🇦", "🇮🇪",
+        "🇫🇮", "🇨🇾", "🇸🇲", "🇲🇹", "🇮🇸", "🇸🇮", "🇸🇰", "🇧🇦", "🇦🇱", "🇲🇰",
+        "🇲🇪", "🇽🇰", "🇱🇺", "🇪🇪", "🇱🇻", "🇱🇹", "🇧🇾", "🇲🇩", "🇬🇪", "🇦🇲",
+        "🇦🇿", "🇰🇿", "🇫🇴", "🇬🇮", "🇦🇩", "🇱🇮"
+    )
+
     # European leagues outside top 5 (e.g. EFL, Portugal, Netherlands, Turkey, Greece, Denmark, etc.)
     _EUROPEAN_LEAGUES_REGEX = re.compile(
-        r"\b(england|efl|championship|league\s*one|league\s*two|fa\s*cup|carabao|trophy|portugal|primeira\s*liga|eredivisie|netherlands|scotland|premiership|belgium|jupiler|pro\s*league|turkey|sper\s*lig|super\s*lig|greece|super\s*league|denmark|superliga|1\.\s*division|sweden|allsvenskan|superettan|norway|eliteserien|austria|bundesliga\s*austria|switzerland|super\s*league|poland|ekstraklasa|czech|croatia|hnl|serbia|prva\s*liga|superliga|romania|liga\s*i|bulgaria|parva\s*liga|hungary|ukraine|ireland|irish|finland|finnish|cyprus|slovenia|slovakia)\b",
+        r"\b("
+        r"england|efl|championship|league\s*one|league\s*two|fa\s*cup|carabao|trophy|"
+        r"portugal|primeira\s*liga|taca\s*de\s*portugal|eredivisie|netherlands|knvb|"
+        r"scotland|premiership|belgium|jupiler|pro\s*league|turkey|s[üu]per\s*lig|"
+        r"greece|super\s*league\s*greece|denmark|superliga|1\.\s*division|"
+        r"sweden|allsvenskan|superettan|norway|eliteserien|austria|bundesliga\s*austria|oefb|"
+        r"switzerland|super\s*league\s*switzerland|poland|ekstraklasa|czech|chance\s*liga|fortuna\s*liga|"
+        r"croatia|hnl|serbia|prva\s*liga|superliga|romania|liga\s*i|superliga\s*romania|"
+        r"bulgaria|parva\s*liga|hungary|otp\s*bank|nb\s*i|ukraine|premier\s*liha|"
+        r"ireland|irish|league\s*of\s*ireland|finland|veikkausliiga|finnish|"
+        r"cyprus|cypriot|cipro|san\s*marino|campionato\s*sammarinese|titano|malta|maltese|"
+        r"islanda|iceland|besta\s*deild|slovenia|prva\s*liga|slovakia|nike\s*liga|albania|bosnia|"
+        r"armenia|azerbaijan|georgia|kazakhstan|faroe|gibraltar|andorra|luxembourg"
+        r")\b",
         re.IGNORECASE,
     )
 
@@ -797,7 +836,12 @@ class GenreClassifier:
                 or is_ita_derby
                 or (
                     "vs" in title_lower
-                    and any(k in eval_text for k in ("fc", "cf", "calcio", "football", "soccer", "serie", "league", "cup", "copa", "championship"))
+                    and (
+                        any(k in eval_text for k in ("fc", "cf", "calcio", "football", "soccer", "serie", "league", "cup", "copa", "championship", "campionato", "torneo", "division", "trofeo", "amichevole", "friendly", "primavera"))
+                        or is_youth
+                        or bool(self._EUROPEAN_LEAGUES_REGEX.search(eval_text))
+                        or bool(self._EXTRA_EU_LEAGUES_REGEX.search(eval_text))
+                    )
                 )
             )
         )
@@ -809,18 +853,26 @@ class GenreClassifier:
             is_extra_eu_confed = bool(self._EXTRA_EU_CONFED_REGEX.search(eval_text))
 
             # --------------------------------------------------------------
-            # 1. NATIONAL TEAMS & AMICHEVOLI (e.g. Italia vs Spagna, Nations League, Qualificazioni)
+            # 1. YOUTH & COLLEGE (International / National youth / College)
+            # Evaluated BEFORE national senior matches so "World Cup U17" or "U19 Friendly"
+            # never pollutes senior "Nazionali e Amichevoli"
+            # --------------------------------------------------------------
+            if is_youth and not bool(re.search(r"\b(primavera|u23|next\s*gen|futuro)\b", eval_text)):
+                return "calcio_estero", "Europei Under 21 e Nazionali Giovanili"
+
+            # --------------------------------------------------------------
+            # 2. NATIONAL TEAMS & AMICHEVOLI (e.g. Italia vs Spagna, Nations League, Qualificazioni)
             # Evaluated before domestic leagues so "Italia vs Spagna" never enters Serie A
             # --------------------------------------------------------------
             is_national_match = (
-                bool(self._FRIENDLY_REGEX.search(title_lower))
+                bool(self._FRIENDLY_REGEX.search(eval_text))
                 or bool(re.search(r"\b(nations\s*league|fifa|qualif|international|world\s*cup|european\s*championship|african\s*cup|afcon|copa\s*america|asian\s*cup|gold\s*cup|intercontinental)\b", eval_text))
             )
             if is_national_match:
                 return "calcio_estero", "Nazionali e Amichevoli"
 
             # --------------------------------------------------------------
-            # 2. EUROPEAN CUPS & UEFA TOURNAMENTS (Champions, Europa, Conference)
+            # 3. EUROPEAN CUPS & UEFA TOURNAMENTS (Champions, Europa, Conference)
             # Evaluated first because teams come from different nations
             # --------------------------------------------------------------
             is_uefa_cup = bool(re.search(r"\b(uefa\s*champions|champions\s*league|europa\s*league|conference\s*league|uefa\s*super\s*cup)\b", eval_text))
@@ -841,19 +893,14 @@ class GenreClassifier:
                     return "calcio_estero", "Champions League"
                 return "calcio_estero", "Europa e Conference League"
 
-            # Youth tournaments (international/club)
-            if is_youth and not bool(re.search(r"\b(primavera|u23|next\s*gen|futuro)\b", eval_text)):
-                return "calcio_estero", "Europei Under 21 e Nazionali Giovanili"
-
             # --------------------------------------------------------------
-            # 3. EXTRA-EU & AMERICHE (CONMEBOL, AFC, CAF, MLS, Brasile, Perù, Argentina, ecc.)
-            # Evaluated before European domestic leagues so Peruvian/Brazilian leagues route cleanly
+            # 4. EXTRA-EU CONFEDERATIONS (CONMEBOL Libertadores, AFC Champions, CAF, CONCACAF)
             # --------------------------------------------------------------
-            if is_extra_eu_confed or bool(self._EXTRA_EU_LEAGUES_REGEX.search(eval_text)) or has_extra_eu_flag:
+            if is_extra_eu_confed:
                 return "calcio_estero", "Americhe e Leghe Extra-UE"
 
             # --------------------------------------------------------------
-            # 4. CALCIO ITALIANO (DOPPIO FILTRO: 1° Nazione -> 2° Torneo)
+            # 5. CALCIO ITALIANO (DOPPIO FILTRO: 1° Nazione -> 2° Torneo)
             # --------------------------------------------------------------
             is_ita_nation = (
                 country in ("italia", "italy")
@@ -878,23 +925,26 @@ class GenreClassifier:
                 return "calcio_italiano", "Serie A"
 
             # --------------------------------------------------------------
-            # 4. PREMIER LEAGUE (DOPPIO FILTRO: 1° Nazione -> 2° Torneo)
+            # 6. PREMIER LEAGUE (DOPPIO FILTRO: 1° Nazione -> 2° Torneo)
             # Gate 1: Country is England/UK OR explicit English indicator in text
             # Gate 2: League is Premier League / FA Cup / Carabao
             # --------------------------------------------------------------
             is_epl_derby = any(d in title_lower for d in ("arsenal vs liverpool", "liverpool vs arsenal", "chelsea vs liverpool", "arsenal vs chelsea", "tottenham vs arsenal"))
+            is_other_european_country = bool(country and country in (self._EUROPEAN_COUNTRIES - {"inghilterra", "england", "uk"}))
             is_england = (
-                country in ("inghilterra", "england", "uk")
-                or "🏴󠁧󠁢󠁥󠁮󠁧󠁿" in eval_text
-                or is_epl_derby
-                or bool(re.search(r"\b(england|inghilterra|uk|epl|premier\s*league)\b", eval_text))
+                (country in ("inghilterra", "england", "uk") or "🏴󠁧󠁢󠁥󠁮󠁧󠁿" in eval_text or is_epl_derby or bool(re.search(r"\b(england|inghilterra|uk|epl)\b", eval_text)))
+                or (
+                    bool(re.search(r"\bpremier\s*league\b", eval_text))
+                    and not is_other_european_country
+                    and not any(k in eval_text for k in ("malta", "maltese", "russia", "russian", "ukraine", "wales", "cymru", "ireland", "irish", "scotland", "scottish"))
+                )
             )
-            if is_england and not is_extra_eu:
+            if is_england and not is_extra_eu and not is_other_european_country:
                 if re.search(r"\b(premier\s*league|epl|fa\s*cup|carabao|efl\s*cup)\b", eval_text) or is_epl_derby:
                     return "calcio_estero", "Premier League"
 
             # --------------------------------------------------------------
-            # 5. LA LIGA (DOPPIO FILTRO: 1° Nazione -> 2° Torneo)
+            # 7. LA LIGA (DOPPIO FILTRO: 1° Nazione -> 2° Torneo)
             # Gate 1: Country is Spain OR explicit Spain indicator in text
             # Gate 2: League is LaLiga / Primera Division / Copa del Rey
             # --------------------------------------------------------------
@@ -910,7 +960,7 @@ class GenreClassifier:
                     return "calcio_estero", "La Liga"
 
             # --------------------------------------------------------------
-            # 6. BUNDESLIGA E LIGUE 1 (DOPPIO FILTRO)
+            # 8. BUNDESLIGA E LIGUE 1 (DOPPIO FILTRO)
             # --------------------------------------------------------------
             is_germany = (
                 country in ("germania", "germany")
@@ -925,15 +975,18 @@ class GenreClassifier:
                     return "calcio_estero", "Bundesliga e Ligue 1"
 
             # --------------------------------------------------------------
-            # 7. EXTRA-EU & AMERICHE
+            # 9. ALTRI CAMPIONATI EUROPEI (Strict Gate: European nation/league/flag required)
             # --------------------------------------------------------------
-            if is_extra_eu_confed or bool(self._EXTRA_EU_LEAGUES_REGEX.search(eval_text)) or has_extra_eu_flag:
-                return "calcio_estero", "Americhe e Leghe Extra-UE"
+            has_eu_flag = any(flag in eval_text for flag in self._EUROPEAN_FLAGS)
+            is_european_country = country in self._EUROPEAN_COUNTRIES
+            is_european_league = bool(self._EUROPEAN_LEAGUES_REGEX.search(eval_text))
+            if (is_european_league or is_european_country or has_eu_flag) and not is_extra_eu:
+                return "calcio_estero", "Altri Campionati Europei"
 
             # --------------------------------------------------------------
-            # 8. TUTTI GLI ALTRI CAMPIONATI EUROPEI (Fallback naturale europeo)
+            # 10. AMERICHE E LEGHE EXTRA-UE (Fallback naturale per tutto il calcio non europeo)
             # --------------------------------------------------------------
-            return "calcio_estero", "Altri Campionati Europei"
+            return "calcio_estero", "Americhe e Leghe Extra-UE"
 
         # ------------------------------------------------------------------
         # 11. FALLBACK

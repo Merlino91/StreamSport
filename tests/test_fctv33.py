@@ -130,6 +130,12 @@ class TestFCTV33Integration(unittest.IsolatedAsyncioTestCase):
             {"title": "Kukielka vs Marchlewski", "_silo": "tennis", "competition": "TT Cup Table Tennis", "country": "Poland"},
             # Fight junk: local episodic Thai broadcasts
             {"title": "Muay Mun Sanan Mueang 2026 Ep.39", "_silo": "fight", "competition": "Muay Mun Sanan Mueang", "country": ""},
+            # Soccer junk: Foreign U17 (even if World Cup), College Soccer, J2/K2/Betplay 2nd divisions
+            {"title": "USA U17 Women vs Samoa U17 Women", "_silo": "football", "competition": "U17 Women's World Cup", "country": "International"},
+            {"title": "Abilene Christian vs Grand Canyon", "_silo": "football", "competition": "NCAA College Soccer", "country": "USA"},
+            {"title": "Yamagata vs Sapporo", "_silo": "football", "competition": "Japanese J2 League", "country": "Japan"},
+            {"title": "Seoul E-Land vs Busan", "_silo": "football", "competition": "K League 2", "country": "South Korea"},
+            {"title": "Real Cartagena vs Bogota", "_silo": "football", "competition": "Torneo BetPlay Dimayor", "country": "Colombia"},
         ]
         for item in junk_items:
             self.assertTrue(fctv33_service.is_junk_event(item), f"Expected junk for {item['title']}")
@@ -143,8 +149,12 @@ class TestFCTV33Integration(unittest.IsolatedAsyncioTestCase):
             {"title": "Juventus U23 vs Renate", "_silo": "football", "competition": "Italian Serie C", "country": "Italy"},
             # Premier League should NEVER be filtered
             {"title": "Tottenham vs Coventry", "_silo": "football", "competition": "English Premier League", "country": "England"},
-            # Official FIFA National tournament should NEVER be filtered
-            {"title": "USA U17 Women vs Samoa U17 Women", "_silo": "football", "competition": "U17 Women's World Cup", "country": "International"},
+            # European peripheral leagues (San Marino, Cyprus, Malta) should NOT be filtered
+            {"title": "Omonia Nicosia vs APOEL", "_silo": "football", "competition": "Cypriot Cup", "country": "Cyprus"},
+            {"title": "Tre Fiori vs La Fiorita", "_silo": "football", "competition": "Campionato Sammarinese", "country": "San Marino"},
+            {"title": "Hamrun Spartans vs Floriana", "_silo": "football", "competition": "Maltese Premier League", "country": "Malta"},
+            # Italian U21 or UEFA Euro U21
+            {"title": "Italia U21 vs Francia U21", "_silo": "football", "competition": "Qualificazioni Euro U21", "country": "Europe"},
             # NBA
             {"title": "Boston Celtics vs LA Lakers", "_silo": "basketball", "competition": "NBA", "country": "USA"},
             # American football: NFL and NCAA Division I FBS must pass

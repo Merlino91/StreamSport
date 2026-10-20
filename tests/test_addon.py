@@ -616,10 +616,15 @@ class StreamSportTestCase(unittest.TestCase):
         self.assertIn("Concluso", streams[0].get("name", ""))
 
     def test_league_two_and_wimbledon_classification(self):
-        # 1. League Two club match without explicit league keyword defaults to Altri Campionati Europei
-        cat1, genre1 = genre_classifier.classify({"title": "Fleetwood Town vs Rochdale", "category": "football", "_silo": "football"})
+        # 1. League Two club match with explicit league keyword routes to Altri Campionati Europei
+        cat1, genre1 = genre_classifier.classify({"title": "Fleetwood Town vs Rochdale", "competition": "EFL League Two", "category": "football", "_silo": "football"})
         self.assertEqual(cat1, "calcio_estero")
         self.assertEqual(genre1, "Altri Campionati Europei")
+
+        # 1b. Match without any European or league metadata defaults to Extra-EU fallback
+        cat1b, genre1b = genre_classifier.classify({"title": "Fleetwood Town vs Rochdale", "category": "football", "_silo": "football"})
+        self.assertEqual(cat1b, "calcio_estero")
+        self.assertEqual(genre1b, "Americhe e Leghe Extra-UE")
 
         # 2. AFC Wimbledon football match must NEVER be classified as Tennis Grand Slam
         cat2, genre2 = genre_classifier.classify({"title": "Cambridge United vs AFC Wimbledon (England - League One)", "category": "football", "_silo": "football"})

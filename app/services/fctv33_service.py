@@ -223,7 +223,8 @@ class FCTV33Service:
                     c_raw = l_sub[80][0]
                     if isinstance(c_raw, bytes):
                         cs = c_raw.decode("utf-8", errors="replace")
-                        country = cs.split("\x12")[-1].split('"')[0].strip() if "\x12" in cs else ""
+                        raw_c = cs.split("\x12")[-1].split('"')[0].strip() if "\x12" in cs else ""
+                        country = re.sub(r"^[^a-zA-Z0-9]+", "", raw_c).strip()
 
             # Canonical silo resolution based on sportType
             silo_info = FCTV33_SPORT_TYPE_MAP.get(sport_type, {"silo": "other", "name": "Altri Sport"})
@@ -233,6 +234,7 @@ class FCTV33Service:
                 "id": f"fctv33:{mid_str}",
                 "title": title,
                 "category": canonical_silo,
+                "_silo": canonical_silo,
                 "date": int(ts),
                 "poster": None,
                 "competition": league,
@@ -413,24 +415,32 @@ class FCTV33Service:
 
         # 6. FOOTBALL (Calcio)
         if silo == "football":
-            # A. Youth / Giovanili non italiane e non top-tier internazionali
-            is_youth = bool(re.search(r"\b(u-?1[0-9]|u-?2[01]|under\s*1[0-9]|under\s*2[01]|sub-?1[0-9]|sub-?20|soeratin|juvenil|cadete)\b", comp_or_title))
+            # A. College Soccer / NCAA
+            if re.search(r"\b(college\s*soccer|ncaa)\b", comp_or_title):
+                return True
+
+            # B. Seconde/terze divisioni minori extra-europee (J2, J3, K League 2, Torneo Betplay Colombia, ecc.)
+            if re.search(r"\b(j[23]\s*league|k\s*league\s*[234]|torneo\s*betplay|colombia(?:n)?\s*torneo\s*betplay|liga\s*de\s*expansi[oó]n|usl\s*league\s*(?:one|two)|mls\s*next\s*pro|s[eé]rie\s*[cd]\s*brazil|primera\s*b\s*(?:nacional|chile|colombia|metropolitana)?)\b", comp_or_title):
+                return True
+
+            # C. Youth / Giovanili non italiane (scarta tutte le U17, U19, U20 estere salvo U21 europei o squadre italiane)
+            is_youth = bool(re.search(r"\b(u-?\d{1,2}|under\s*\d{1,2}|sub-?\d{1,2}|soeratin|juvenil|cadete|allievi|giovanissimi)\b", comp_or_title))
             if is_youth:
-                is_it_youth = bool(re.search(r"\b(italia|italy|primavera|juventus|milan|inter|roma|atalanta|fiorentina|lazio)\b", f"{comp} {title}"))
-                is_uefa_fifa = bool(re.search(r"\b(uefa|fifa|champions|euro|world cup)\b", comp_or_title))
-                if not is_it_youth and not is_uefa_fifa:
+                is_it_youth = bool(re.search(r"\b(italia|italy|primavera|juventus|milan|inter|roma|atalanta|fiorentina|lazio|napoli|torino)\b", f"{comp} {title}"))
+                is_u21_major = bool(re.search(r"\b(u-?21|under\s*21)\b", comp_or_title)) and bool(re.search(r"\b(euro|uefa|qualif)\b", comp_or_title)) and "women" not in comp_or_title
+                if not is_it_youth and not is_u21_major:
                     return True
 
-            # B. Tornei Nazionali ufficiali (AFCON, Qualifiers Mondiali/Europei, Nations League, ecc.) -> Sempre ammessi
+            # D. Riserve e leghe di sviluppo amatoriali
+            if re.search(r"\b(reserve|reserves|amateur|development\s*league)\b", comp_or_title):
+                return True
+
+            # E. Tornei Nazionali maggiori ufficiali (AFCON, Qualifiers Mondiali/Europei, Nations League, ecc.) -> Ammessi se non giovanili
             is_national_tournament = bool(re.search(r"\b(afcon|world cup|qualifier|nations league|copa america|asian cup|gold cup|futsal afcon)\b", comp_or_title))
             if is_national_tournament:
                 return False
 
-            # C. Riserve e leghe di sviluppo amatoriali
-            if re.search(r"\b(reserve|reserves|amateur|development\s*league)\b", comp_or_title):
-                return True
-
-            # D. Femminile non italiano e non top internazionale
+            # F. Femminile non italiano e non top internazionale
             is_women = bool(re.search(r"\b(women(?:['']s)?|femminile|femenil|dames|frauen|ladies)\b", comp_or_title))
             if is_women:
                 is_top_women = bool(re.search(r"\b(serie a|coppa italia|italia|italy|champions|uwcl|world cup|nations league|euro)\b", comp_or_title))
@@ -438,7 +448,7 @@ class FCTV33Service:
                 if not is_top_women and not is_it_team:
                     return True
 
-            # E. Campionati nazionali minori / esotici di club non europei
+            # G. Campionati nazionali minori / esotici di club non europei
             EXOTIC_CLUB_COUNTRIES = {
                 "myanmar", "vietnam", "cambodia", "laos", "indonesia", "thailand",
                 "mauritania", "antigua", "antigua and barbuda", "suriname", "st. kitts", "st. kitts and nevis", "saint kitts",
