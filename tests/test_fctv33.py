@@ -121,8 +121,15 @@ class TestFCTV33Integration(unittest.IsolatedAsyncioTestCase):
             # Hockey junk: AHL, ECHL, junior hockey
             {"title": "Chicago Wolves vs Rockford IceHogs", "_silo": "hockey", "competition": "AHL", "country": "USA"},
             {"title": "London Knights vs Guelph Storm", "_silo": "hockey", "competition": "OHL Junior Hockey", "country": "Canada"},
-            # Volleyball junk: foreign college / district volleyball
+            # Volleyball junk: foreign college / district volleyball / minor Asian club cups
             {"title": "Stanford vs Penn State", "_silo": "volley", "competition": "College Volleyball NCAA", "country": "USA"},
+            {"title": "KAL Jumbos vs Rush & Cash", "_silo": "volley", "competition": "KOVO Cup", "country": "South Korea"},
+            {"title": "PLDT High Speed Hitters vs Akari", "_silo": "volley", "competition": "Premier Volleyball League", "country": "Philippines"},
+            # Tennis junk: informational summary cards, table tennis
+            {"title": "20/10/2026 Tennis: ATP & WTA", "_silo": "tennis", "competition": "ZRisultati in tempo reale e gli esiti", "country": ""},
+            {"title": "Kukielka vs Marchlewski", "_silo": "tennis", "competition": "TT Cup Table Tennis", "country": "Poland"},
+            # Fight junk: local episodic Thai broadcasts
+            {"title": "Muay Mun Sanan Mueang 2026 Ep.39", "_silo": "fight", "competition": "Muay Mun Sanan Mueang", "country": ""},
         ]
         for item in junk_items:
             self.assertTrue(fctv33_service.is_junk_event(item), f"Expected junk for {item['title']}")

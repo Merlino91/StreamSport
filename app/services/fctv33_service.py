@@ -278,13 +278,37 @@ class FCTV33Service:
         title = (item.get("title") or "").lower().strip()
         comp_or_title = comp or title
 
-        # --- LEVEL 1: Immune Silos (Global circuits, international tournaments) ---
-        if silo in ("motor-sports", "tennis", "fight"):
+        # --- SPORT-SPECIFIC STRUCTURAL FILTERING (No hardcoded team lists) ---
+
+        # 1. TENNIS
+        # Keep: Grand Slam, ATP, WTA, ATP Challenger Tour, Davis Cup, Billie Jean King Cup.
+        # Discard: Informational/schedule-only summaries, non-matches, table tennis/ping pong leaks.
+        if silo == "tennis":
+            if re.search(r"(risultati\s*in\s*tempo\s*reale|tennis:\s*atp|atp\s*&\s*wta|schedule\s*only|placeholder)", comp_or_title):
+                return True
+            if re.search(r"\b(table\s*tennis|ping\s*pong|tt\s*cup|setka\s*cup)\b", comp_or_title):
+                return True
             return False
 
-        # --- LEVEL 2: Sport-Specific Structural Filtering ---
+        # 2. MOTOR SPORTS
+        # Keep: Formula 1, MotoGP, Superbike, WRC, Rally, NASCAR, IndyCar, WEC, DTM, Supercars.
+        # Discard: Novelty / demolition derby / grassroots tractor pulling.
+        if silo == "motor-sports":
+            if re.search(r"\b(tractor\s*pull|lawn\s*mower|demolition\s*derby|figure\s*8)\b", comp_or_title):
+                return True
+            return False
 
-        # 1. AMERICAN FOOTBALL
+        # 3. FIGHT (Sport da Combattimento)
+        # Keep: UFC, Bellator, PFL, ONE Championship, Boxe (titoli e promoter d'élite), KSW, Cage Warriors, WWE, AEW.
+        # Discard: Local daily episodic Thai circuits / serial televised muay thai cards.
+        if silo == "fight":
+            if re.search(r"\b(muay\s*mun\s*sanan\s*mueang|the\s*global\s*fight|new\s*power\s*muay\s*thai|rajadamnern\s*knockout)\b", comp_or_title):
+                return True
+            if re.search(r"\bep\.\s*\d+\b", comp_or_title) and not re.search(r"\b(ufc|wwe|aew|one\s*championship)\b", comp_or_title):
+                return True
+            return False
+
+        # 4. AMERICAN FOOTBALL
         # Keep: NFL, CFL, UFL, and strictly NCAA Division I FBS.
         # Discard: Lower college divisions (FCS, D-II, D-III, NAIA, JuCo) and high school.
         if silo == "american-football":
@@ -292,15 +316,15 @@ class FCTV33Service:
                 return True
             return False
 
-        # 2. BASEBALL
-        # Keep: MLB, NPB, KBO, Italian/European leagues, World Baseball Classic.
+        # 5. BASEBALL
+        # Keep: MLB, NPB, KBO, Italian/European leagues, World Baseball Classic, Caribbean Winter Leagues (LIDOM).
         # Discard: Minor leagues (MiLB, Triple-A, Double-A, Single-A, Rookie), college baseball, exotic development circuits.
         if silo == "baseball":
             if re.search(r"\b(milb|triple-a|double-a|single-a|class\s*a|rookie|minor\s*league|phoenix\s*league|college\s*baseball|ncaa)\b", comp_or_title):
                 return True
             return False
 
-        # 3. HOCKEY
+        # 6. HOCKEY
         # Keep: NHL, KHL, SHL, Liiga, DEL, Swiss National League, Italian/Alpine leagues, IIHF World Championship.
         # Discard: American minor leagues (AHL, ECHL), major junior leagues (OHL, WHL, QMJHL, USHL), college ice hockey.
         if silo == "hockey":
@@ -308,14 +332,29 @@ class FCTV33Service:
                 return True
             return False
 
-        # 4. VOLLEYBALL
-        # Keep: SuperLega, Serie A1/A2/A3, Coppa Italia, CEV, VNL, World/Euro Championships, top national leagues.
-        # Discard: College volleyball, regional/district tournaments.
+        # 7. VOLLEYBALL
+        # Keep: SuperLega, Serie A1/A2/A3, Coppa Italia, CEV Champions/Cup, VNL, World/Euro Championships, top European leagues (PlusLiga, Ligue A).
+        # Discard: Asian/minor exotic domestic cups (KOVO Cup, PVL Philippines, Thai pro challenge), lower college divisions.
         if silo == "volley":
-            is_it_volley = bool(re.search(r"\b(italia|italy|superlega|serie\s*a[123]?|coppa\s*italia)\b", f"{comp} {title}"))
-            if not is_it_volley:
-                if re.search(r"\b(college\s*volleyball|ncaa|district|universiade)\b", comp_or_title):
+            full_text = f"{comp} {title} {country}"
+            is_it_volley = bool(re.search(r"\b(italia|italy|superlega|serie\s*a[123]?|coppa\s*italia)\b", full_text))
+            if is_it_volley:
+                return False
+
+            # College volleyball, regional/district tournaments
+            if re.search(r"\b(college\s*volleyball|ncaa|district|universiade|amateur)\b", comp_or_title):
+                return True
+
+            # Asian / exotic minor club tournaments
+            ASIAN_EXOTIC_VOLLEY_COUNTRIES = {"south korea", "korea", "philippines", "thailand", "vietnam", "indonesia", "malaysia", "taiwan"}
+            is_asian_exotic_country = country in ASIAN_EXOTIC_VOLLEY_COUNTRIES
+            is_asian_exotic_comp = bool(re.search(r"\b(kovo\s*cup|kovo|premier\s*volleyball|pvl|pro\s*challenge|v-league\s*korea|thailand\s*league|spikers\s*turf)\b", comp_or_title))
+            if is_asian_exotic_country or is_asian_exotic_comp:
+                # Protect official FIVB / CEV / Olympic tournaments between national teams
+                is_top_world_fivb = bool(re.search(r"\b(vnl|nations\s*league|world\s*championship|olympic|cev|champions\s*league)\b", comp_or_title))
+                if not is_top_world_fivb:
                     return True
+
             return False
 
         # 5. BASKETBALL

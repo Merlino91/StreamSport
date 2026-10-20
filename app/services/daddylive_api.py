@@ -203,7 +203,7 @@ class DaddyLiveAPI:
 
         # 1. Football (Soccer)
         if any(k in cat_lower for k in (
-            "soccer", "league one", "league two", "national league", "mls", "usl",
+            "soccer", "championship", "league one", "league two", "national league", "mls", "usl",
             "youth league", "champions league", "europa league", "conference league",
             "serie a", "serie b", "serie c", "la liga", "bundesliga", "ligue 1", "premier league",
             "eredivisie", "coppa italia", "fa cup", "copa del rey", "copa libertadores", "copa sudamericana"
@@ -390,6 +390,32 @@ class DaddyLiveAPI:
 
                         # 5. Minor foreign 2nd divisions
                         if re.search(r"\b(aba\s*league\s*2|israeli\s*national\s*league)\b", full_basket_text):
+                            continue
+
+                    # Volleyball: filter college volleyball and minor Asian/exotic club leagues
+                    is_volley = "volley" in cat_lower or "volley" in raw_title.lower()
+                    if is_volley:
+                        title_low = raw_title.lower()
+                        full_volley_text = f"{cat_lower} {title_low}"
+                        is_it_volley = "🇮🇹" in raw_title or bool(re.search(r"\b(superlega|serie\s*a[123]?|coppa\s*italia|italia|italy)\b", full_volley_text))
+                        if not is_it_volley:
+                            if re.search(r"\b(college\s*volleyball|ncaa|district|universiade|amateur)\b", full_volley_text):
+                                continue
+                            ASIAN_FLAGS = ("🇨🇳", "🇰🇷", "🇵🇭", "🇹🇼", "🇯🇵", "🇻🇳", "🇹🇭", "🇮🇩", "🇲🇾", "🇮🇳")
+                            has_asian_flag = any(f in raw_title for f in ASIAN_FLAGS)
+                            is_asian_exotic = has_asian_flag or bool(re.search(r"\b(kovo|pvl|pro\s*challenge|v-league|thailand\s*league)\b", full_volley_text))
+                            if is_asian_exotic:
+                                is_top_world_fivb = bool(re.search(r"\b(vnl|nations\s*league|world\s*championship|olympic|cev|champions\s*league)\b", full_volley_text))
+                                if not is_top_world_fivb:
+                                    continue
+
+                    # Tennis: filter multi-tournament early rounds summary tickers or table tennis
+                    is_tennis = "tennis" in cat_lower or "tennis" in raw_title.lower()
+                    if is_tennis:
+                        title_low = raw_title.lower()
+                        if "early rounds" in title_low and " vs " not in title_low:
+                            continue
+                        if re.search(r"\b(table\s*tennis|ping\s*pong|tt\s*cup|setka\s*cup)\b", title_low):
                             continue
 
                     # Clean event title
