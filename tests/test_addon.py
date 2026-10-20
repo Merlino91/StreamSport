@@ -257,8 +257,8 @@ class StreamSportTestCase(unittest.TestCase):
         self.assertEqual(inter_match["poster"], "http://img/1.png")
 
         # Test Melbourne Phoenix vs Melbourne United partial name match
-        nbl_streamed = [{"id": "nbl1", "title": "South East Melbourne Phoenix vs Melbourne United", "date": 1790000000000, "poster": "http://img/nbl.png", "sources": [{"id": "s_nbl"}]}]
-        nbl_dlhd = [{"id": "dl_nbl1", "title": "South East Melbourne vs Melbourne United (NBL)", "date": 1790000000000, "poster": None, "sources": [{"id": "dl_nbl"}]}]
+        nbl_streamed = [{"id": "nbl1", "title": "South East Melbourne Phoenix vs Melbourne United", "category": "basketball", "date": 1790000000000, "poster": "http://img/nbl.png", "sources": [{"id": "s_nbl"}]}]
+        nbl_dlhd = [{"id": "dl_nbl1", "title": "South East Melbourne vs Melbourne United (NBL)", "category": "basketball", "date": 1790000000000, "poster": None, "sources": [{"id": "dl_nbl"}]}]
         nbl_merged = catalog_service.merge_and_deduplicate(nbl_streamed, nbl_dlhd)
         self.assertEqual(len(nbl_merged), 1)
         self.assertEqual(len(nbl_merged[0]["sources"]), 2)
@@ -576,8 +576,9 @@ class StreamSportTestCase(unittest.TestCase):
         from app.services.stream_service import stream_service
 
         # 1. Sport-specific dynamic live windows
-        # Tennis: 300 minutes (5 hours)
-        self.assertEqual(CatalogService.get_live_window_minutes({"category": "tennis", "title": "Sinner vs Alcaraz"}), 300)
+        # Tennis: 160 minutes for VS matches, 360 minutes for sessions
+        self.assertEqual(CatalogService.get_live_window_minutes({"category": "tennis", "title": "Sinner vs Alcaraz"}), 160)
+        self.assertEqual(CatalogService.get_live_window_minutes({"category": "tennis", "title": "ATP Masters 1000 Sessione Diurna"}), 360)
         # Football: canonical 160 minutes
         self.assertEqual(CatalogService.get_live_window_minutes({"category": "football", "title": "Inter vs Milan"}), 160)
         self.assertEqual(CatalogService.get_live_window_minutes({"category": "football", "title": "Real Madrid vs Man City (Champions League)"}), 160)

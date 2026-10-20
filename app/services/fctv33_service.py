@@ -319,15 +319,57 @@ class FCTV33Service:
             return False
 
         # 5. BASKETBALL
-        # Keep: NBA, WNBA, EuroLeague, EuroCup, LBA Serie A, A2, FIBA, NCAA Division I.
-        # Discard: Youth (U14-U21), lower college divisions (D-II, D-III, NAIA, JuCo), minor amateur/regional circuits.
+        # Keep: NBA, WNBA, EuroLeague, EuroCup, Basketball Champions League (BCL), FIBA Europe Cup,
+        #       LBA Serie A, Serie A2, Coppa Italia, Italian clubs, NCAA Division I.
+        # Discard:
+        #   - Foreign youth (U14-U21, Sub-17/20, Junior, High School) unless Italian.
+        #   - Lower college divisions (D-II, D-III, NAIA, JuCo) and minor amateur development circuits.
+        #   - Foreign women's basketball unless WNBA, Italian, or official FIBA World tournaments.
+        #   - Asian, African and exotic domestic club competitions (CBA, KBL, PBA, BAL, etc.) unless official senior FIBA World Cup.
+        #   - Minor foreign 2nd divisions.
         if silo == "basketball":
-            # Youth
-            if re.search(r"\b(u-?1[0-9]|u-?2[01]|under\s*1[0-9]|under\s*2[01])\b", comp_or_title):
+            full_text = f"{comp} {title} {country}"
+
+            # A. Youth non-italiane
+            if re.search(r"\b(u-?1[0-9]|u-?2[01]|under\s*1[0-9]|under\s*2[01]|sub-?1[0-9]|sub-?20|junior|high\s*school)\b", comp_or_title):
+                is_it_youth = bool(re.search(r"\b(italia|italy|lba|serie\s*a)\b", full_text))
+                if not is_it_youth:
+                    return True
+
+            # B. Lower college divisions & circuiti amatoriali
+            if re.search(r"\b(division\s*(?:ii|iii|1-aa|i-aa)|d-?[23]|naia|juco|mpbl|zone\s*5|amateur|development\s*league)\b", comp_or_title):
                 return True
-            # Lower college divisions & amateur circuits
-            if re.search(r"\b(division\s*(?:ii|iii|1-aa|i-aa)|d-?[23]|naia|juco|wbla|mpbl|zone\s*5|regional)\b", comp_or_title):
+
+            # C. Basket Femminile estero (WNBA e Italia sempre ammessi)
+            is_women = bool(re.search(r"\b(women(?:['’]s)?|femminile|femenil|damen|ladies|wnbl|wbla)\b", comp_or_title)) or "women" in country
+            if is_women:
+                is_wnba = bool(re.search(r"\bwnba\b", comp_or_title)) or "women's national basketball association" in comp
+                is_it_women = bool(re.search(r"\b(serie\s*a[12]?|coppa\s*italia|lba|italia|italy)\b", full_text))
+                is_top_fiba_women = bool(re.search(r"\b(fiba\s*world\s*cup|eurobasket|olympic)\b", comp_or_title)) and "asia" not in comp_or_title
+                if not (is_wnba or is_it_women or is_top_fiba_women):
+                    return True
+
+            # D. Campionati asiatici, africani ed esotici di club (CBA, KBL, PBA, BAL, ecc.)
+            ASIAN_EXOTIC_BASKET_COUNTRIES = {
+                "china", "south korea", "korea", "philippines", "taiwan", "japan",
+                "vietnam", "thailand", "indonesia", "malaysia", "singapore", "india",
+                "mongolia", "asian", "africa", "rwanda", "uganda", "kenya", "senegal", "angola"
+            }
+            is_asian_exotic_country = country in ASIAN_EXOTIC_BASKET_COUNTRIES
+            is_asian_exotic_comp = bool(re.search(
+                r"\b(cba|chinese\s*basketball|kbl|korean\s*basketball|pba|philippine\s*basketball|governors\s*cup|commissioner\s*s\s*cup|t1\s*league|tpbl|plg|b\.league|road\s*to\s*b\.?a\.?l\.?|champions\s*clubs|basketball\s*africa\s*league|bal)\b",
+                comp_or_title
+            ))
+            if is_asian_exotic_country or is_asian_exotic_comp:
+                # Proteggi tornei mondiali di Nazionali maggiori FIBA
+                is_top_world_fiba = bool(re.search(r"\b(fiba\s*(?:world\s*cup|qualifier)|olympic)\b", comp_or_title)) and not bool(re.search(r"\b(club|asia|bal|league)\b", comp_or_title))
+                if not is_top_world_fiba:
+                    return True
+
+            # E. Seconde divisioni estere minori
+            if re.search(r"\b(aba\s*league\s*2|israeli\s*national\s*league)\b", comp_or_title):
                 return True
+
             return False
 
         # 6. FOOTBALL (Calcio)

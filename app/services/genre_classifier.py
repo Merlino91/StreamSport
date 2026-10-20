@@ -780,13 +780,21 @@ class GenreClassifier:
         is_water_or_niche = bool(re.search(r"\b(surf|surfing|sailing|boating|water\s*sport|swimming|snooker|billiard|padel)\b", eval_text))
         is_explicit_other_cat = bool(cat and cat not in ("", "other", "unknown", "altri sport", "live sports", "football", "soccer"))
         
-        # Candidate soccer match check: category/silo is football, or classic "vs" match with club indicators
+        is_ita_derby = any(derby in title_lower for derby in (
+            "inter vs milan", "milan vs inter", "roma vs lazio", "lazio vs roma",
+            "juventus vs torino", "torino vs juventus", "inter vs juventus", "juventus vs inter",
+            "napoli vs roma", "roma vs napoli", "palermo vs bari", "bari vs palermo",
+            "genoa vs sampdoria", "sampdoria vs genoa"
+        ))
+
+        # Candidate soccer match check: category/silo is football, classic derby, or classic "vs" match with club indicators
         is_soccer_candidate = (
             not is_water_or_niche
             and not is_explicit_other_cat
             and (
                 cat in ("football", "soccer")
                 or silo == "football"
+                or is_ita_derby
                 or (
                     "vs" in title_lower
                     and any(k in eval_text for k in ("fc", "cf", "calcio", "football", "soccer", "serie", "league", "cup", "copa", "championship"))
@@ -847,12 +855,6 @@ class GenreClassifier:
             # --------------------------------------------------------------
             # 4. CALCIO ITALIANO (DOPPIO FILTRO: 1° Nazione -> 2° Torneo)
             # --------------------------------------------------------------
-            is_ita_derby = any(derby in title_lower for derby in (
-                "inter vs milan", "milan vs inter", "roma vs lazio", "lazio vs roma",
-                "juventus vs torino", "torino vs juventus", "inter vs juventus", "juventus vs inter",
-                "napoli vs roma", "roma vs napoli", "palermo vs bari", "bari vs palermo",
-                "genoa vs sampdoria", "sampdoria vs genoa"
-            ))
             is_ita_nation = (
                 country in ("italia", "italy")
                 or "🇮🇹" in eval_text

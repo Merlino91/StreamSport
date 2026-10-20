@@ -221,7 +221,7 @@ class DaddyLiveAPI:
             return "motor-sports", "motor-sports"
 
         # 4. Basketball
-        if "basket" in cat_lower or "nba" in cat_lower:
+        if any(k in cat_lower for k in ("basket", "nba", "wnba", "eurocup", "euroleague", "aba")):
             return "basketball", "basketball"
 
         # 5. Combat / Fight
@@ -350,6 +350,47 @@ class DaddyLiveAPI:
                                 )
                                 if not is_italian:
                                     continue
+
+                    # Basketball: filter Asian club leagues, foreign minor women, youth & lower divisions
+                    is_basketball = any(k in cat_lower for k in ("basket", "nba", "wnba", "eurocup", "euroleague", "aba")) or \
+                                    any(k in raw_title.lower() for k in ("(nba)", "(eurocup)", "(euroleague)", "basketball", "cba", "kbl"))
+                    if is_basketball:
+                        title_low = raw_title.lower()
+                        full_basket_text = f"{cat_lower} {title_low}"
+
+                        # 1. Youth
+                        if re.search(r"\b(u-?1[0-9]|u-?2[01]|under\s*1[0-9]|under\s*2[01]|sub-?1[0-9]|sub-?20|junior|high\s*school)\b", full_basket_text):
+                            if not ("🇮🇹" in raw_title or re.search(r"\b(italia|italy|lba|serie\s*a)\b", full_basket_text)):
+                                continue
+
+                        # 2. Lower college divisions & amateur circuits (Keep Division I Men's and March Madness)
+                        if re.search(r"\b(division\s*(?:ii|iii|1-aa|i-aa)|d-?[23]|naia|juco|mpbl|zone\s*5|amateur|development\s*league)\b", full_basket_text):
+                            continue
+
+                        # 3. Foreign Women's Basketball (Keep WNBA, Italian women, FIBA World/Euro)
+                        is_women = bool(re.search(r"\b(women(?:['’]s)?|femminile|femenil|damen|ladies|wnbl|wbla)\b", full_basket_text)) or bool(re.search(r"\b[A-Za-z0-9]+\s+[WD]\b", raw_title))
+                        if is_women:
+                            is_wnba = bool(re.search(r"\bwnba\b", full_basket_text))
+                            is_it_women = "🇮🇹" in raw_title or bool(re.search(r"\b(serie\s*a[12]?|coppa\s*italia|lba|italia|italy)\b", full_basket_text))
+                            is_top_fiba_women = bool(re.search(r"\b(fiba\s*world\s*cup|eurobasket|olympic)\b", full_basket_text)) and "asia" not in full_basket_text
+                            if not (is_wnba or is_it_women or is_top_fiba_women):
+                                continue
+
+                        # 4. Asian & Minor Exotic Domestic Competitions
+                        ASIAN_FLAGS = ("🇨🇳", "🇰🇷", "🇵🇭", "🇹🇼", "🇯🇵", "🇻🇳", "🇹🇭", "🇮🇩", "🇲🇾", "🇮🇳")
+                        has_asian_flag = any(f in raw_title for f in ASIAN_FLAGS)
+                        is_asian_exotic_comp = bool(re.search(
+                            r"\b(cba|chinese\s*basketball|kbl|korean\s*basketball|pba|philippine\s*basketball|governors\s*cup|commissioner\s*s\s*cup|t1\s*league|tpbl|plg|b\.league|road\s*to\s*b\.?a\.?l\.?|champions\s*clubs|basketball\s*africa\s*league|bal)\b",
+                            full_basket_text
+                        ))
+                        if has_asian_flag or is_asian_exotic_comp:
+                            is_top_world_fiba = bool(re.search(r"\b(fiba\s*(?:world\s*cup|qualifier)|olympic)\b", full_basket_text)) and not bool(re.search(r"\b(club|asia|bal|league)\b", full_basket_text))
+                            if not is_top_world_fiba:
+                                continue
+
+                        # 5. Minor foreign 2nd divisions
+                        if re.search(r"\b(aba\s*league\s*2|israeli\s*national\s*league)\b", full_basket_text):
+                            continue
 
                     # Clean event title
                     clean_title = self._clean_title(raw_title)

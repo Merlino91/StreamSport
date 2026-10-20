@@ -69,6 +69,38 @@ class TestBasketClassification(unittest.TestCase):
             cat, genre = genre_classifier.classify(m)
             self.assertEqual((cat, genre), (exp_cat, exp_genre), f"Failed for {m['title']}")
 
+    def test_fctv33_basket_junk_filtering(self):
+        from app.services.fctv33_service import FCTV33Service
+
+        # Junk events that MUST be discarded upstream
+        junk_events = [
+            {"category": "basketball", "_silo": "basketball", "title": "Fujian Xunxing vs Zhejiang", "competition": "Chinese Basketball Association", "country": "China"},
+            {"category": "basketball", "_silo": "basketball", "title": "Seoul SK Knights vs Anyang KGC", "competition": "Korean Basketball League", "country": "South Korea"},
+            {"category": "basketball", "_silo": "basketball", "title": "San Miguel Beermen vs NLEX Road Warriors", "competition": "Philippine basketball governors cup", "country": "Philippines"},
+            {"category": "basketball", "_silo": "basketball", "title": "Adelaide Link Lightning vs Townsville Fire", "competition": "Women's National Basketball League", "country": "Australia"},
+            {"category": "basketball", "_silo": "basketball", "title": "Denso Iris Women vs Indian Railways Women", "competition": "Women's Basketball League Asia", "country": "Asian"},
+            {"category": "basketball", "_silo": "basketball", "title": "Spintex Knights vs Nabaya Sofas", "competition": "8Africa Champions Clubs ROAD TO B.A.L. 2027", "country": ""},
+            {"category": "basketball", "_silo": "basketball", "title": "France U18 vs Spain U18", "competition": "FIBA U18 Championship", "country": "Europe"},
+            {"category": "basketball", "_silo": "basketball", "title": "Valdosta State vs West Florida", "competition": "NCAA Division II", "country": "USA"},
+        ]
+        for ev in junk_events:
+            self.assertTrue(FCTV33Service.is_junk_event(ev), f"Expected junk for {ev['title']} ({ev['competition']})")
+
+        # Legitimate events that MUST be kept upstream
+        legit_events = [
+            {"category": "basketball", "_silo": "basketball", "title": "Detroit Pistons vs Boston Celtics", "competition": "National Basketball Association", "country": "USA"},
+            {"category": "basketball", "_silo": "basketball", "title": "Golden State Valkyries vs Atlanta Dream", "competition": "Women's National Basketball Association", "country": "USA"},
+            {"category": "basketball", "_silo": "basketball", "title": "Balkan Botevgrad vs Lietkabelis", "competition": "EuroCup Basketball", "country": "Europe"},
+            {"category": "basketball", "_silo": "basketball", "title": "Galatasaray vs Strasbourg", "competition": "Basketball Champions League", "country": "Europe"},
+            {"category": "basketball", "_silo": "basketball", "title": "Nancy vs Nitra Blue Wings", "competition": "FIBA Europe Cup", "country": "Europe"},
+            {"category": "basketball", "_silo": "basketball", "title": "Virtus Bologna vs Olimpia Milano", "competition": "LBA Serie A", "country": "Italy"},
+            {"category": "basketball", "_silo": "basketball", "title": "Familia Schio vs Virtus Bologna Femminile", "competition": "Serie A1 Femminile", "country": "Italy"},
+            {"category": "basketball", "_silo": "basketball", "title": "Tasmania JackJumpers vs Brisbane Bullets", "competition": "National Basketball League", "country": "Australia"},
+            {"category": "basketball", "_silo": "basketball", "title": "Duke vs North Carolina", "competition": "NCAA Basketball", "country": "USA"},
+        ]
+        for ev in legit_events:
+            self.assertFalse(FCTV33Service.is_junk_event(ev), f"Expected legitimate for {ev['title']} ({ev['competition']})")
+
 
 if __name__ == "__main__":
     unittest.main()
