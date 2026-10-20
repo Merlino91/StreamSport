@@ -47,7 +47,10 @@ class LiveManifestManager:
     - Proactively renews temporary Vavoo tokens in the background when < 5 mins remain, without interrupting player playback.
     - Throttles rapid repeated manifest requests (< 1.5s).
     - Guards against player buffer stalls: on transient 401/403 or network errors, serves the recent manifest (< 10s) while asynchronously re-resolving tokens.
+    - Enforces hard LRU bounds (MAX_SESSIONS = 1000) to prevent memory leaks from uncapped concurrent sessions.
     """
+
+    MAX_SESSIONS: int = 1000
 
     def __init__(self, service: "TvVooService"):
         self.service = service
@@ -61,14 +64,21 @@ class LiveManifestManager:
         return f"{play_url}:{valid_ip or 'default'}"
 
     def cleanup(self) -> None:
-        """Periodic cleanup of sessions stale for > 45 minutes (throttled to at most once per 5 min)."""
+        """Periodic cleanup of sessions stale for > 45 minutes or exceeding max capacity."""
         now = time.time()
-        if now - self._last_cleanup < 300:
+        if (now - self._last_cleanup < 300) and len(self.sessions) <= self.MAX_SESSIONS:
             return
         self._last_cleanup = now
         stale_keys = [k for k, s in list(self.sessions.items()) if (now - s.last_fetched_at) > 2700]  # 45 minutes
         for k in stale_keys:
             self.sessions.pop(k, None)
+
+        # Enforce LRU cap if sessions exceed MAX_SESSIONS
+        if len(self.sessions) > self.MAX_SESSIONS:
+            excess = len(self.sessions) - self.MAX_SESSIONS
+            oldest_keys = sorted(self.sessions.keys(), key=lambda k: self.sessions[k].last_fetched_at)[:excess]
+            for k in oldest_keys:
+                self.sessions.pop(k, None)
 
     async def get_live_manifest(self, play_url: str, client_ip: Optional[str] = None) -> Optional[str]:
         key = self._get_key(play_url, client_ip)
@@ -170,6 +180,11 @@ class LiveManifestManager:
         key = self._get_key(play_url, client_ip)
         async with self._lock:
             self.sessions[key] = updated
+            if len(self.sessions) > self.MAX_SESSIONS:
+                excess = len(self.sessions) - self.MAX_SESSIONS
+                oldest_keys = sorted(self.sessions.keys(), key=lambda k: self.sessions[k].last_fetched_at)[:excess]
+                for k in oldest_keys:
+                    self.sessions.pop(k, None)
         logger.info("[LiveManifest] Session refreshed for %s (valid for ~%ds)", play_url[:60], int(valid_until - time.time()))
         return updated
 

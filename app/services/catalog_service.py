@@ -42,6 +42,33 @@ from app.services.canonical_competition_service import (
 
 
 
+try:
+    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+except ImportError:
+    ZoneInfo = None
+    ZoneInfoNotFoundError = Exception
+
+DEFAULT_TIMEZONE = "Europe/Rome"
+
+def get_safe_timezone(user_tz: Optional[str] = None) -> datetime.tzinfo:
+    """Safely resolves timezone from user string, gracefully falling back to Europe/Rome or UTC."""
+    target = (user_tz or DEFAULT_TIMEZONE).strip()
+    if ZoneInfo is not None:
+        try:
+            return ZoneInfo(target)
+        except (ZoneInfoNotFoundError, ValueError, Exception):
+            try:
+                return ZoneInfo(DEFAULT_TIMEZONE)
+            except Exception:
+                pass
+    try:
+        import pytz
+        return pytz.timezone(target)
+    except Exception:
+        pass
+    return datetime.timezone.utc
+
+
 logger = logging.getLogger("streamsport.catalog")
 
 class CatalogService:
@@ -59,16 +86,7 @@ class CatalogService:
 
     def format_event_date(self, timestamp_ms: int, user_tz: Optional[str] = None) -> str:
         """Converts timestamp in ms to localized Italian date string (e.g. '21 Sep 2026, 20:45')."""
-        try:
-            from zoneinfo import ZoneInfo
-            tz = ZoneInfo(user_tz or "Europe/Rome")
-        except Exception:
-            try:
-                import pytz
-                tz = pytz.timezone(user_tz or "Europe/Rome")
-            except Exception:
-                tz = datetime.timezone(datetime.timedelta(hours=2))
-
+        tz = get_safe_timezone(user_tz)
         dt_utc = datetime.datetime.fromtimestamp(timestamp_ms / 1000, tz=datetime.timezone.utc)
         dt_local = dt_utc.astimezone(tz)
         return dt_local.strftime("%d %b %Y, %H:%M").lstrip("0")
@@ -257,12 +275,7 @@ class CatalogService:
                     status_text = f"📅 Tra {days_left} giorni"
 
                 banner_status = "upcoming"
-                try:
-                    from zoneinfo import ZoneInfo
-                    tz = ZoneInfo(user_tz or "Europe/Rome")
-                except Exception:
-                    from zoneinfo import ZoneInfo
-                    tz = ZoneInfo("Europe/Rome")
+                tz = get_safe_timezone(user_tz)
                 dt = datetime.datetime.fromtimestamp(date_ms / 1000.0, tz=tz)
                 months_it = {
                     1: "GEN", 2: "FEB", 3: "MAR", 4: "APR", 5: "MAG", 6: "GIU",
