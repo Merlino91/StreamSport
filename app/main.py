@@ -447,14 +447,30 @@ async def live_manifest_proxy(request: Request, url: str, config: Optional[str] 
     )
 
 
+def is_trusted_stream_redirect(url: str, allowed_suffixes: Tuple[str, ...]) -> bool:
+    """Validates that a resolved stream redirect points strictly to trusted CDN domains."""
+    try:
+        parsed = urllib.parse.urlsplit(url.strip())
+        host = (parsed.hostname or "").lower()
+        return any(host == domain or host.endswith("." + domain) for domain in allowed_suffixes)
+    except Exception:
+        return False
+
+
 @app.get("/dailymotion/stream/{video_id}.m3u8")
 async def dailymotion_stream_proxy(video_id: str):
     """
     On-demand resolver and redirect for Dailymotion video highlights.
     Extracts direct HLS master .m3u8 stream via yt-dlp with TLS impersonation.
     """
+    if not re.match(r"^[a-zA-Z0-9_-]{3,32}$", video_id):
+        raise HTTPException(status_code=400, detail="ID video Dailymotion non valido")
+
     stream_url = await dailymotion_service.resolve_stream_url(video_id)
     if stream_url:
+        if not is_trusted_stream_redirect(stream_url, ("dmcdn.net", "dailymotion.com")):
+            logger.warning("Blocked redirect to untrusted Dailymotion domain: %s", stream_url)
+            raise HTTPException(status_code=502, detail="URL del flusso Dailymotion non attendibile")
         return RedirectResponse(url=stream_url, status_code=307)
 
     logger.warning("Dailymotion stream extraction failed for %s", video_id)
@@ -484,6 +500,9 @@ async def youtube_stream_proxy(video_id: str):
             },
         )
     if redirect_url:
+        if not is_trusted_stream_redirect(redirect_url, ("googlevideo.com", "youtube.com")):
+            logger.warning("Blocked redirect to untrusted YouTube domain: %s", redirect_url)
+            raise HTTPException(status_code=502, detail="URL del flusso YouTube non attendibile")
         return RedirectResponse(url=redirect_url, status_code=307)
 
     logger.warning("YouTube stream extraction failed for %s", video_id)
