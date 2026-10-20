@@ -397,18 +397,6 @@ class StreamService:
         else:
             slug_id = item_id
 
-        # Empty catalog / genre informational placeholder
-        # Empty catalog / genre informational placeholder
-        if item_id.startswith("streamsport:empty:") or slug_id.startswith("empty:"):
-            return [
-                {
-                    "name": "ℹ️ Nessun evento disponibile",
-                    "title": "Al momento non ci sono match o flussi in programma per questa categoria.",
-                    "url": "",
-                    "behaviorHints": {"notWebReady": True},
-                }
-            ]
-
         if not ep_url and not base_url:
             return [
                 {
