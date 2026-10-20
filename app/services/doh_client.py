@@ -91,7 +91,7 @@ class DoHClient:
         self._limits = httpx.Limits(max_keepalive_connections=50, max_connections=100, keepalive_expiry=60.0)
         self._transport = httpx.AsyncHTTPTransport(verify=self._ssl_context, limits=self._limits)
         self._client = httpx.AsyncClient(transport=self._transport, timeout=httpx.Timeout(8.0, connect=4.0))
-        self._resolve_lock: Optional[asyncio.Lock] = None
+        self._resolve_lock: asyncio.Lock = asyncio.Lock()
 
     async def close(self):
         """Closes the underlying HTTP clients."""
@@ -107,10 +107,6 @@ class DoHClient:
             ip, expire_at = self._dns_cache[hostname]
             if now < expire_at:
                 return ip
-
-        if self._resolve_lock is None:
-            import asyncio
-            self._resolve_lock = asyncio.Lock()
 
         async with self._resolve_lock:
             # Re-check cache after acquiring lock

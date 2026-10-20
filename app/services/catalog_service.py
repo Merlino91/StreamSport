@@ -1327,7 +1327,7 @@ class CatalogService:
                 logger.error("Error during background sports schedule sync: %s", e, exc_info=True)
 
     def start_background_sync(self):
-        """Starts the periodic background sync task."""
+        """Starts the periodic background sync task with watchdog supervision."""
         if self._is_running:
             return
         self._is_running = True
@@ -1336,7 +1336,8 @@ class CatalogService:
         except RuntimeError:
             loop = asyncio.get_event_loop()
         self._background_task = loop.create_task(self._background_loop())
-        logger.info("CatalogService background sync scheduled every %d seconds.", CATALOG_SYNC_INTERVAL)
+        self._background_task.add_done_callback(self._on_background_task_done)
+        logger.info("CatalogService background sync scheduled every %d seconds with watchdog.", CATALOG_SYNC_INTERVAL)
 
     def stop_background_sync(self):
         """Stops the periodic background sync task."""
@@ -1344,6 +1345,43 @@ class CatalogService:
         if self._background_task and not self._background_task.done():
             self._background_task.cancel()
             logger.info("CatalogService background sync stopped.")
+
+    def _on_background_task_done(self, task: asyncio.Task):
+        """Supervises the background sync task, catching unexpected failures and auto-restarting."""
+        if not self._is_running:
+            return
+
+        # Check if cancelled or failed with exception
+        exc = None
+        if not task.cancelled():
+            exc = task.exception()
+
+        if exc:
+            logger.critical("CatalogService background sync task died with unhandled exception: %s", exc, exc_info=exc)
+        elif task.cancelled():
+            logger.warning("CatalogService background sync task was cancelled while _is_running=True.")
+        else:
+            logger.warning("CatalogService background sync task terminated unexpectedly while _is_running=True.")
+
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            try:
+                loop = asyncio.get_event_loop()
+            except Exception:
+                loop = None
+
+        if loop and loop.is_running() and self._is_running:
+            logger.info("Watchdog: Scheduling auto-restart of CatalogService background sync in 10s...")
+            loop.call_later(10.0, self._restart_background_sync, loop)
+
+    def _restart_background_sync(self, loop: asyncio.AbstractEventLoop):
+        """Restarts the background loop if the service is still active."""
+        if not self._is_running:
+            return
+        logger.info("Watchdog: Restarting CatalogService background sync task...")
+        self._background_task = loop.create_task(self._background_loop())
+        self._background_task.add_done_callback(self._on_background_task_done)
 
     async def _background_loop(self):
         """Periodic background loop running every CATALOG_SYNC_INTERVAL seconds."""
