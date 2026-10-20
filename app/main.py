@@ -278,7 +278,6 @@ async def unconfigured_catalog(
         user_tz="Europe/Rome",
         base_url=base_url,
     )
-    logger.info("Catalog: id=%s, genre=%s, skip=%d -> %d items", id, genre, skip, len(metas))
     return JSONResponse(
         content={"metas": metas},
         headers={"Cache-Control": "public, max-age=180"},
@@ -305,7 +304,6 @@ async def configured_catalog(
         user_tz=tz,
         base_url=base_url,
     )
-    logger.info("Configured Catalog: id=%s, genre=%s, skip=%d -> %d items", id, genre, skip, len(metas))
     return JSONResponse(
         content={"metas": metas},
         headers={"Cache-Control": "public, max-age=180"},

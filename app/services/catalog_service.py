@@ -1475,8 +1475,8 @@ class CatalogService:
             )
             return [placeholder]
 
-        # 8. Pagination & Schema Cleanup (Row limit: max 5 items on first page for Nuvio/Android TV)
-        effective_limit = 5 if (skip == 0 and not search_query) else limit
+        # 8. Pagination & Schema Cleanup (Row limit: max 4 items on first page for Nuvio/Android TV)
+        effective_limit = 4 if (skip == 0 and not search_query) else limit
         page = filtered[skip : skip + effective_limit]
         for item in page:
             item.pop("_date_ms", None)
