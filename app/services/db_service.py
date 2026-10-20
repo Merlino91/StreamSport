@@ -80,11 +80,24 @@ class DBService:
                         poster TEXT,
                         popular INTEGER DEFAULT 0,
                         sources TEXT,
+                        competition TEXT,
+                        country TEXT,
+                        canonical_competition TEXT,
                         updated_at INTEGER NOT NULL
                     )
                 """)
                 cursor.execute("CREATE INDEX IF NOT EXISTS idx_matches_date ON matches(date)")
                 cursor.execute("CREATE INDEX IF NOT EXISTS idx_matches_cat ON matches(category)")
+
+                # Safe migrations: ensure optional columns exist if table already existed
+                cursor.execute("PRAGMA table_info(matches)")
+                cols = {c[1] for c in cursor.fetchall()}
+                if "competition" not in cols:
+                    cursor.execute("ALTER TABLE matches ADD COLUMN competition TEXT")
+                if "country" not in cols:
+                    cursor.execute("ALTER TABLE matches ADD COLUMN country TEXT")
+                if "canonical_competition" not in cols:
+                    cursor.execute("ALTER TABLE matches ADD COLUMN canonical_competition TEXT")
 
                 cursor.execute("""
                     CREATE TABLE IF NOT EXISTS thesportsdb_cache (
@@ -116,7 +129,10 @@ class DBService:
             poster = m.get("poster") or ""
             popular = 1 if m.get("popular") else 0
             sources = json.dumps(m.get("sources", []))
-            records.append((m_id, title, category, date, poster, popular, sources, now))
+            comp = m.get("competition") or m.get("_competition") or ""
+            country = m.get("country") or m.get("_country") or ""
+            canon = m.get("canonical_competition") or m.get("_canonical_competition") or ""
+            records.append((m_id, title, category, date, poster, popular, sources, comp, country, canon, now))
 
         if not records:
             return
@@ -125,8 +141,8 @@ class DBService:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.executemany("""
-                    INSERT INTO matches (id, title, category, date, poster, popular, sources, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO matches (id, title, category, date, poster, popular, sources, competition, country, canonical_competition, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(id) DO UPDATE SET
                         title = excluded.title,
                         category = excluded.category,
@@ -137,6 +153,18 @@ class DBService:
                         END,
                         popular = excluded.popular,
                         sources = excluded.sources,
+                        competition = CASE
+                            WHEN excluded.competition IS NOT NULL AND excluded.competition != '' THEN excluded.competition
+                            ELSE matches.competition
+                        END,
+                        country = CASE
+                            WHEN excluded.country IS NOT NULL AND excluded.country != '' THEN excluded.country
+                            ELSE matches.country
+                        END,
+                        canonical_competition = CASE
+                            WHEN excluded.canonical_competition IS NOT NULL AND excluded.canonical_competition != '' THEN excluded.canonical_competition
+                            ELSE matches.canonical_competition
+                        END,
                         updated_at = excluded.updated_at
                 """, records)
                 conn.commit()
@@ -329,7 +357,12 @@ class DBService:
         except Exception:
             sources = []
 
-        return {
+        keys = row.keys() if hasattr(row, "keys") else []
+        comp = row["competition"] if "competition" in keys and row["competition"] else None
+        country = row["country"] if "country" in keys and row["country"] else None
+        canon = row["canonical_competition"] if "canonical_competition" in keys and row["canonical_competition"] else None
+
+        d = {
             "id": row["id"],
             "title": row["title"],
             "category": row["category"],
@@ -338,5 +371,15 @@ class DBService:
             "popular": bool(row["popular"]),
             "sources": sources,
         }
+        if comp:
+            d["competition"] = comp
+            d["_competition"] = comp
+        if country:
+            d["country"] = country
+            d["_country"] = country
+        if canon:
+            d["canonical_competition"] = canon
+            d["_canonical_competition"] = canon
+        return d
 
 db_service = DBService()

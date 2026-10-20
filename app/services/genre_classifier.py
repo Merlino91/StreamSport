@@ -432,17 +432,19 @@ class GenreClassifier:
             or "basketball" in eval_text
             or re.search(r"\b(nba|wnba|euroleague|eurocup|lba|nbl|fiba|cba)\b", eval_text)
         ) and not is_football_context:
-            # LIVELLO 1: Tornei Internazionali e Acronimi Globali
+            # --------------------------------------------------------------
+            # LIVELLO 1: Tornei Internazionali, Coppe Europee e Femminile
+            # --------------------------------------------------------------
 
             # 1. WNBA & Basket Femminile
-            if is_women or re.search(r"\b(wnba|liga\s*femenina|tauihi|wlb|women|femminile|femenino)\b", eval_text):
+            if is_women or re.search(r"\b(wnba|liga\s*femenina|tauihi|wlb|women|femminile|femenino|wbbl|wnbl)\b", eval_text):
                 return "basket", "WNBA e Femminile"
 
-            # 2. FIBA, 3x3, Tornei Nazionali
-            if re.search(r"\b(fiba|3x3|world\s*tour|world\s*cup|mondiali|eurobasket|qualif|national\s*team|intercontinental\s*cup)\b", eval_text):
+            # 2. FIBA, 3x3 e Tornei Nazionali
+            if re.search(r"\b(fiba|3x3|world\s*tour|world\s*cup|mondiali|eurobasket|qualif|national\s*team|intercontinental\s*cup|afrobasket|americup|asia\s*cup)\b", eval_text):
                 return "basket", "FIBA e Tornei Nazionali"
 
-            # 3. Eurolega & Eurocup (Coppe Europee)
+            # 3. Eurolega & Eurocup (Coppe Continentali per Club)
             if re.search(r"\b(euroleague|eurocup|eurolega|bcl|basketball\s*champions|fiba\s*europe\s*cup)\b", eval_text):
                 return "basket", "Eurolega ed Eurocup"
 
@@ -450,45 +452,81 @@ class GenreClassifier:
             if re.search(r"\b(ncaa|college\s*basketball|march\s*madness)\b", eval_text):
                 return "basket", "NCAA e College Basket"
 
-            # 5. CBA Cina ed Altri Campionati Esteri Noti (Priorità su squadre omonime)
-            is_cba_or_foreign = (
-                country in ("china", "cina", "cn")
-                or bool(re.search(r"\b(cba|chinese\s*cba|china\s*cba|chinese\s*basketball|acb|endesa|bbl|lnb|gbl|bsl|aba\s*league|nbl|vtb|nbb)\b", eval_text))
-                or bool(re.search(r"\b(ningbo|zhejiang|nanjing|shanghai|beijing|guangdong|liaoning|xinjiang|jilin|shandong|qingdao|jiangsu|guangzhou|tianjin|fujian|shenzhen|sichuan)\b", eval_text))
-            )
-            if is_cba_or_foreign:
+            # --------------------------------------------------------------
+            # LIVELLO 2: Campionati Nazionali (DOPPIO FILTRO: 1° Nazione -> 2° Torneo)
+            # --------------------------------------------------------------
+
+            # Segnali di campionati esteri noti (Country o Sigle competizioni)
+            has_foreign_flag = any(flag in eval_text for flag in ("🇨🇳", "🇪🇸", "🇦🇺", "🇩🇪", "🇫🇷", "🇬🇷", "🇹🇷", "🇧🇷", "🇯🇵", "🇰🇷"))
+            is_foreign_country = country in (
+                "china", "cina", "cn", "spain", "spagna", "es", "australia", "germany", "germania", "de",
+                "france", "francia", "fr", "greece", "grecia", "gr", "turkey", "turchia", "tr", "russia", "ru",
+                "brazil", "brasile", "br", "japan", "giappone", "jp", "korea", "corea", "kr", "philippines", "filippine",
+                "argentina", "ar", "israel", "israele", "il", "poland", "polonia", "pl", "lithuania", "lituania", "lt",
+                "serbia", "rs", "croatia", "croazia", "hr"
+            ) or has_foreign_flag
+            is_foreign_league = bool(re.search(
+                r"\b(cba|chinese\s*basketball|chinese\s*cba|china\s*cba|acb|endesa|primera\s*feb|nbl|australian\s*nbl|bbl|lnb|pro\s*a|betclic|gbl|basket\s*league|bsl|super\s*ligi|aba\s*league|vtb|nbb|pba|kbl|b\s*league|korisliiga|plk|lkl)\b",
+                eval_text
+            ))
+
+            # A) Se ha segnali espliciti di lega/nazione estera, instrada subito a Campionati Esteri
+            if (is_foreign_country and country not in ("usa", "united states", "italia", "italy")) or is_foreign_league:
                 return "basket", "Campionati Esteri ed NBL"
 
-            # 6. NBA (USA Men's Professional League: acronimo NBA o franchigie)
-            NBA_REGEX = (
-                r"\b(nba|trail\s*blazers|timberwolves|76ers|sixers|cavaliers|mavericks|"
-                r"boston\s*celtics|celtics|chicago\s*bulls|houston\s*rockets|la\s*lakers|los\s*angeles\s*lakers|lakers|"
-                r"golden\s*state\s*warriors|golden\s*state|warriors|sacramento\s*kings|la\s*clippers|los\s*angeles\s*clippers|clippers|"
-                r"ny\s*knicks|new\s*york\s*knicks|knicks|okc\s*thunder|oklahoma\s*city\s*thunder|thunder|"
-                r"orlando\s*magic|miami\s*heat|milwaukee\s*bucks|bucks|san\s*antonio\s*spurs|spurs|toronto\s*raptors|raptors|"
-                r"utah\s*jazz|jazz|washington\s*wizards|wizards|brooklyn\s*nets|nets|charlotte\s*hornets|hornets|"
-                r"atlanta\s*hawks|hawks|denver\s*nuggets|nuggets|detroit\s*pistons|pistons|indiana\s*pacers|pacers|"
-                r"memphis\s*grizzlies|grizzlies|phoenix\s*suns|suns|new\s*orleans\s*pelicans|pelicans)\b"
-            )
-            if re.search(NBA_REGEX, eval_text):
-                return "basket", "NBA"
-
-            # LIVELLO 2: Campionati Nazionali (Country / Bandiere / Leghe Nazionali)
-
-            # A) LBA Serie A (Italia)
-            # Riconosce: country Italia, bandiera 🇮🇹, o sigle del basket italiano
-            is_italy_basket = (
+            # B) LBA Serie A (Italia: 1° Nazione -> 2° Torneo)
+            is_italy = (
                 country in ("italy", "italia")
                 or "🇮🇹" in title
-                or bool(re.search(r"\b(lba|serie\s*a\s*basket|lega\s*basket|serie\s*a2|coppa\s*italia\s*basket)\b", eval_text))
+                or bool(re.search(r"\b(italy|italia|italian)\b", eval_text))
             )
-            if is_italy_basket:
+            is_lba_comp = bool(re.search(r"\b(lba|serie\s*a\s*basket|lega\s*basket|serie\s*a2|coppa\s*italia\s*basket|supercoppa\s*basket)\b", eval_text))
+            if is_lba_comp or (is_italy and not is_foreign_league):
                 return "basket", "LBA Serie A"
 
-            # B) Campionati Esteri ed NBL (Tutti gli altri campionati nazionali)
-            # Spagna (ACB, FEB, 🇪🇸), Australia/NZ (NBL, 🇦🇺/🇳🇿), Germania (BBL, 🇩🇪),
-            # Francia (LNB, Pro A, 🇫🇷), Grecia (GBL, 🇬🇷), Turchia (BSL, 🇹🇷),
-            # Balcani (ABA League), Russia (VTB), Brasile (NBB), ecc.
+            # C) NBA (USA: 1° Nazione/Sigla -> 2° Franchigie con prefisso cittadino o moniker univoci)
+            is_usa = country in ("usa", "united states", "stati uniti", "us") or "🇺🇸" in eval_text
+            has_nba_token = bool(re.search(r"\b(nba|nba-preseason|summer\s*league)\b", eval_text))
+
+            # Franchigie NBA con vincolo geografico (città/stato) o moniker univoci NBA (nessuna parola generica isolata come 'rockets' o 'bulls')
+            NBA_FRANCHISE_REGEX = (
+                r"\b("
+                r"boston\s*celtics|celtics|"
+                r"brooklyn\s*nets|ny\s*knicks|new\s*york\s*knicks|knicks|"
+                r"philadelphia\s*76ers|76ers|sixers|"
+                r"toronto\s*raptors|"
+                r"chicago\s*bulls|"
+                r"cleveland\s*cavaliers|cavaliers|cavs|"
+                r"detroit\s*pistons|"
+                r"indiana\s*pacers|"
+                r"milwaukee\s*bucks|"
+                r"atlanta\s*hawks|"
+                r"charlotte\s*hornets|"
+                r"miami\s*heat|"
+                r"orlando\s*magic|"
+                r"washington\s*wizards|"
+                r"denver\s*nuggets|"
+                r"minnesota\s*timberwolves|timberwolves|twolves|"
+                r"oklahoma\s*city\s*thunder|okc\s*thunder|"
+                r"portland\s*trail\s*blazers|trail\s*blazers|blazers|"
+                r"utah\s*jazz|"
+                r"golden\s*state\s*warriors|golden\s*state|"
+                r"la\s*clippers|los\s*angeles\s*clippers|"
+                r"la\s*lakers|los\s*angeles\s*lakers|lakers|"
+                r"phoenix\s*suns|"
+                r"sacramento\s*kings|"
+                r"dallas\s*mavericks|mavericks|mavs|"
+                r"houston\s*rockets|"
+                r"memphis\s*grizzlies|"
+                r"new\s*orleans\s*pelicans|"
+                r"san\s*antonio\s*spurs"
+                r")\b"
+            )
+
+            if has_nba_token or (not is_foreign_country and re.search(NBA_FRANCHISE_REGEX, title_lower)):
+                return "basket", "NBA"
+
+            # D) Fallback per qualsiasi altro campionato nazionale / estero
             return "basket", "Campionati Esteri ed NBL"
 
         # ------------------------------------------------------------------
