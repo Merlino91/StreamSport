@@ -462,7 +462,7 @@ class TennisPosterService:
                 self._last_tsdb_call = time.monotonic()
 
                 try:
-                    tsdb_url = f"https://www.thesportsdb.com/api/v1/json/3/searchplayers.php?p={urllib.parse.quote(search_query)}"
+                    tsdb_url = f"https://www.thesportsdb.com/api/v1/json/123/searchplayers.php?p={urllib.parse.quote(search_query)}"
                     res = await client.get(tsdb_url)
                     if res.status_code == 200:
                         data = res.json()

@@ -24,7 +24,7 @@ from app.services.team_matching import clean_team_name, match_single_team
 
 logger = logging.getLogger("streamsport.thesportsdb")
 
-THESPORTSDB_API_BASE = "https://www.thesportsdb.com/api/v1/json/3"
+THESPORTSDB_API_BASE = "https://www.thesportsdb.com/api/v1/json/123"
 
 THESPORTSDB_SPORT_TO_SILO = {
     "soccer": "football",
