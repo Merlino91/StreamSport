@@ -26,6 +26,7 @@ FS_IT_SPORTS: Dict[int, Tuple[str, str]] = {
 # Flashscore English feeds (Project 2 - Flashscore Global): English team names, TV channels disabled
 FS_EN_SPORTS: Dict[int, Tuple[str, str]] = {
     1: ("Calcio", "football"),
+    2: ("Tennis", "tennis"),
     3: ("Basket", "basketball"),
     4: ("Hockey", "hockey"),
     5: ("Football Americano", "american-football"),
@@ -131,6 +132,26 @@ class DirettaService:
         """Returns True if the last fetch from Diretta.it was successful and returned events."""
         return self._is_healthy and len(self._cached_events) > 0
 
+    @staticmethod
+    def reconstruct_tennis_name(abbrev: str, slug: str) -> str:
+        """Reconstructs 'Jasmine Paolini' from 'Paolini J.' and slug 'paolini-jasmine'."""
+        if not slug or not abbrev:
+            return abbrev.strip()
+        if "/" in abbrev:
+            return abbrev.strip()
+        try:
+            # Strip trailing initials: ' J.', ' J. M.', ' J-L.', etc.
+            last_name = re.sub(r"(?:\s+[A-Za-z][\.\-]?[A-Za-z]?\.?)+$", "", abbrev).strip()
+            slug_tokens = slug.split("-")
+            last_tokens = [re.sub(r"[^a-zA-Z]", "", t).lower() for t in last_name.split() if t]
+            first_tokens = [t.capitalize() for t in slug_tokens if t.lower() not in last_tokens]
+            if first_tokens:
+                fn = " ".join(first_tokens)
+                return f"{fn} {last_name}".strip()
+        except Exception:
+            pass
+        return abbrev.strip()
+
     def parse_flashscore_feed(
         self,
         raw_text: str,
@@ -190,6 +211,12 @@ class DirettaService:
                     # Clean competition name: use league name directly (fallback to country or Live Sports)
                     comp_name = current_league.strip() if current_league else (current_country or "Live Sports")
 
+                    full_home = home.strip()
+                    full_away = away.strip()
+                    if silo_name == "tennis":
+                        full_home = self.reconstruct_tennis_name(home, fields.get("WU") or "")
+                        full_away = self.reconstruct_tennis_name(away, fields.get("WV") or "")
+
                     matches.append({
                         "id": f"diretta-{m_id}",
                         "flashscore_id": m_id,
@@ -200,7 +227,9 @@ class DirettaService:
                         "competition": comp_name,
                         "home": home.strip(),
                         "away": away.strip(),
-                        "title": f"{home.strip()} vs {away.strip()}",
+                        "full_home": full_home,
+                        "full_away": full_away,
+                        "title": f"{full_home} vs {full_away}" if silo_name == "tennis" else f"{home.strip()} vs {away.strip()}",
                         "date": date_ms,
                         "tv_channels": tv_channels,
                     })
@@ -399,14 +428,19 @@ class DirettaService:
             if chosen:
                 reconciled_count += 1
                 m["_diretta_matched"] = True
-                m["_diretta_home"] = chosen["home"]
-                m["_diretta_away"] = chosen["away"]
-                m["_diretta_title"] = f"{chosen['home']} vs {chosen['away']}"
+                d_home = chosen.get("full_home") or chosen["home"]
+                d_away = chosen.get("full_away") or chosen["away"]
+                m["_diretta_home"] = d_home
+                m["_diretta_away"] = d_away
+                m["_diretta_title"] = f"{d_home} vs {d_away}"
 
                 # Non-destructive: preserve raw title if not already tracked
                 if "raw_titles" not in m and m.get("title"):
                     m["raw_titles"] = [m["title"]]
                 m["title"] = m["_diretta_title"]
+                m["teams"] = {"home": {"name": d_home}, "away": {"name": d_away}}
+                if chosen.get("full_home") and chosen.get("full_away"):
+                    m["_full_players"] = (d_home, d_away)
 
                 # Adopt exact kickoff time from Diretta
                 if chosen.get("date"):

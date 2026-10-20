@@ -259,11 +259,17 @@ class TennisPosterService:
 
     @staticmethod
     def format_short_display_name(full_name: str) -> str:
-        """Formats 'Jannik Sinner' into 'J. SINNER' or doubles 'Garland / Hsieh' into 'GARLAND / HSIEH'."""
+        """Formats 'Jannik Sinner' into 'J. SINNER', 'Paolini J.' into 'J. PAOLINI', or doubles 'Garland / Hsieh' into 'GARLAND / HSIEH'."""
         name = full_name.strip()
         if "/" in name:
             sub = [p.strip().split()[-1].upper() for p in name.split("/") if p.strip()]
             return " / ".join(sub[:2])
+        # If already formatted as 'Paolini J.' or 'Sinner J.'
+        m = re.match(r"^(.+?)\s+([A-Za-z])[\.\-]?$", name)
+        if m:
+            last = m.group(1).upper()
+            initial = m.group(2).upper()
+            return f"{initial}. {last}"
         parts = [p for p in name.split() if p]
         if not parts:
             return name.upper()
@@ -422,6 +428,7 @@ class TennisPosterService:
         }
 
         async with httpx.AsyncClient(timeout=8.0, headers=headers) as client:
+            full_name_resolved = None
             # 1. ESPN Search API for Tennis Player Headshot
             try:
                 espn_url = f"https://site.web.api.espn.com/apis/search/v2?query={urllib.parse.quote(search_query)}"
@@ -433,10 +440,11 @@ class TennisPosterService:
                             for item in r.get("contents", []):
                                 sport = str(item.get("sport") or "").lower()
                                 desc = str(item.get("description") or "").lower()
-                                img_url = (item.get("image") or {}).get("default") or ""
+                                is_tennis = (sport == "tennis") or ("tennis" in desc) or ("/tennis/" in (item.get("image") or {}).get("default", "").lower())
+                                if is_tennis and item.get("displayName") and not full_name_resolved:
+                                    full_name_resolved = item.get("displayName")
 
-                                # STRICT SPORT VALIDATION: Must be Tennis!
-                                is_tennis = (sport == "tennis") or ("tennis" in desc) or ("/tennis/" in img_url.lower())
+                                img_url = (item.get("image") or {}).get("default") or ""
                                 if not is_tennis:
                                     continue
 
@@ -453,24 +461,35 @@ class TennisPosterService:
             except Exception as e:
                 logger.debug("ESPN athlete search error for '%s': %s", search_query, e)
 
-            # 2. TheSportsDB Cutout Fallback (Rate Limited to 2.5s)
+            # 2. TheSportsDB Cutout Fallback (Rate Limited to 13.0s = max 4.6 calls/min for free test key 123)
             async with self._tsdb_lock:
                 now = time.monotonic()
                 elapsed = now - self._last_tsdb_call
-                if elapsed < 2.5:
-                    await asyncio.sleep(2.5 - elapsed)
+                if elapsed < 13.0:
+                    await asyncio.sleep(13.0 - elapsed)
                 self._last_tsdb_call = time.monotonic()
 
                 try:
-                    tsdb_url = f"https://www.thesportsdb.com/api/v1/json/123/searchplayers.php?p={urllib.parse.quote(search_query)}"
+                    tsdb_query = full_name_resolved or search_query
+                    tsdb_url = f"https://www.thesportsdb.com/api/v1/json/123/searchplayers.php?p={urllib.parse.quote(tsdb_query)}"
                     res = await client.get(tsdb_url)
-                    if res.status_code == 200:
+                    if res.status_code == 429:
+                        logger.warning("TheSportsDB rate limit raggiunto (429) per '%s'. Proseguimento con silhouette.", tsdb_query)
+                    elif res.status_code == 200:
                         data = res.json()
                         players = data.get("player") or []
                         for p in players:
                             sport = str(p.get("strSport") or "").lower()
                             # STRICT SPORT VALIDATION: Must be Tennis!
                             if sport != "tennis":
+                                continue
+
+                            # STRICT ACTIVE VALIDATION: Exclude retired players
+                            status = str(p.get("strStatus") or "").lower()
+                            if status == "retired":
+                                continue
+                            team = str(p.get("strTeam") or "").lower()
+                            if "_retired" in team:
                                 continue
 
                             # ONLY ACCEPT transparent cutout PNG. Never strThumb or strRender!
