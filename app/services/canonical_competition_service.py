@@ -739,19 +739,25 @@ SIMULCAST_PATTERN = re.compile(
     r"\b(red\s*zone|redzone|golazo(?:\s*show)?|simulcast|diretta\s*gol|direttagol|zona\s*gol|"
     r"zona\s*serie\s*[ab]|zona\s*dazn|zona\s*europa|konferenz|multifoot|multiplex|"
     r"multiliga|multichampions|multipremier|multigoal|goal\s*rush|diretta\s*basket|"
-    r"diretta\s*eurolega|whip\s*around)\b",
+    r"diretta\s*eurolega|diretta\s*tennis|early\s*rounds|tennis\s*channel|whip\s*around)\b",
     re.I,
 )
 
 
 def is_simulcast_event(text: str) -> bool:
     """
-    Detects if an event is a multi-match / whip-around broadcast show
-    (e.g. NFL RedZone, The Golazo Show, UEFA Simulcast, Diretta Gol, Zona Serie A, Bundesliga Konferenz).
+    Detects if an event is a multi-match / whip-around broadcast show or multi-court session
+    (e.g. NFL RedZone, The Golazo Show, UEFA Simulcast, Diretta Gol, Tennis Multi-Court).
     """
     if not text:
         return False
-    return bool(SIMULCAST_PATTERN.search(str(text)))
+    t = str(text)
+    if SIMULCAST_PATTERN.search(t):
+        return True
+    # Tennis multi-tournament concatenation (e.g. 'ATP 250 ... & WTA 500 ...') without vs
+    if re.search(r"\b(atp|wta)\b", t, re.I) and bool(re.search(r"[&+,]", t)) and not bool(re.search(r"\s+(?:vs\.?|v\.?)\s+", t, re.I)):
+        return True
+    return False
 
 
 def is_redzone_event(title: str) -> bool:
@@ -906,7 +912,30 @@ def get_simulcast_info(text: str, hint: Optional[str] = None) -> Optional[Dict[s
             "catalog": "basket",
         }
 
-    # 12. Generic Diretta Gol / Zona Gol / Zona DAZN
+    # 12. Tennis Multi-Court & Simulcast
+    has_vs = bool(re.search(r"\s+(?:vs\.?|v\.?)\s+", text, re.I))
+    is_tennis_sim = not has_vs and (
+        bool(re.search(r"\b(diretta\s*tennis|early\s*rounds|tennis\s*channel)\b", t)) or (
+            bool(re.search(r"\b(atp|wta|tennis)\b", t)) and bool(re.search(r"[&+,]", text))
+        )
+    )
+    if is_tennis_sim:
+        has_atp = "atp" in t
+        has_wta = "wta" in t
+        comp = "ATP & WTA" if (has_atp and has_wta) else ("WTA Tour" if has_wta else "ATP Tour")
+        clean_t = re.sub(r"^[🎾\s\:\-]+", "", text).replace("🎾", "").strip()
+        clean_t = re.sub(r"\s*\(tennis\)$", "", clean_t, flags=re.I).strip()
+        genre = "Challenger e Altri" if (has_atp and has_wta) else ("WTA" if has_wta else "ATP")
+        return {
+            "title": clean_t,
+            "competition": comp,
+            "silo": "tennis",
+            "canonical": "tennis_atp" if has_atp else "tennis_wta",
+            "genre": genre,
+            "catalog": "tennis",
+        }
+
+    # 13. Generic Diretta Gol / Zona Gol / Zona DAZN
     is_dazn = "dazn" in t
     title = "Zona DAZN" if is_dazn else ("Zona Gol" if "zona" in t else "Diretta Gol")
     is_italian = any(k in t for k in ("italia", "serie", "dazn", "sky"))

@@ -319,18 +319,55 @@ class TennisPosterService:
         return tourn, stage
 
     def is_stage_placeholder(self, title: str) -> Optional[Dict[str, str]]:
-        """Returns stage info if title is a tournament bracket stage announcement without player vs player."""
-        has_vs = " vs " in (title or "").lower()
-        t_clean = (title or "").strip().lower()
+        """
+        Returns stage/session info if title is a tournament bracket stage announcement
+        or a multi-court / tournament session coverage feed without player vs player.
+        """
+        t = (title or "").strip()
+        t_low = t.lower()
+        has_vs = bool(re.search(r"\s+(?:vs\.?|v\.?)\s+", t_low))
+        if has_vs:
+            return None
 
-        # Direct broadcast title match for generic circuit feeds
-        if t_clean in ("atp & wta", "atp and wta", "wta & atp", "wta and atp", "atp + wta", "wta + atp", "atp", "wta"):
-            return {"tournament": "ATP & WTA TOURS", "stage": "LIVE BROADCAST"}
-
+        # 1. Bracket stage announcement (e.g. 'Quarter Finals', 'Semifinals', 'Final', 'Day 1')
         m = STAGE_REGEX.search(title or "")
-        if m and not has_vs:
+        if m:
             tourn, stage = self.extract_tournament_and_stage(title, "")
             return {"tournament": tourn, "stage": stage or m.group(1).upper()}
+
+        # 2. Multi-tournament, circuit feeds or broadcast sessions
+        has_circuit = bool(re.search(r"\b(atp|wta|challenger|itf|masters|slam|open|davis|bjk)\b", t_low))
+        has_multicourt_signal = (
+            any(k in t_low for k in ("&", "+", "early rounds", "session", "sessione", "diretta", "multicourt", "multi-court", "broadcast"))
+            or bool(re.match(r"^(?:atp|wta|itf|challenger)\s*(?:\d{3,4})?\s+[\w\s]+$", t, re.I))
+            or t_low in ("atp & wta", "atp and wta", "wta & atp", "wta and atp", "atp + wta", "wta + atp", "atp", "wta")
+        )
+
+        if has_circuit and has_multicourt_signal:
+            has_atp = "atp" in t_low
+            has_wta = "wta" in t_low
+            if has_atp and has_wta:
+                tourn = "ATP & WTA TOURS"
+                stage = "COPERTURA MULTI-CAMPO"
+            elif has_wta:
+                tourn = re.sub(r"\s*\(tennis\)$", "", t, flags=re.I).strip().upper()
+                if "&" in tourn:
+                    tourn = "WTA TOUR"
+                stage = "SESSIONE DIRETTA"
+            elif has_atp:
+                tourn = re.sub(r"\s*\(tennis\)$", "", t, flags=re.I).strip().upper()
+                if "&" in tourn:
+                    tourn = "ATP TOUR"
+                stage = "SESSIONE DIRETTA"
+            else:
+                tourn = "CIRCUITO TENNIS"
+                stage = "LIVE BROADCAST"
+
+            if "early rounds" in t_low:
+                stage = "EARLY ROUNDS"
+
+            return {"tournament": tourn, "stage": stage}
+
         return None
 
     def is_country_match(self, title: str, p1: str, p2: str, genre: str) -> bool:
@@ -525,7 +562,11 @@ class TennisPosterService:
         if "slam" in combined:
             return {"bg_file": "bg_us_open.jpg", "badge_text": "GRAND SLAM"}
 
-        # 2. WTA Tour
+        # 2. Both ATP & WTA combined
+        if "atp" in combined and "wta" in combined:
+            return {"bg_file": "bg_atp.jpg", "badge_text": "ATP & WTA TOURS"}
+
+        # 3. WTA Tour
         if "wta" in combined or "femminile" in combined:
             return {"bg_file": "bg_wta.jpg", "badge_text": "WTA TOUR"}
 
@@ -805,6 +846,9 @@ class TennisPosterService:
             # 2. Check if Country match (Davis Cup / BJK Cup / 'Italy vs China')
             if self.is_country_match(title, p1_name, p2_name, genre):
                 canvas = self._render_country_match(canvas, p1_name, p2_name, tourn_name)
+            elif not p2_name:
+                # Failsafe: if there is no second competitor, never render an asymmetric single-sided match
+                canvas = self._render_stage_card(canvas, "LIVE BROADCAST", tourn_name)
             else:
                 # 3. Standard Player vs Player Match
                 canvas = await self._render_standard_match(canvas, p1_name, p2_name, is_female=is_fem)

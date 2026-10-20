@@ -179,6 +179,31 @@ class TennisPosterTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(male_cutout)
         self.assertIsNotNone(female_cutout)
 
+    def test_multicourt_session_detection_and_poster(self):
+        """Verifies that multi-court / broadcast sessions are properly routed to stage cards without fake players."""
+        multicourt_titles = [
+            "Tennis: ATP 250 Almaty & WTA 500 Ningbo & WTA 250 Osaka",
+            "Tennis: ATP 250 Brussels & ATP 250 Almaty & WTA 500 Ningbo",
+            "WTA 500 Ningbo & WTA 250 Osaka (Tennis)",
+            "WTA 250 Osaka",
+            "ATP 250 Almaty",
+            "Brussels-ATP, Lyon-ATP, Almaty-ATP, Osaka-WTA & Ningbo-WTA Early Rounds",
+        ]
+        for t in multicourt_titles:
+            info = tennis_poster_service.is_stage_placeholder(t)
+            self.assertIsNotNone(info, f"Expected stage/session card for: {t}")
+            self.assertIn("tournament", info)
+            self.assertIn("stage", info)
+
+        real_matches = [
+            "Terence Atmane vs Rinky Hijikata (ATP - Singles)",
+            "Jasmine Paolini vs Anhelina Kalinina",
+            "Simone Bolelli / Andrea Vavassori vs Jean-Julien Rojer / Tyler Winegar",
+        ]
+        for t in real_matches:
+            info = tennis_poster_service.is_stage_placeholder(t)
+            self.assertIsNone(info, f"Expected regular match (None) for: {t}")
+
 
 if __name__ == "__main__":
     unittest.main()

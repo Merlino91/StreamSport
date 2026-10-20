@@ -409,12 +409,10 @@ class DaddyLiveAPI:
                                 if not is_top_world_fivb:
                                     continue
 
-                    # Tennis: filter multi-tournament early rounds summary tickers or table tennis
+                    # Tennis: filter table tennis / ping pong leaks
                     is_tennis = "tennis" in cat_lower or "tennis" in raw_title.lower()
                     if is_tennis:
                         title_low = raw_title.lower()
-                        if "early rounds" in title_low and " vs " not in title_low:
-                            continue
                         if re.search(r"\b(table\s*tennis|ping\s*pong|tt\s*cup|setka\s*cup)\b", title_low):
                             continue
 
