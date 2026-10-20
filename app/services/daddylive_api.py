@@ -77,10 +77,13 @@ class DaddyLiveAPI:
                             self._last_domain_check = now
                             logger.info("DaddyLive active domain confirmed: %s", self._active_domain)
                             return self._active_domain
+            self._active_domain = "dlive.sx"
+            self._last_domain_check = now
             return "dlive.sx"
         except Exception as e:
             logger.debug("DaddyLive domain check fallback: %s", e)
             self._last_domain_check = now
+            self._active_domain = "dlive.sx"
 
         return self._active_domain
 

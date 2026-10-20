@@ -119,12 +119,20 @@ class SportVideoService:
                     info_raw = torrent_bytes[info_start:i]
                     return hashlib.sha1(info_raw).hexdigest()
             elif c == b'i':
-                i = torrent_bytes.find(b'e', i) + 1
+                end_pos = torrent_bytes.find(b'e', i)
+                if end_pos == -1:
+                    break
+                i = end_pos + 1
             elif c.isdigit():
                 colon = torrent_bytes.find(b':', i)
                 if colon == -1:
                     break
-                length = int(torrent_bytes[i:colon])
+                try:
+                    length = int(torrent_bytes[i:colon])
+                except ValueError:
+                    break
+                if length < 0:
+                    break
                 i = colon + 1 + length
             else:
                 i += 1
