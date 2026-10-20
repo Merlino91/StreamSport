@@ -53,20 +53,15 @@ class TestStreamServiceTvVoo(unittest.IsolatedAsyncioTestCase):
         )
 
 
-        self.assertEqual(len(streams), 6)
+        self.assertEqual(len(streams), 4)
 
-        # 1st stream is TvVoo No-Freeze!
+        # 1st and 2nd streams are exclusive TvVoo No-Freeze streams!
         self.assertIn("No-Freeze", streams[0]["name"])
         self.assertIn("live/manifest.m3u8", streams[0]["url"])
+        self.assertIn("No-Freeze", streams[1]["name"])
+        self.assertIn("live/manifest.m3u8", streams[1]["url"])
 
-        # EasyProxy TvVoo streams are also available
-        easyproxy_tvvoo = [s for s in streams if "host=Vavoo" in s["url"]]
-        self.assertEqual(len(easyproxy_tvvoo), 2)
-        self.assertEqual(easyproxy_tvvoo[0]["name"], "🇮🇹 Sky Sport Calcio")
-        self.assertEqual(easyproxy_tvvoo[0]["title"], "🇮🇹 Italia • ⚡ Fonte: TvVoo • Qualità FHD 1080p")
-        self.assertIn("host=Vavoo", easyproxy_tvvoo[0]["url"])
-
-        # DaddyLive streams follow
+        # DaddyLive streams follow cleanly without duplicate TvVoo entries
         dl_streams = [s for s in streams if "DaddyLive" in s.get("title", "")]
         self.assertEqual(len(dl_streams), 2)
         self.assertIn("🇮🇹", dl_streams[0]["name"])

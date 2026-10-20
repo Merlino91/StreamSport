@@ -60,3 +60,22 @@ chunk_102.ts
             self.assertEqual(resp.status_code, 200)
             self.assertEqual(resp.headers.get("content-type"), "application/vnd.apple.mpegurl")
             self.assertIn("https://edge.vavoo.to/seg1.ts", resp.text)
+
+    @patch.object(tvvoo_service, "get_live_manifest")
+    async def test_fastapi_live_manifest_easyproxy_fallback(self, mock_get_manifest):
+        """Verifies seamless HTTP 307 redirect to EasyProxy when native No-Freeze resolution fails."""
+        import base64
+        from app.main import app
+
+        mock_get_manifest.return_value = None  # Simulate upstream resolution failure
+
+        config_str = base64.b64encode("https://myep.example.com|mysecret|Europe/Rome".encode()).decode()
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test", follow_redirects=False) as client:
+            resp = await client.get(f"/{config_str}/live/manifest.m3u8?url=https://vavoo.to/play/calcio_1")
+            self.assertEqual(resp.status_code, 307)
+            location = resp.headers.get("location")
+            self.assertIn("myep.example.com", location)
+            self.assertIn("host=Vavoo", location)
+            self.assertIn("api_password=mysecret", location)
+            self.assertIn("redirect_stream=true", location)

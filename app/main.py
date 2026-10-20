@@ -352,17 +352,19 @@ async def configured_stream(request: Request, config: str, type: str, id: str):
         ep_pass=ep_pass,
         user_tz=tz,
         base_url=base_url,
+        config=config,
     )
     return JSONResponse(content={"streams": streams})
 
 
 @app.get("/live/manifest.m3u8")
 @app.get("/{config}/live/manifest.m3u8")
-async def live_manifest_proxy(request: Request, url: str):
+async def live_manifest_proxy(request: Request, url: str, config: Optional[str] = None):
     """
     Live M3U8 Manifest Proxy Endpoint (Auto token renewal, 0% video bandwidth).
     Serves rewritten playlists pointing directly to upstream CDN chunks,
     proactively renewing tokens in background to prevent stream freezing.
+    Automatically redirects to EasyProxy (HTTP 307) if upstream native resolution fails.
     """
     if not url:
         raise HTTPException(status_code=400, detail="Parametro url mancante")
@@ -371,8 +373,26 @@ async def live_manifest_proxy(request: Request, url: str):
     if client_ip and "," in client_ip:
         client_ip = client_ip.split(",")[0].strip()
 
-    manifest_content = await tvvoo_service.get_live_manifest(url, client_ip)
+    manifest_content = None
+    try:
+        manifest_content = await tvvoo_service.get_live_manifest(url, client_ip)
+    except Exception as exc:
+        logger.warning("[LiveManifest] Upstream exception for %s: %s", url[:80], exc)
+
     if not manifest_content:
+        # Automatic Fallback to EasyProxy if configured
+        ep_url, ep_pass = None, None
+        if config:
+            ep_url, ep_pass, _ = decode_config(config)
+
+        if ep_url:
+            easyproxy_url = stream_service.build_easyproxy_url(ep_url, ep_pass, "Vavoo", url)
+            logger.info(
+                "[LiveManifest] Upstream resolution failed for %s. Seamlessly redirecting player to EasyProxy fallback: %s",
+                url[:60], easyproxy_url[:80]
+            )
+            return RedirectResponse(url=easyproxy_url, status_code=307)
+
         raise HTTPException(status_code=502, detail="Impossibile generare il manifest live dello stream")
 
     return Response(

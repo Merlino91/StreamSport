@@ -386,6 +386,7 @@ class StreamService:
         ep_pass: Optional[str] = None,
         user_tz: Optional[str] = None,
         base_url: Optional[str] = None,
+        config: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """
         Resolves streams for an event ID and formats them for Stremio.
@@ -549,24 +550,24 @@ class StreamService:
             flag_prefix = "" if has_flag else f"{flag} "
             name_label = f"{flag_prefix}{raw_name}" if count == 1 else f"{flag_prefix}{raw_name} (Server {count})"
 
-            # 1. Native No-Freeze stream (auto token renewal, 0% video bandwidth)
+            # Exclusive single No-Freeze stream with internal EasyProxy automatic fallback
             if base_url:
-                no_freeze_url = f"{base_url.rstrip('/')}/live/manifest.m3u8?url={urllib.parse.quote(vavoo_url, safe='')}"
+                manifest_path = f"/{config}/live/manifest.m3u8" if config else "/live/manifest.m3u8"
+                no_freeze_url = f"{base_url.rstrip('/')}{manifest_path}?url={urllib.parse.quote(vavoo_url, safe='')}"
                 tvvoo_streams.append({
                     "name": f"{name_label} ⚡ No-Freeze",
                     "title": f"{flag} {c_name} • ⚡ Fonte: TvVoo (No-Freeze) • Qualità FHD 1080p",
                     "url": no_freeze_url,
                     "behaviorHints": {"isLive": True, "notWebReady": False},
                 })
-
-            # 2. EasyProxy stream (if configured)
-            if ep_url:
+            elif ep_url:
+                # Fallback only if base_url is somehow unavailable
                 stream_url = self.build_easyproxy_url(ep_url, ep_pass, "Vavoo", vavoo_url)
                 tvvoo_streams.append({
-                    "name": name_label,
-                    "title": f"{flag} {c_name} • ⚡ Fonte: TvVoo • Qualità FHD 1080p",
+                    "name": f"{name_label} ⚡ No-Freeze",
+                    "title": f"{flag} {c_name} • ⚡ Fonte: TvVoo (No-Freeze) • Qualità FHD 1080p",
                     "url": stream_url,
-                    "behaviorHints": {"notWebReady": False},
+                    "behaviorHints": {"isLive": True, "notWebReady": False},
                 })
 
         # Keep Italian TvVoo streams at index 0, followed by international TvVoo streams
