@@ -48,6 +48,7 @@ async def lifespan(app: FastAPI):
     catalog_service.start_background_sync()
     yield
     catalog_service.stop_background_sync()
+    await tvvoo_service.manifest_manager.close()
     await doh_client.close()
 
 # Directories

@@ -40,6 +40,8 @@ class YouTubeService:
         }
         # In-memory cache for resolved stream manifests (video_id -> (timestamp, content, redirect))
         self._manifest_cache: Dict[str, Tuple[float, Optional[str], Optional[str]]] = {}
+        # Concurrency semaphore to prevent thread pool exhaustion from parallel yt-dlp executions
+        self._semaphore: asyncio.Semaphore = asyncio.Semaphore(4)
 
     def extract_teams(self, title: str) -> List[str]:
         """Extracts individual team names from match title."""
@@ -367,7 +369,8 @@ class YouTubeService:
         if cached and (now - cached[0] < 3600):
             return cached[1], cached[2]
 
-        content, redirect = await asyncio.to_thread(self._extract_master_m3u8_sync, video_id)
+        async with self._semaphore:
+            content, redirect = await asyncio.to_thread(self._extract_master_m3u8_sync, video_id)
         if content or redirect:
             self._manifest_cache[video_id] = (now, content, redirect)
 

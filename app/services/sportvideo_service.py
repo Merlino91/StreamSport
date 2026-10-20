@@ -44,6 +44,8 @@ PUBLIC_TRACKERS = [
 class SportVideoService:
     """Scrapes clean full match replays from sport-video.org.ua with strict filtering."""
 
+    MAX_INFOHASH_CACHE = 500
+
     def __init__(self):
         self._category_cache: Dict[str, Tuple[float, List[Dict[str, str]]]] = {}
         self._infohash_cache: Dict[str, str] = {}
@@ -201,6 +203,8 @@ class SportVideoService:
 
                 info_hash = self.extract_info_hash(t_resp.content)
                 if info_hash:
+                    if len(self._infohash_cache) >= self.MAX_INFOHASH_CACHE:
+                        self._infohash_cache.pop(next(iter(self._infohash_cache)), None)
                     self._infohash_cache[match_page_url] = info_hash
                     return info_hash
         except Exception as e:

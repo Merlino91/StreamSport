@@ -7,15 +7,14 @@ import sqlite3
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
-from app.config import ENABLE_REPLAYS
+from app.config import ENABLE_REPLAYS, PROJECT_DIR
 
 import os
 import tempfile
 
 logger = logging.getLogger("streamsport.db")
 
-BASE_DIR = Path(__file__).resolve().parent.parent
-DEFAULT_DATA_DIR = BASE_DIR.parent / "data"
+DEFAULT_DATA_DIR = PROJECT_DIR / "data"
 DATA_DIR = Path(os.getenv("STREAMSPORT_DATA_DIR", os.getenv("DATA_DIR", str(DEFAULT_DATA_DIR))))
 DB_PATH = DATA_DIR / "events.db"
 

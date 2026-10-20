@@ -8,6 +8,7 @@ services:
     environment:
       - STREAMSPORT_HOST=0.0.0.0
       - STREAMSPORT_PORT=7002
+      - STREAMSPORT_DATA_DIR=/app/data
       - STREAMED_API_HOST=streamed.pk
       - STREAMED_CACHE_TTL=60
       # Imposta il tuo dominio pubblico (es. Cloudflare) per blindare gli header e i manifest:

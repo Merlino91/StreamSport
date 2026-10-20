@@ -18,6 +18,8 @@ class DailymotionService:
         self._api_base = "https://api.dailymotion.com"
         # In-memory cache for resolved stream URLs (video_id -> (timestamp, stream_url))
         self._manifest_cache: Dict[str, Tuple[float, str]] = {}
+        # Concurrency semaphore to prevent thread pool exhaustion from parallel yt-dlp executions
+        self._semaphore: asyncio.Semaphore = asyncio.Semaphore(4)
 
     def clean_search_query(self, title: str) -> str:
         """Cleans match title into effective search terms for highlights."""
@@ -90,7 +92,8 @@ class DailymotionService:
         if cached and (now - cached[0] < 3600):
             return cached[1]
 
-        stream_url = await asyncio.to_thread(self._extract_dm_stream_sync, video_id)
+        async with self._semaphore:
+            stream_url = await asyncio.to_thread(self._extract_dm_stream_sync, video_id)
         if stream_url:
             self._manifest_cache[video_id] = (now, stream_url)
 

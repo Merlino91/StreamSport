@@ -8,6 +8,9 @@ class TestLiveManifestManager(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.manager = LiveManifestManager(tvvoo_service)
 
+    async def asyncTearDown(self):
+        await self.manager.close()
+
     def test_rewrite_manifest(self):
         raw_m3u8 = """#EXTM3U
 #EXT-X-VERSION:3

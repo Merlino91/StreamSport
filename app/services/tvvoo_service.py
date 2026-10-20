@@ -58,6 +58,20 @@ class LiveManifestManager:
         self._in_flight: Dict[str, asyncio.Task] = {}
         self._lock = asyncio.Lock()
         self._last_cleanup: float = 0.0
+        # Persistent pooled client for live HLS upstream polling to prevent socket TIME_WAIT exhaustion
+        self._client = httpx.AsyncClient(
+            timeout=httpx.Timeout(4.0, connect=2.0),
+            limits=httpx.Limits(max_keepalive_connections=20, max_connections=50, keepalive_expiry=30.0),
+            headers={
+                "User-Agent": "VAVOO/2.6",
+                "Accept": "*/*",
+            }
+        )
+
+    async def close(self):
+        """Closes the underlying HTTP client."""
+        if hasattr(self, "_client") and self._client and not self._client.is_closed:
+            await self._client.aclose()
 
     def _get_key(self, play_url: str, client_ip: Optional[str]) -> str:
         valid_ip = sanitize_ip(client_ip)
@@ -143,17 +157,12 @@ class LiveManifestManager:
         return rewritten
 
     async def _fetch_upstream(self, stream_url: str) -> str:
-        headers = {
-            "User-Agent": "VAVOO/2.6",
-            "Accept": "*/*",
-        }
-        async with httpx.AsyncClient(timeout=4.0) as client:
-            res = await client.get(stream_url, headers=headers)
-            if res.status_code in (401, 403):
-                raise RuntimeError(f"Upstream auth error: {res.status_code}")
-            if res.status_code != 200:
-                raise RuntimeError(f"Upstream error: {res.status_code}")
-            return res.text
+        res = await self._client.get(stream_url)
+        if res.status_code in (401, 403):
+            raise RuntimeError(f"Upstream auth error: {res.status_code}")
+        if res.status_code != 200:
+            raise RuntimeError(f"Upstream error: {res.status_code}")
+        return res.text
 
     async def _refresh_session(self, current: Optional[LiveStreamSession], play_url: str, client_ip: Optional[str]) -> Optional[LiveStreamSession]:
         resolved = await self.service.resolve_clean_stream_url(play_url, client_ip)
