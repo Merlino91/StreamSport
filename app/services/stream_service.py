@@ -592,7 +592,7 @@ class StreamService:
                     ace_url = f"acestream://{ace_id}"
                     quality_label = s.get("quality", "1080p")
                     acestream_streams.append({
-                        "name": f"⚡ [AceStream] {ch_name} [{quality_label}]",
+                        "name": f"{flag_prefix}⚡ [AceStream] {ch_name} [{quality_label}]",
                         "title": f"🌍 P2P BitTorrent Live • 📡 Fonte: Mandrakodi (AceStream Media)\n⚡ Reindirizza all'app AceStream Player / Media",
                         "externalUrl": ace_url,
                         "url": ace_url,
@@ -623,6 +623,14 @@ class StreamService:
                         "url": stream_url,
                         "behaviorHints": {"isLive": True, "notWebReady": False},
                     })
+
+        # Sort Mandrakodi and AceStream streams: Italian channels first
+        mandrakodi_streams.sort(
+            key=lambda s: 0 if "🇮🇹" in s.get("name", "") or "italia" in s.get("title", "").lower() else 1
+        )
+        acestream_streams.sort(
+            key=lambda s: 0 if "🇮🇹" in s.get("name", "") else 1
+        )
 
         # 1. Process TvVoo (Vavoo) streams with top priority
         tvvoo_streams: List[Dict[str, Any]] = []
@@ -714,6 +722,10 @@ class StreamService:
                     "behaviorHints": {"notWebReady": False},
                 })
 
+            # Sort DaddyLive streams: Italian channels first, then cap to maximum 6 streams
+            dlhd_streams.sort(key=lambda s: 0 if "🇮🇹" in s.get("name", "") else 1)
+            dlhd_streams = dlhd_streams[:6]
+
         # 3. Process FCTV33 streams with TencentEdgeOne CDN format
         fctv33_streams: List[Dict[str, Any]] = []
         if ep_url:
@@ -750,6 +762,9 @@ class StreamService:
                     "url": stream_url,
                     "behaviorHints": {"notWebReady": False},
                 })
+
+            # Sort FCTV33 streams: Italian channels first
+            fctv33_streams.sort(key=lambda s: 0 if "🇮🇹" in s.get("name", "") else 1)
 
         # 4. Process Streamed upstream sources (hotel, delta, etc.)
         streamed_streams: List[Dict[str, Any]] = []
@@ -802,12 +817,29 @@ class StreamService:
                             })
                             stream_index += 1
 
-        # Sort other streams: Italian channels first
-        secondary_streams = dlhd_streams + fctv33_streams + streamed_streams
-        secondary_streams.sort(key=lambda s: 0 if "🇮🇹" in s.get("name", "") else 1)
+                # Sort Streamed streams: Italian channels first, then HD
+                streamed_streams.sort(
+                    key=lambda s: (
+                        0 if "🇮🇹" in s.get("name", "") or "italiano" in s.get("title", "").lower() else 1,
+                        0 if "[HD]" in s.get("name", "") else 1,
+                    )
+                )
 
-        # Assemble final stream list: Mandrakodi OTT & TvVoo first, then others, then AceStream
-        final_streams = mandrakodi_streams + tvvoo_streams + secondary_streams + acestream_streams
+        # Assemble final stream list in strict provider priority:
+        # 1. TvVoo (No-Freeze)
+        # 2. Mandrakodi (OTT Nativo ClearKey / Direct CDN / Socceron)
+        # 3. DaddyLive (Capped at 6)
+        # 4. FCTV33
+        # 5. Streamed
+        # 6. AceStream (P2P external player)
+        final_streams = (
+            tvvoo_streams
+            + mandrakodi_streams
+            + dlhd_streams
+            + fctv33_streams
+            + streamed_streams
+            + acestream_streams
+        )
 
         if not final_streams:
             if not ep_url and any(s.get("source") in ("dlhd", "fctv33", "streamed", "amstaff") for s in sources):

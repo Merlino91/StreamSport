@@ -132,8 +132,8 @@ class TestMandrakodiStreams(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("proxy", st["url"])
         self.assertNotIn("ep.bluccoj.com", st["url"])
 
-    async def test_stream_ordering_direct_amstaff_tvvoo_acestream(self):
-        """Verifies that Direct/Amstaff streams appear first, followed by TvVoo, and AceStreams at the end."""
+    async def test_stream_ordering_tvvoo_mandrakodi_acestream(self):
+        """Verifies that TvVoo streams appear first, followed by Mandrakodi, and AceStreams at the end."""
         now_ts = int(time.time() * 1000)
         multi_stream_match = {
             "id": "epg:test:multi",
@@ -187,20 +187,57 @@ class TestMandrakodiStreams(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(len(streams), 4)
 
-        # 1. Direct stream and Amstaff stream must be in top mandrakodi group
-        self.assertIn("Canale 5 [Diretto]", streams[0]["name"])
-        self.assertEqual(streams[0]["url"], "https://stream.cdn/live.m3u8")
+        # 1. TvVoo stream comes first
+        self.assertIn("🇮🇹 Canale 5 HD", streams[0]["name"])
 
-        self.assertIn("20 Mediaset [1080p 50fps]", streams[1]["name"])
-        self.assertIn("/proxy/mpd/manifest.m3u8", streams[1]["url"])
+        # 2. Mandrakodi streams (Direct & Amstaff) come second
+        self.assertIn("Canale 5 [Diretto]", streams[1]["name"])
+        self.assertEqual(streams[1]["url"], "https://stream.cdn/live.m3u8")
 
-        # 2. TvVoo stream comes next
-        self.assertIn("🇮🇹 Canale 5 HD", streams[2]["name"])
+        self.assertIn("20 Mediaset [1080p 50fps]", streams[2]["name"])
+        self.assertIn("/proxy/mpd/manifest.m3u8", streams[2]["url"])
 
         # 3. AceStream comes at the very end
         self.assertIn("[AceStream] Zona Dazn", streams[3]["name"])
         self.assertEqual(streams[3]["externalUrl"], "acestream://16519c3e10c7f1dddea05eb2dae6182cbdd34e4f")
         self.assertTrue(streams[3]["behaviorHints"]["notWebReady"])
+
+    async def test_daddylive_streams_capped_at_six_and_italian_first(self):
+        """Verifies that DaddyLive exposes at most 6 streams, with Italian channels prioritised at the top."""
+        now_ts = int(time.time() * 1000)
+        # Create 10 DaddyLive sources: 8 foreign and 2 Italian
+        dl_sources = [
+            {"source": "dlhd", "id": f"src_{i}", "name": f"Foreign Channel {i} UK"}
+            for i in range(1, 9)
+        ]
+        # Insert 2 Italian sources at the end
+        dl_sources.append({"source": "dlhd", "id": "src_it1", "name": "Sky Sport Calcio IT"})
+        dl_sources.append({"source": "dlhd", "id": "src_it2", "name": "DAZN 1 Italia"})
+
+        fake_match = {
+            "id": "dlhd:test:capped",
+            "title": "Arsenal vs Chelsea",
+            "category": "football",
+            "_silo": "football",
+            "date": now_ts,
+            "sources": dl_sources,
+            "_provider": "dlhd",
+        }
+
+        from app.services.catalog_service import catalog_service
+        catalog_service._cached_matches.append(fake_match)
+
+        streams = await stream_service.get_streams_for_event(
+            "dlhd:test:capped",
+            ep_url="https://ep.bluccoj.com",
+            ep_pass="Z3r0EP"
+        )
+
+        # Must be capped at exactly 6 streams
+        self.assertEqual(len(streams), 6)
+        # Italian streams must be at the very top (indices 0 and 1)
+        self.assertIn("🇮🇹", streams[0]["name"])
+        self.assertIn("🇮🇹", streams[1]["name"])
 
     async def test_fctv33_dict_teams_resolution_avoids_500(self):
         """Verifies that FCTV33 matches with dict teams structure do not crash with 500 in JIT resolution."""
