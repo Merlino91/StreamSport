@@ -501,6 +501,23 @@ class StreamService:
         final_streams: List[Dict[str, Any]] = []
         sources = match.get("sources", [])
 
+        # JIT Dynamic Mandrakodi Resolution:
+        # If match does not have Mandrakodi OTT sources attached, trigger a real-time lookup
+        has_mandrakodi = any(
+            isinstance(s, dict) and (s.get("provider") == "mandrakodi" or s.get("source") in ("amstaff", "acestream", "socceron"))
+            for s in sources
+        )
+        if not has_mandrakodi:
+            from app.services.mandrakodi_service import mandrakodi_service
+            jit_sources = await mandrakodi_service.resolve_live_match_streams(match)
+            if jit_sources:
+                existing_ids = {str(s.get("id")) for s in sources if isinstance(s, dict)}
+                for s in jit_sources:
+                    if isinstance(s, dict) and str(s.get("id")) not in existing_ids:
+                        sources.append(s)
+                        existing_ids.add(str(s.get("id")))
+                match["sources"] = sources
+
         # 0. Process Mandrakodi (Amstaff ClearKey 1080p 50fps, Direct CDN, AceStream Media)
         mandrakodi_streams: List[Dict[str, Any]] = []
         acestream_streams: List[Dict[str, Any]] = []

@@ -489,6 +489,56 @@ class TestItalianEPGService(unittest.IsolatedAsyncioTestCase):
         }
         self.assertEqual(catalog_service.get_live_window_minutes(session_match), 360)
 
+    @patch("app.services.italian_epg_service.tvvoo_service")
+    @patch("app.services.italian_epg_service.mandrakodi_service")
+    async def test_sky_channel_resolved_via_mandrakodi_when_tvvoo_missing(
+        self, mock_mandra, mock_tvvoo
+    ):
+        """Verifies that if TvVoo has 0 streams for a Sky channel, Mandrakodi streams are used and event is not ghosted."""
+        # TvVoo returns empty (e.g. offline or missing)
+        mock_tvvoo.get_channel_streams.return_value = []
+        mock_tvvoo.get_canonical_from_sky_id.return_value = "sky sport 251"
+
+        # Mandrakodi has this 24/7 channel registered
+        mock_mandra.get_channel_streams.return_value = [
+            {
+                "source": "amstaff",
+                "provider": "mandrakodi",
+                "id": "mandra_sky_251",
+                "name": "Sky Sport 251",
+                "sky_channel_id": "skysport251",
+                "stream_data": {"mpd_url": "https://test.mpd", "kid": "k1", "key": "k2"}
+            }
+        ]
+
+        service = ItalianEPGService()
+        mock_client = AsyncMock()
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "events": [
+                {
+                    "eventTitle": "Atalanta - Lazio (Diretta)",
+                    "eventSynopsis": "Serie A Enilive 2026",
+                    "starttime": "2026-10-21T18:45:00Z",
+                    "endtime": "2026-10-21T20:45:00Z",
+                    "content": {
+                        "genre": {"id": 6, "name": "Sport"},
+                        "subgenre": {"id": 38, "name": "Calcio"},
+                    },
+                }
+            ]
+        }
+        mock_client.get.return_value = mock_resp
+
+        parsed = await service._fetch_sky_events(mock_client, "2026-10-21T00:00:00Z", "2026-10-21T23:59:59Z")
+        # Event is kept and NOT ghosted!
+        self.assertGreater(len(parsed), 0)
+        matched_ev = [e for e in parsed if "Atalanta" in e["title"]][0]
+        self.assertEqual(len(matched_ev["sources"]), 1)
+        self.assertEqual(matched_ev["sources"][0]["provider"], "mandrakodi")
+        self.assertEqual(matched_ev["sources"][0]["id"], "mandra_sky_251")
+
 
 if __name__ == "__main__":
     unittest.main()

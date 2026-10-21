@@ -84,6 +84,44 @@ class CatalogService:
         self._sync_lock: asyncio.Lock = asyncio.Lock()
         self._background_task: Optional[asyncio.Task] = None
         self._is_running: bool = False
+        self._sync_reset_event: asyncio.Event = asyncio.Event()
+
+    def get_current_sync_interval(self) -> int:
+        """
+        Dynamic sync interval based on Rome time:
+        - 12:00 to 22:59 (12 <= hour <= 22): 900 seconds (15 minutes) for peak sports coverage.
+        - 23:00 to 11:59: 3600 seconds (1 hour).
+        """
+        tz = get_safe_timezone("Europe/Rome")
+        now_rome = datetime.datetime.now(tz)
+        if 12 <= now_rome.hour <= 22:
+            return 900
+        return 3600
+
+    def reset_sync_timer(self) -> None:
+        """Resets the background catalog sync timer to postpone the next scheduled sync by a full interval."""
+        self._last_sync_time = time.time()
+        if hasattr(self, "_sync_reset_event"):
+            self._sync_reset_event.set()
+
+    def reconcile_mandrakodi_live_matches(self, mandrakodi_matches: List[Dict[str, Any]]) -> None:
+        """
+        Merges newly discovered Mandrakodi live/OTT matches into the catalog in memory
+        and resets the background sync timer.
+        """
+        if not mandrakodi_matches:
+            return
+        if self._cached_matches:
+            self._cached_matches = self.merge_and_deduplicate_by_silos(self._cached_matches, mandrakodi_matches)
+        else:
+            self._cached_matches = list(mandrakodi_matches)
+
+        for m in self._cached_matches:
+            mid = m.get("id")
+            if mid:
+                self._matches_by_id[str(mid)] = m
+
+        self.reset_sync_timer()
 
     def format_event_date(self, timestamp_ms: int, user_tz: Optional[str] = None) -> str:
         """Converts timestamp in ms to localized Italian date string (e.g. '21 Sep 2026, 20:45')."""
@@ -393,8 +431,12 @@ class CatalogService:
             return None
         teams = match.get("teams")
         if isinstance(teams, dict) and teams.get("home") and teams.get("away"):
-            h = re.sub(r"[^a-z0-9]+", " ", (teams.get("home", {}).get("name") or "").lower()).strip()
-            a = re.sub(r"[^a-z0-9]+", " ", (teams.get("away", {}).get("name") or "").lower()).strip()
+            home_val = teams.get("home")
+            home_str = home_val.get("name") if isinstance(home_val, dict) else str(home_val)
+            away_val = teams.get("away")
+            away_str = away_val.get("name") if isinstance(away_val, dict) else str(away_val)
+            h = re.sub(r"[^a-z0-9]+", " ", (home_str or "").lower()).strip()
+            a = re.sub(r"[^a-z0-9]+", " ", (away_str or "").lower()).strip()
             EXCLUDED_CLUB_TERMS = (
                 "fc", "ac", "cf", "sc", "as", "the", "bc",
                 "pallacanestro", "pallacan", "baloncesto", "basquet", "basket", "calcio", "volley", "pallavolo", "club"
@@ -1172,7 +1214,8 @@ class CatalogService:
         """
         async with self._sync_lock:
             now = time.time()
-            if not force and self._cached_matches and (now - self._last_sync_time < CATALOG_SYNC_INTERVAL):
+            interval = self.get_current_sync_interval()
+            if not force and self._cached_matches and (now - self._last_sync_time < interval):
                 return
 
             logger.info("Starting background sports schedule sync...")
@@ -1219,9 +1262,12 @@ class CatalogService:
                     if m_id and m_id in db_posters and not m.get("poster"):
                         m["poster"] = db_posters[m_id]
 
-                # Exclude fresh IDs from all_db_matches to eliminate stale duplicate records across different silos
+                # Exclude fresh IDs and stale mandrakodi channel entries from all_db_matches
                 fresh_ids = {m.get("id") for m in combined_fresh if m.get("id")}
-                all_db_matches = [m for m in all_db_matches if m.get("id") not in fresh_ids]
+                all_db_matches = [
+                    m for m in all_db_matches
+                    if m.get("id") not in fresh_ids and not str(m.get("id", "")).startswith("mandrakodi:")
+                ]
                 all_matches = self.merge_and_deduplicate_by_silos(combined_fresh, all_db_matches) if all_db_matches else combined_fresh
 
                 # 3. FASE 1: CONVALIDATORI UFFICIALI & ARRICCHIMENTO INFORMATIVE (Diretta.it & OCB)
@@ -1243,13 +1289,19 @@ class CatalogService:
                 if ocb_sessions:
                     ocblacktop_service.reconcile_matches(all_matches, ocb_sessions)
 
-                # 4. FASE 2: ARRICCHIMENTO FLUSSI TV (TvVoo & EPG Sky/Tivùsat)
+                # 4. FASE 2: ARRICCHIMENTO FLUSSI TV (TvVoo, Mandrakodi & EPG Sky/Tivùsat)
                 # Enrich any match (from DaddyLive, Streamed, etc.) with TvVoo FHD streams if matching recognized broadcasters
                 tvvoo_service.enrich_matches_with_tvvoo(all_matches)
+
+                # Enrich any match with Mandrakodi linear channels (ClearKey 1080p 50fps and AceStream)
+                mandrakodi_service.enrich_matches_with_mandrakodi(all_matches)
 
                 # Enrich confirmed real matches with official Italian Sky & Tivùsat TvVoo channels from Italian EPG
                 # Now benefits from certified kickoff times and _diretta_tv_channels!
                 await italian_epg_service.enrich_matches_with_epg_channels(all_matches)
+
+                # Enrich again with Mandrakodi in case EPG added new Italian Sky/Tivùsat channels
+                mandrakodi_service.enrich_matches_with_mandrakodi(all_matches)
 
                 # Purge palpably conflicting Italian TV channels (aligned with asymmetric window)
                 italian_epg_service.filter_conflicting_italian_channels(all_matches)
@@ -1406,7 +1458,7 @@ class CatalogService:
         self._background_task.add_done_callback(self._on_background_task_done)
 
     async def _background_loop(self):
-        """Periodic background loop running every CATALOG_SYNC_INTERVAL seconds."""
+        """Periodic background loop with dynamic interval (15m peak 12-22, 60m off-peak) and reset support."""
         while self._is_running:
             try:
                 await self.sync_matches()
@@ -1415,10 +1467,20 @@ class CatalogService:
             except Exception as e:
                 logger.warning("Unexpected error in background sync loop: %s", e)
 
-            try:
-                await asyncio.sleep(CATALOG_SYNC_INTERVAL)
-            except asyncio.CancelledError:
-                break
+            # Wait dynamically, waking up if reset_sync_timer is called
+            while self._is_running:
+                interval = self.get_current_sync_interval()
+                elapsed = time.time() - self._last_sync_time
+                remaining = interval - elapsed
+                if remaining <= 0:
+                    break
+                try:
+                    await asyncio.wait_for(self._sync_reset_event.wait(), timeout=min(remaining, 15.0))
+                    self._sync_reset_event.clear()
+                except asyncio.TimeoutError:
+                    pass
+                except asyncio.CancelledError:
+                    return
 
     async def ensure_synced(self):
         """Ensures that at least one sync has completed before serving requests."""

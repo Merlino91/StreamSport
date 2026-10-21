@@ -7,9 +7,11 @@ class TestStreamServiceTvVoo(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.service = StreamService()
 
+    @patch("app.services.mandrakodi_service.mandrakodi_service.resolve_live_match_streams", new_callable=AsyncMock)
     @patch("app.services.stream_service.daddylive_api")
-    async def test_tvvoo_stream_priority_and_format(self, mock_dl):
+    async def test_tvvoo_stream_priority_and_format(self, mock_dl, mock_mandra):
         mock_dl.get_active_domain = AsyncMock(return_value="dlive.sx")
+        mock_mandra.return_value = []
 
         match = {
             "id": "test_match_1",

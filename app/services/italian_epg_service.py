@@ -12,6 +12,7 @@ from app.config import (
     ITALIAN_EPG_CACHE_INTERVAL,
 )
 from app.services.tvvoo_service import tvvoo_service
+from app.services.mandrakodi_service import mandrakodi_service
 from app.services.canonical_competition_service import (
     is_simulcast_event,
     get_simulcast_info,
@@ -469,10 +470,12 @@ class ItalianEPGService:
                 else:
                     cat, silo = self._resolve_category_and_silo(meta, title, synopsis, genre_name, subgenre_name)
 
-                # TvVoo Stream Target Resolution
+                # Stream Target Resolution: Check both TvVoo and Mandrakodi in-memory registries
                 tvvoo_streams = tvvoo_service.get_channel_streams(sky_id=ch_id, country="Italy")
-                if not tvvoo_streams:
-                    # GHOST EVENT FILTER: No playable source
+                canonical = tvvoo_service.get_canonical_from_sky_id(ch_id)
+                mandra_streams = mandrakodi_service.get_channel_streams(canonical) if canonical else []
+                if not tvvoo_streams and not mandra_streams:
+                    # GHOST EVENT FILTER: No playable source on either TvVoo or Mandrakodi
                     continue
 
                 sources = []
@@ -489,6 +492,20 @@ class ItalianEPGService:
                             "tag": st.get("tag", "c"),
                             "country": "Italy",
                         })
+
+                existing_stream_ids = {str(s.get("id")) for s in sources}
+                existing_sky_ids = {str(s.get("sky_channel_id")) for s in sources if s.get("sky_channel_id")}
+
+                for st in mandra_streams:
+                    st_id = str(st.get("id") or "")
+                    sky_ch = str(st.get("sky_channel_id") or "")
+                    if (st_id and st_id in existing_stream_ids) or (sky_ch and sky_ch in existing_sky_ids):
+                        continue
+                    sources.append(dict(st))
+                    if st_id:
+                        existing_stream_ids.add(st_id)
+                    if sky_ch:
+                        existing_sky_ids.add(sky_ch)
 
                 slug_title = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")
                 match_id = f"sky_{ch_id}_{slug_title}_{int(date_ms / 1000)}"
@@ -605,10 +622,12 @@ class ItalianEPGService:
                         subgenre_name=" ".join(cat_names),
                     )
 
-                # TvVoo Stream Target Resolution
+                # Stream Target Resolution: Check both TvVoo and Mandrakodi in-memory registries
                 tvvoo_streams = tvvoo_service.get_channel_streams(tivusat_id=ch_id, country="Italy")
-                if not tvvoo_streams:
-                    # GHOST EVENT FILTER
+                canonical = tvvoo_service.get_canonical_from_tivusat_id(ch_id)
+                mandra_streams = mandrakodi_service.get_channel_streams(canonical) if canonical else []
+                if not tvvoo_streams and not mandra_streams:
+                    # GHOST EVENT FILTER: No playable source on either TvVoo or Mandrakodi
                     continue
 
                 sources = []
@@ -625,6 +644,20 @@ class ItalianEPGService:
                             "tag": st.get("tag", "c"),
                             "country": "Italy",
                         })
+
+                existing_stream_ids = {str(s.get("id")) for s in sources}
+                existing_sky_ids = {str(s.get("sky_channel_id")) for s in sources if s.get("sky_channel_id")}
+
+                for st in mandra_streams:
+                    st_id = str(st.get("id") or "")
+                    sky_ch = str(st.get("sky_channel_id") or "")
+                    if (st_id and st_id in existing_stream_ids) or (sky_ch and sky_ch in existing_sky_ids):
+                        continue
+                    sources.append(dict(st))
+                    if st_id:
+                        existing_stream_ids.add(st_id)
+                    if sky_ch:
+                        existing_sky_ids.add(sky_ch)
 
                 slug_title = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")
                 match_id = f"tivusat_{ch_id}_{slug_title}_{int(date_ms / 1000)}"
