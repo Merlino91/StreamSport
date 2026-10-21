@@ -1094,8 +1094,15 @@ class CatalogService:
         valid_merged_ids = [mid for mid in merged_away_ids if mid]
         if valid_merged_ids:
             try:
-                db_service.delete_matches_by_ids(valid_merged_ids)
-                logger.info("Deduplicatore Post-Convalida: epurati dal database %d ID duplicati assorbiti.", len(valid_merged_ids))
+                loop = asyncio.get_running_loop()
+                loop.create_task(db_service.delete_matches_by_ids_async(valid_merged_ids))
+                logger.info("Deduplicatore Post-Convalida: schedulata epurazione asincrona di %d ID duplicati assorbiti dal db.", len(valid_merged_ids))
+            except RuntimeError:
+                try:
+                    db_service.delete_matches_by_ids(valid_merged_ids)
+                    logger.info("Deduplicatore Post-Convalida: epurati dal database %d ID duplicati assorbiti.", len(valid_merged_ids))
+                except Exception as ex:
+                    logger.debug("Errore rimozione sync ID duplicati fusi dal db: %s", ex)
             except Exception as e:
                 logger.debug("Errore rimozione ID duplicati fusi dal db: %s", e)
 

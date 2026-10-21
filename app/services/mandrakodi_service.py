@@ -128,30 +128,65 @@ class MandrakodiService:
         self._channels_lock: asyncio.Lock = asyncio.Lock()
         # Cache for dynamically resolved Sky Sport channels: {channel_id: (resolved_dict, expiry_ts)}
         self._sky_channel_cache: Dict[str, Tuple[Dict[str, Any], float]] = {}
+        # Persistent HTTP client pool for keep-alive connection reuse
+        self._client: Optional[httpx.AsyncClient] = None
+        self._client_loop: Optional[asyncio.AbstractEventLoop] = None
+        self._client_lock: asyncio.Lock = asyncio.Lock()
+
+    async def _get_client(self) -> httpx.AsyncClient:
+        """Returns or lazily initializes the shared HTTP client with connection pooling."""
+        try:
+            cur_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            cur_loop = None
+
+        if self._client is None or self._client.is_closed or self._client_loop != cur_loop:
+            if self._client_loop != cur_loop:
+                self._client_lock = asyncio.Lock()
+            async with self._client_lock:
+                if self._client is None or self._client.is_closed or self._client_loop != cur_loop:
+                    self._client = httpx.AsyncClient(
+                        timeout=httpx.Timeout(12.0, connect=6.0),
+                        verify=False,
+                        follow_redirects=True,
+                        limits=httpx.Limits(max_keepalive_connections=10, max_connections=20, keepalive_expiry=60.0),
+                    )
+                    self._client_loop = cur_loop
+        return self._client
+
+    async def close(self) -> None:
+        """Closes the shared HTTP client pool gracefully on application shutdown."""
+        client = self._client
+        c_loop = self._client_loop
+        self._client = None
+        self._client_loop = None
+        if client and not client.is_closed:
+            try:
+                cur_loop = asyncio.get_running_loop()
+                if c_loop is None or c_loop == cur_loop:
+                    await client.aclose()
+            except Exception:
+                pass
 
     def _get_headers(self) -> Dict[str, str]:
-        pwd = MANDRAKODI_PASSWORD or "UDvXkJqTBR"
-        dev_id = MANDRAKODI_DEVICE_ID or "ABC123XYZ456"
+        pwd = MANDRAKODI_PASSWORD
+        dev_id = MANDRAKODI_DEVICE_ID
         return {
             "User-Agent": f"MandraKodi2@@1.2.84@@{pwd}@@{dev_id}",
             "Accept": "application/json, text/plain, */*",
         }
 
     async def _fetch_endpoint(self, num_test: str, params: Optional[Dict[str, str]] = None) -> Any:
-        """Helper to fetch a specific numTest from Mandrakodi."""
+        """Helper to fetch a specific numTest from Mandrakodi using the shared client."""
         url = f"{BASE_API_URL}?numTest={num_test}"
         if params:
             url += "&" + urllib.parse.urlencode(params)
         try:
-            async with httpx.AsyncClient(
-                timeout=httpx.Timeout(12.0, connect=6.0),
-                verify=False,
-                follow_redirects=True,
-            ) as client:
-                r = await client.get(url, headers=self._get_headers())
-                if r.status_code == 200:
-                    return r.json()
-                logger.warning("Mandrakodi query numTest=%s returned HTTP %s", num_test, r.status_code)
+            client = await self._get_client()
+            r = await client.get(url, headers=self._get_headers())
+            if r.status_code == 200:
+                return r.json()
+            logger.warning("Mandrakodi query numTest=%s returned HTTP %s", num_test, r.status_code)
         except Exception as e:
             logger.warning("Mandrakodi query error for numTest=%s: %s", num_test, e)
         return None

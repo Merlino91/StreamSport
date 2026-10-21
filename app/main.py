@@ -34,6 +34,8 @@ from app.services.catalog_service import catalog_service
 from app.services.dailymotion_service import dailymotion_service
 from app.services.db_service import db_service
 from app.services.doh_client import doh_client
+from app.services.mandrakodi_service import mandrakodi_service
+from app.services.sportvideo_service import sportvideo_service
 from app.services.stream_service import stream_service
 from app.services.tvvoo_service import tvvoo_service
 from app.services.youtube_service import youtube_service
@@ -50,6 +52,8 @@ async def lifespan(app: FastAPI):
     catalog_service.stop_background_sync()
     await tvvoo_service.manifest_manager.close()
     await doh_client.close()
+    await mandrakodi_service.close()
+    await sportvideo_service.close()
 
 # Directories
 BASE_DIR = Path(__file__).resolve().parent

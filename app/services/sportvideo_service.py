@@ -50,6 +50,44 @@ class SportVideoService:
         self._category_cache: Dict[str, Tuple[float, List[Dict[str, str]]]] = {}
         self._infohash_cache: Dict[str, str] = {}
         self._cache_ttl = 1800  # 30 minutes
+        self._client: Optional[httpx.AsyncClient] = None
+        self._client_loop: Optional[asyncio.AbstractEventLoop] = None
+        self._client_lock: asyncio.Lock = asyncio.Lock()
+
+    async def _get_client(self) -> httpx.AsyncClient:
+        """Returns or lazily initializes the shared HTTP client with connection pooling."""
+        try:
+            cur_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            cur_loop = None
+
+        if self._client is None or self._client.is_closed or self._client_loop != cur_loop:
+            if self._client_loop != cur_loop:
+                self._client_lock = asyncio.Lock()
+            async with self._client_lock:
+                if self._client is None or self._client.is_closed or self._client_loop != cur_loop:
+                    self._client = httpx.AsyncClient(
+                        headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"},
+                        timeout=8.0,
+                        follow_redirects=True,
+                        limits=httpx.Limits(max_keepalive_connections=5, max_connections=15, keepalive_expiry=60.0),
+                    )
+                    self._client_loop = cur_loop
+        return self._client
+
+    async def close(self) -> None:
+        """Closes the shared HTTP client pool gracefully on application shutdown."""
+        client = self._client
+        c_loop = self._client_loop
+        self._client = None
+        self._client_loop = None
+        if client and not client.is_closed:
+            try:
+                cur_loop = asyncio.get_running_loop()
+                if c_loop is None or c_loop == cur_loop:
+                    await client.aclose()
+            except Exception:
+                pass
 
     def _normalize_name(self, text: str) -> str:
         s = text.lower()
@@ -148,15 +186,13 @@ class SportVideoService:
                 return cached
 
         url = f"https://www.sport-video.org.ua/{page_name}"
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
-
         try:
-            async with httpx.AsyncClient(headers=headers, timeout=8.0, follow_redirects=True) as client:
-                resp = await client.get(url)
-                if resp.status_code != 200:
-                    logger.warning(f"sport-video.org.ua returned {resp.status_code} for {page_name}")
-                    return []
-                html = resp.text
+            client = await self._get_client()
+            resp = await client.get(url)
+            if resp.status_code != 200:
+                logger.warning(f"sport-video.org.ua returned {resp.status_code} for {page_name}")
+                return []
+            html = resp.text
         except Exception as e:
             logger.warning(f"Failed to fetch {url}: {e}")
             return []
@@ -183,30 +219,29 @@ class SportVideoService:
         if match_page_url in self._infohash_cache:
             return self._infohash_cache[match_page_url]
 
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
         try:
-            async with httpx.AsyncClient(headers=headers, timeout=8.0, follow_redirects=True) as client:
-                page_resp = await client.get(match_page_url)
-                if page_resp.status_code != 200:
-                    return None
-                
-                torrent_links = re.findall(r'href=[\'"]([^\'"]+\.torrent)[\'"]', page_resp.text)
-                if not torrent_links:
-                    return None
+            client = await self._get_client()
+            page_resp = await client.get(match_page_url)
+            if page_resp.status_code != 200:
+                return None
+            
+            torrent_links = re.findall(r'href=[\'"]([^\'"]+\.torrent)[\'"]', page_resp.text)
+            if not torrent_links:
+                return None
 
-                torrent_rel = torrent_links[0].lstrip('./')
-                torrent_url = f"https://www.sport-video.org.ua/{urllib.parse.quote(torrent_rel)}"
+            torrent_rel = torrent_links[0].lstrip('./')
+            torrent_url = f"https://www.sport-video.org.ua/{urllib.parse.quote(torrent_rel)}"
 
-                t_resp = await client.get(torrent_url)
-                if t_resp.status_code != 200:
-                    return None
+            t_resp = await client.get(torrent_url)
+            if t_resp.status_code != 200:
+                return None
 
-                info_hash = self.extract_info_hash(t_resp.content)
-                if info_hash:
-                    if len(self._infohash_cache) >= self.MAX_INFOHASH_CACHE:
-                        self._infohash_cache.pop(next(iter(self._infohash_cache)), None)
-                    self._infohash_cache[match_page_url] = info_hash
-                    return info_hash
+            info_hash = self.extract_info_hash(t_resp.content)
+            if info_hash:
+                if len(self._infohash_cache) >= self.MAX_INFOHASH_CACHE:
+                    self._infohash_cache.pop(next(iter(self._infohash_cache)), None)
+                self._infohash_cache[match_page_url] = info_hash
+                return info_hash
         except Exception as e:
             logger.warning(f"Error extracting torrent infohash from {match_page_url}: {e}")
 
