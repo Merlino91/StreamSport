@@ -391,8 +391,12 @@ class GenreClassifier:
             or silo == "football"
             or bool(re.search(r"\b(afc\s*wimbledon|wimbledon\s*fc)\b", title_lower))
         )
+        is_other_sport_context = (
+            cat in ("badminton", "table-tennis", "padel", "squash", "cricket", "rugby", "golf", "handball", "cycling", "darts", "billiards", "snooker", "waterpolo")
+            or silo in ("badminton", "table-tennis", "padel", "squash", "cricket", "rugby", "golf", "handball", "cycling", "darts", "billiards", "snooker", "waterpolo")
+        )
         eval_tennis = f"{title_lower} {comp}".strip()
-        if not is_football_context and (
+        if not is_football_context and not is_other_sport_context and (
             cat == "tennis"
             or silo == "tennis"
             or "tennis" in eval_tennis
@@ -789,6 +793,7 @@ class GenreClassifier:
 
         if (
             cat in ("golf", "darts", "rugby", "afl", "cricket", "handball", "waterpolo", "table-tennis", "badminton", "billiards", "cycling", "altri_sport")
+            or silo in ("golf", "darts", "rugby", "afl", "aussie-rules", "cricket", "handball", "waterpolo", "table-tennis", "badminton", "billiards", "cycling")
             or is_afl_match
             or any(k in eval_altri for k in (
                 "golf", "pga", "darts", "freccette", "rugby", "ciclismo", "cycling", "uci", "road race", "time trial", "snooker", "padel",
@@ -797,17 +802,17 @@ class GenreClassifier:
             ))
             or re.search(r"\b(cricket|odi|t20|twenty20|ipl|ashes|uci|ihf|ehf)\b", eval_altri)
         ):
-            if is_afl_match or re.search(r"\b(rugby|afl|aflw|six\s*nations|sei\s*nazioni|nrl|top\s*14|premiership\s*rugby|urc|super\s*rugby|champions\s*cup\s*rugby)\b", eval_altri) or cat in ("rugby", "afl"):
+            if is_afl_match or re.search(r"\b(rugby|afl|aflw|six\s*nations|sei\s*nazioni|nrl|top\s*14|premiership\s*rugby|urc|super\s*rugby|champions\s*cup\s*rugby)\b", eval_altri) or cat in ("rugby", "afl") or silo in ("rugby", "afl", "aussie-rules"):
                 return "altri_sport", "Rugby e AFL"
-            if re.search(r"\b(cricket|odi|t20|twenty20|test\s*match|ipl|one\s*day\s*international|the\s*hundred|big\s*bash|ashes)\b", eval_altri) or cat == "cricket":
+            if re.search(r"\b(cricket|odi|t20|twenty20|test\s*match|ipl|one\s*day\s*international|the\s*hundred|big\s*bash|ashes)\b", eval_altri) or cat == "cricket" or silo == "cricket":
                 return "altri_sport", "Cricket"
-            if re.search(r"\b(golf|pga|lpga|ryder\s*cup|presidents\s*cup|liv|dp\s*world|masters\s*tournament)\b", eval_altri) or cat == "golf":
+            if re.search(r"\b(golf|pga|lpga|ryder\s*cup|presidents\s*cup|liv|dp\s*world|masters\s*tournament)\b", eval_altri) or cat == "golf" or silo == "golf":
                 return "altri_sport", "Golf"
             if re.search(r"\b(darts|freccette|pdc|world\s*darts)\b", eval_altri):
                 return "altri_sport", "Freccette / Darts"
-            if (re.search(r"\b(ciclismo|cycling|tour\s*de\s*france|giro\s*d['’]italia|vuelta|uci|road\s*race|time\s*trial)\b", eval_altri) or cat == "cycling") and "hockey" not in title_lower:
+            if (re.search(r"\b(ciclismo|cycling|tour\s*de\s*france|giro\s*d['’]italia|vuelta|uci|road\s*race|time\s*trial)\b", eval_altri) or cat == "cycling" or silo == "cycling") and "hockey" not in title_lower:
                 return "altri_sport", "Ciclismo"
-            if re.search(r"\b(handball|pallamano|ihf|ehf|dhb\s*pokal|bundesliga\s*handball)\b", eval_altri) or cat == "handball":
+            if re.search(r"\b(handball|pallamano|ihf|ehf|dhb\s*pokal|bundesliga\s*handball)\b", eval_altri) or cat == "handball" or silo == "handball":
                 return "altri_sport", "Pallamano"
             return "altri_sport", "Biliardo, Padel e Altri"
 

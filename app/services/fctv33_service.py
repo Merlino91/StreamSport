@@ -34,7 +34,7 @@ FCTV33_SPORT_TYPE_MAP: Dict[int, Dict[str, str]] = {
     90: {"silo": "other", "name": "Altri Sport"},
 }
 
-DEFAULT_FETCH_SPORTS = [1, 2, 3, 7, 9, 13, 14, 4, 11]
+DEFAULT_FETCH_SPORTS = [1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 90]
 
 # Protobuf Varint and Envelope Decoders
 def _read_varint(buffer: bytes, offset: int = 0) -> Tuple[int, int]:
