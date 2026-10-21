@@ -549,6 +549,23 @@ class StreamService:
                         kid = res.get("kid")
                         key = res.get("key")
 
+                # Safeguard: if stream is unencrypted clear stream (e.g. key == '0000' or -clr.isml)
+                # serve as Direct HLS stream without routing through EasyProxy or VPN
+                is_clear = (
+                    s_data.get("is_clear")
+                    or (kid in ("0000", "", None) and key in ("0000", "", None))
+                    or ("-clr.isml" in str(mpd_url))
+                )
+                if is_clear and mpd_url:
+                    direct_hls = mpd_url.replace("/manifest.mpd", "/manifest.m3u8").replace(".mpd", ".m3u8")
+                    mandrakodi_streams.append({
+                        "name": f"{flag_prefix}📡 {ch_name} [Diretto]",
+                        "title": f"{flag_prefix}Fonte: Ufficiale CDN • Zero Carico Server\nQualità: HD Live (Flusso in chiaro)",
+                        "url": direct_hls,
+                        "behaviorHints": {"isLive": True, "notWebReady": False},
+                    })
+                    continue
+
                 if mpd_url and ep_url:
                     encoded_mpd = urllib.parse.quote_plus(mpd_url)
                     clearkey_param = f"{kid}:{key}" if (kid and key) else ""
@@ -579,13 +596,13 @@ class StreamService:
                         "behaviorHints": {"isLive": True, "notWebReady": True},
                     })
 
-            # Case C: Direct CDN (HLS Pubblico, es. Radio TV Serie A, SuperTennis)
+            # Case C: Direct CDN (HLS Pubblico, es. SuperTennis, Mediaset Clear)
             elif src_type == "direct":
                 direct_url = s_data.get("stream_url") or s.get("id")
                 if direct_url and direct_url.startswith("http"):
                     mandrakodi_streams.append({
                         "name": f"{flag_prefix}📡 {ch_name} [Diretto]",
-                        "title": f"{flag_prefix}Fonte: Ufficiale CDN • Zero Carico Server\nQualità: HD Live",
+                        "title": f"{flag_prefix}Fonte: Ufficiale CDN • Zero Carico Server\nQualità: HD Live (Flusso in chiaro)",
                         "url": direct_url,
                         "behaviorHints": {"isLive": True, "notWebReady": False},
                     })

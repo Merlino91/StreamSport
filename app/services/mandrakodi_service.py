@@ -291,6 +291,42 @@ class MandrakodiService:
             logger.info("Mandrakodi: enriched %d match entries with high-definition linear streams.", enriched_count)
         return enriched_count
 
+    def _parse_amstaff_payload(self, raw_payload: str) -> Tuple[Optional[str], Dict[str, Any]]:
+        """
+        Decodes an amstaff payload and detects whether it is an encrypted ClearKey stream (amstaff)
+        or an unencrypted public stream (direct HLS).
+        Returns (source_type, stream_meta).
+        """
+        try:
+            dec = raw_payload if raw_payload.startswith("http") else base64.b64decode(raw_payload).decode("utf-8", errors="ignore")
+            parts = dec.split("|")
+            mpd_url = parts[0].strip()
+            key_part = parts[1].strip() if len(parts) > 1 else ""
+            kid, key = key_part.split(":", 1) if ":" in key_part else ("", "")
+
+            # Detect unencrypted clear streams (e.g. key == '0000', empty keys, or '-clr.isml')
+            is_clear = (
+                key_part in ("0000", "0", "none", "clear", "")
+                or (not kid and not key)
+                or "-clr.isml" in mpd_url
+            )
+            if is_clear:
+                hls_url = mpd_url.replace("/manifest.mpd", "/manifest.m3u8").replace(".mpd", ".m3u8")
+                return "direct", {
+                    "stream_url": hls_url,
+                    "original_mpd": mpd_url,
+                    "is_clear": True,
+                }
+
+            return "amstaff", {
+                "mpd_url": mpd_url,
+                "kid": kid,
+                "key": key,
+            }
+        except Exception as e:
+            logger.debug("Failed to decode amstaff payload: %s", e)
+            return None, {}
+
     async def sync_channels(self, force: bool = False) -> None:
         """
         Loads and indexes all 24/7 linear channels from A1A165 (Sky), A1A134F (MPD),
@@ -353,21 +389,14 @@ class MandrakodiService:
                     if not any(k in t_upper for k in TARGET_KEYWORDS):
                         continue
 
-                    source_type = "amstaff" if "amstaff@@" in link else "direct"
+                    source_type = None
                     stream_meta: Dict[str, Any] = {}
                     if "amstaff@@" in link and ENABLE_MANDRAKODI_AMSTAFF:
-                        raw_payload = link.split("amstaff@@", 1)[1]
-                        try:
-                            dec = raw_payload if raw_payload.startswith("http") else base64.b64decode(raw_payload).decode("utf-8", errors="ignore")
-                            parts = dec.split("|")
-                            stream_meta = {
-                                "mpd_url": parts[0].strip(),
-                                "kid": parts[1].split(":")[0].strip() if len(parts) > 1 and ":" in parts[1] else "",
-                                "key": parts[1].split(":")[1].strip() if len(parts) > 1 and ":" in parts[1] else "",
-                            }
-                        except Exception:
+                        source_type, stream_meta = self._parse_amstaff_payload(link.split("amstaff@@", 1)[1])
+                        if not source_type:
                             continue
                     elif link.startswith("http"):
+                        source_type = "direct"
                         stream_meta = {"stream_url": link.strip()}
                     else:
                         continue
@@ -415,17 +444,8 @@ class MandrakodiService:
                         ace_id = link.replace("acestream://", "").strip()
                         stream_meta = {"ace_id": ace_id}
                     elif "amstaff@@" in link and ENABLE_MANDRAKODI_AMSTAFF:
-                        source_type = "amstaff"
-                        raw_payload = link.split("amstaff@@", 1)[1]
-                        try:
-                            dec = raw_payload if raw_payload.startswith("http") else base64.b64decode(raw_payload).decode("utf-8", errors="ignore")
-                            parts = dec.split("|")
-                            stream_meta = {
-                                "mpd_url": parts[0].strip(),
-                                "kid": parts[1].split(":")[0].strip() if len(parts) > 1 and ":" in parts[1] else "",
-                                "key": parts[1].split(":")[1].strip() if len(parts) > 1 and ":" in parts[1] else "",
-                            }
-                        except Exception:
+                        source_type, stream_meta = self._parse_amstaff_payload(link.split("amstaff@@", 1)[1])
+                        if not source_type:
                             continue
 
                     if not source_type:
@@ -651,27 +671,18 @@ class MandrakodiService:
             stream_meta: Dict[str, Any] = {}
 
             if "amstaff@@" in link and ENABLE_MANDRAKODI_AMSTAFF:
-                source_type = "amstaff"
-                raw_payload = link.split("amstaff@@", 1)[1]
-                try:
-                    dec = raw_payload if raw_payload.startswith("http") else base64.b64decode(raw_payload).decode("utf-8", errors="ignore")
-                    parts = dec.split("|")
-                    mpd_url = parts[0].strip()
-                    key_part = parts[1].strip() if len(parts) > 1 else ""
-                    kid, key = key_part.split(":", 1) if ":" in key_part else ("", "")
-                    stream_meta = {
-                        "mpd_url": mpd_url,
-                        "kid": kid,
-                        "key": key,
-                    }
-                except Exception as e:
-                    logger.debug("Failed to decode amstaff payload: %s", e)
+                source_type, stream_meta = self._parse_amstaff_payload(link.split("amstaff@@", 1)[1])
+                if not source_type:
                     continue
 
             elif link.startswith("acestream://") and ENABLE_MANDRAKODI_ACESTREAM:
                 source_type = "acestream"
                 ace_id = link.replace("acestream://", "").strip()
                 stream_meta = {"ace_id": ace_id}
+
+            elif link.startswith("http"):
+                source_type = "direct"
+                stream_meta = {"stream_url": link.strip()}
 
             if not source_type:
                 continue
