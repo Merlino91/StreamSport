@@ -32,6 +32,7 @@ from app.services.fctv33_service import fctv33_service
 from app.services.mandrakodi_service import mandrakodi_service
 from app.services.italian_epg_service import italian_epg_service
 from app.services.diretta_service import diretta_service
+from app.services.team_matching import extract_team_name
 from app.services.canonical_competition_service import (
     detect_canonical_competition,
     get_canonical_display_name,
@@ -573,10 +574,10 @@ class CatalogService:
         """
         if not isinstance(t1, dict) or not isinstance(t2, dict):
             return False
-        h1 = cls._clean_team_str(t1.get("home", {}).get("name") or "")
-        a1 = cls._clean_team_str(t1.get("away", {}).get("name") or "")
-        h2 = cls._clean_team_str(t2.get("home", {}).get("name") or "")
-        a2 = cls._clean_team_str(t2.get("away", {}).get("name") or "")
+        h1 = cls._clean_team_str(extract_team_name(t1.get("home")))
+        a1 = cls._clean_team_str(extract_team_name(t1.get("away")))
+        h2 = cls._clean_team_str(extract_team_name(t2.get("home")))
+        a2 = cls._clean_team_str(extract_team_name(t2.get("away")))
         if not h1 or not a1 or not h2 or not a2:
             return False
 
@@ -1155,8 +1156,8 @@ class CatalogService:
         if cat == "calcio_italiano":
             if genre == "Nazionali e Amichevoli":
                 teams = match.get("teams") or {}
-                home = (teams.get("home", {}).get("name") or "").lower() if isinstance(teams, dict) else ""
-                away = (teams.get("away", {}).get("name") or "").lower() if isinstance(teams, dict) else ""
+                home = extract_team_name(teams.get("home")).lower() if isinstance(teams, dict) else ""
+                away = extract_team_name(teams.get("away")).lower() if isinstance(teams, dict) else ""
                 combined_check = f"{title} {home} {away}"
                 return bool(re.search(r"\b(italia|italy|azzurr[ie])\b", combined_check))
             return True
@@ -1165,8 +1166,8 @@ class CatalogService:
         if cat == "calcio_estero":
             if genre in ("Nazionali e Amichevoli", "Europei Under 21 e Nazionali Giovanili"):
                 teams = match.get("teams") or {}
-                home = (teams.get("home", {}).get("name") or "").lower() if isinstance(teams, dict) else ""
-                away = (teams.get("away", {}).get("name") or "").lower() if isinstance(teams, dict) else ""
+                home = extract_team_name(teams.get("home")).lower() if isinstance(teams, dict) else ""
+                away = extract_team_name(teams.get("away")).lower() if isinstance(teams, dict) else ""
                 combined_check = f"{title} {home} {away}"
                 return bool(re.search(r"\b(italia|italy|azzurr[ie])\b", combined_check))
 
@@ -1564,8 +1565,8 @@ class CatalogService:
                 q = search_query.lower()
                 m_title = (m.get("title") or "").lower()
                 teams = m.get("teams") or {}
-                home = (teams.get("home", {}).get("name") or "").lower() if isinstance(teams, dict) else ""
-                away = (teams.get("away", {}).get("name") or "").lower() if isinstance(teams, dict) else ""
+                home = extract_team_name(teams.get("home")).lower() if isinstance(teams, dict) else ""
+                away = extract_team_name(teams.get("away")).lower() if isinstance(teams, dict) else ""
                 if q not in m_title and q not in home and q not in away:
                     continue
 

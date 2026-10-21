@@ -6,6 +6,7 @@ import time
 from typing import Any, Dict, List, Optional, Tuple
 import unicodedata
 import httpx
+from app.services.team_matching import extract_team_name
 
 logger = logging.getLogger("streamsport.espn")
 
@@ -297,8 +298,8 @@ class ESPNService:
     def _extract_team_words(self, match: Dict[str, Any]) -> Tuple[set, set]:
         teams = match.get("teams")
         if isinstance(teams, dict) and teams.get("home") and teams.get("away"):
-            h = (teams.get("home", {}).get("name") or "").lower()
-            a = (teams.get("away", {}).get("name") or "").lower()
+            h = extract_team_name(teams.get("home")).lower()
+            a = extract_team_name(teams.get("away")).lower()
             h = unicodedata.normalize("NFKD", h).encode("ascii", "ignore").decode("utf-8")
             a = unicodedata.normalize("NFKD", a).encode("ascii", "ignore").decode("utf-8")
             for pat, rep in self.ESPN_NORM_ALIASES.items():

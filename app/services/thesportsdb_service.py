@@ -20,7 +20,7 @@ from app.services.canonical_competition_service import (
     is_competition_conflict,
     is_simulcast_event,
 )
-from app.services.team_matching import clean_team_name, match_single_team
+from app.services.team_matching import clean_team_name, match_single_team, extract_team_name
 
 logger = logging.getLogger("streamsport.thesportsdb")
 
@@ -409,8 +409,8 @@ class TheSportsDBService:
         home = ""
         away = ""
         if isinstance(teams, dict) and teams.get("home") and teams.get("away"):
-            home = self._clean_team_name(teams.get("home", {}).get("name", ""))
-            away = self._clean_team_name(teams.get("away", {}).get("name", ""))
+            home = self._clean_team_name(extract_team_name(teams.get("home")))
+            away = self._clean_team_name(extract_team_name(teams.get("away")))
 
         if not home or not away:
             raw_title = match.get("title", "")
@@ -1137,8 +1137,8 @@ class TheSportsDBService:
         home = ""
         away = ""
         if teams and isinstance(teams, dict):
-            home = (teams.get("home", {}) or {}).get("name", "").strip()
-            away = (teams.get("away", {}) or {}).get("name", "").strip()
+            home = extract_team_name(teams.get("home"))
+            away = extract_team_name(teams.get("away"))
 
         if home and away:
             clean_home = re.sub(r"[\U0001F1E6-\U0001F1FF]", "", home).strip()

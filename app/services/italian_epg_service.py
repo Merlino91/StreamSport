@@ -13,6 +13,7 @@ from app.config import (
 )
 from app.services.tvvoo_service import tvvoo_service
 from app.services.mandrakodi_service import mandrakodi_service
+from app.services.team_matching import extract_team_name
 from app.services.canonical_competition_service import (
     is_simulcast_event,
     get_simulcast_info,
@@ -811,10 +812,10 @@ class ItalianEPGService:
         from difflib import SequenceMatcher
         if not isinstance(t1, dict) or not isinstance(t2, dict):
             return False
-        h1 = cls._clean_team_str(t1.get("home", {}).get("name") or "")
-        a1 = cls._clean_team_str(t1.get("away", {}).get("name") or "")
-        h2 = cls._clean_team_str(t2.get("home", {}).get("name") or "")
-        a2 = cls._clean_team_str(t2.get("away", {}).get("name") or "")
+        h1 = cls._clean_team_str(extract_team_name(t1.get("home")))
+        a1 = cls._clean_team_str(extract_team_name(t1.get("away")))
+        h2 = cls._clean_team_str(extract_team_name(t2.get("home")))
+        a2 = cls._clean_team_str(extract_team_name(t2.get("away")))
         if not h1 or not a1 or not h2 or not a2:
             return False
 

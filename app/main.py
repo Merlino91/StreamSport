@@ -387,7 +387,11 @@ async def configured_meta(request: Request, config: str, type: str, id: str):
 @app.get("/stream/{type}/{id}.json")
 async def unconfigured_stream(request: Request, type: str, id: str):
     base_url = get_base_url(request)
-    streams = await stream_service.get_streams_for_event(id, ep_url=None, user_tz="UTC", base_url=base_url)
+    try:
+        streams = await stream_service.get_streams_for_event(id, ep_url=None, user_tz="UTC", base_url=base_url)
+    except Exception as e:
+        logger.error("Error generating streams for %s: %s", id, e, exc_info=True)
+        streams = []
     return JSONResponse(content={"streams": streams})
 
 
@@ -395,14 +399,18 @@ async def unconfigured_stream(request: Request, type: str, id: str):
 async def configured_stream(request: Request, config: str, type: str, id: str):
     base_url = get_base_url(request)
     ep_url, ep_pass, tz = decode_config(config)
-    streams = await stream_service.get_streams_for_event(
-        id,
-        ep_url=ep_url,
-        ep_pass=ep_pass,
-        user_tz=tz,
-        base_url=base_url,
-        config=config,
-    )
+    try:
+        streams = await stream_service.get_streams_for_event(
+            id,
+            ep_url=ep_url,
+            ep_pass=ep_pass,
+            user_tz=tz,
+            base_url=base_url,
+            config=config,
+        )
+    except Exception as e:
+        logger.error("Error generating streams for %s: %s", id, e, exc_info=True)
+        streams = []
     return JSONResponse(content={"streams": streams})
 
 

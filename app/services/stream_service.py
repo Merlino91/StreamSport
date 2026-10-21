@@ -504,19 +504,22 @@ class StreamService:
         # JIT Dynamic Mandrakodi Resolution:
         # If match does not have Mandrakodi OTT sources attached, trigger a real-time lookup
         has_mandrakodi = any(
-            isinstance(s, dict) and (s.get("provider") == "mandrakodi" or s.get("source") in ("amstaff", "acestream", "socceron"))
+            isinstance(s, dict) and (s.get("provider") == "mandrakodi" or s.get("source") in ("amstaff", "acestream", "socceron", "direct"))
             for s in sources
         )
         if not has_mandrakodi:
-            from app.services.mandrakodi_service import mandrakodi_service
-            jit_sources = await mandrakodi_service.resolve_live_match_streams(match)
-            if jit_sources:
-                existing_ids = {str(s.get("id")) for s in sources if isinstance(s, dict)}
-                for s in jit_sources:
-                    if isinstance(s, dict) and str(s.get("id")) not in existing_ids:
-                        sources.append(s)
-                        existing_ids.add(str(s.get("id")))
-                match["sources"] = sources
+            try:
+                from app.services.mandrakodi_service import mandrakodi_service
+                jit_sources = await mandrakodi_service.resolve_live_match_streams(match)
+                if jit_sources:
+                    existing_ids = {str(s.get("id")) for s in sources if isinstance(s, dict)}
+                    for s in jit_sources:
+                        if isinstance(s, dict) and str(s.get("id")) not in existing_ids:
+                            sources.append(s)
+                            existing_ids.add(str(s.get("id")))
+                    match["sources"] = sources
+            except Exception as e:
+                logger.error("Error in JIT Mandrakodi stream resolution: %s", e)
 
         # 0. Process Mandrakodi (Amstaff ClearKey 1080p 50fps, Direct CDN, AceStream Media)
         mandrakodi_streams: List[Dict[str, Any]] = []
@@ -721,10 +724,13 @@ class StreamService:
             # Live-refresh: if match has FCTV33 ID and streams aren't resolved yet, query /api/match/detail in real-time
             has_concrete_streams = any(s.get("stream_id") for s in fctv_sources)
             if fctv_mid and not has_concrete_streams:
-                fresh_fctv = await fctv33_service.get_streams_for_match(fctv_mid, sport_type=fctv_sport)
-                if fresh_fctv:
-                    fctv_sources = fresh_fctv
-                    sources.extend(fresh_fctv)
+                try:
+                    fresh_fctv = await fctv33_service.get_streams_for_match(fctv_mid, sport_type=fctv_sport)
+                    if fresh_fctv:
+                        fctv_sources = fresh_fctv
+                        sources.extend(fresh_fctv)
+                except Exception as e:
+                    logger.debug("Failed real-time FCTV33 stream fetch for %s: %s", fctv_mid, e)
 
             for idx, s in enumerate(fctv_sources, 1):
                 m_id = s.get("match_id") or fctv_mid

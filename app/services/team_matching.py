@@ -8,6 +8,14 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 # 1. CENTRALIZED VOCABULARY & ALIASES
 # ==============================================================================
 
+def extract_team_name(val: Any) -> str:
+    """Safely extracts a team string whether val is a dict {'name': '...'} or a plain str."""
+    if isinstance(val, dict):
+        return str(val.get("name") or "").strip()
+    if isinstance(val, str):
+        return val.strip()
+    return ""
+
 # Master aliases dictionary unifying Diretta, TheSportsDB, EPG, and Catalog mappings
 MASTER_CLUB_ALIASES: Dict[str, str] = {
     # Italian Top Clubs
@@ -280,8 +288,8 @@ def calculate_match_score(
 
         # 2. Extract Home & Away
         m_teams = match.get("teams") or {}
-        m_h = (m_teams.get("home", {}).get("name") or "") if isinstance(m_teams, dict) else ""
-        m_a = (m_teams.get("away", {}).get("name") or "") if isinstance(m_teams, dict) else ""
+        m_h = extract_team_name(m_teams.get("home")) if isinstance(m_teams, dict) else ""
+        m_a = extract_team_name(m_teams.get("away")) if isinstance(m_teams, dict) else ""
         if not m_h or not m_a:
             t = match.get("title") or ""
             clean_t = re.sub(r"^[0-9:\s-]+(?:\s*:\s*)?", "", t)
@@ -396,11 +404,11 @@ def calculate_match_score(
         channel_confirmed = any(channel_name.lower() in dtv.lower() for dtv in diretta_tvs) if channel_name else False
 
         m_teams = match.get("teams") or {}
-        m_h = (m_teams.get("home", {}).get("name") or "") if isinstance(m_teams, dict) else ""
-        m_a = (m_teams.get("away", {}).get("name") or "") if isinstance(m_teams, dict) else ""
+        m_h = extract_team_name(m_teams.get("home")) if isinstance(m_teams, dict) else ""
+        m_a = extract_team_name(m_teams.get("away")) if isinstance(m_teams, dict) else ""
         c_teams = candidate.get("teams") or {}
-        c_h = (c_teams.get("home", {}).get("name") or "") if isinstance(c_teams, dict) else ""
-        c_a = (c_teams.get("away", {}).get("name") or "") if isinstance(c_teams, dict) else ""
+        c_h = extract_team_name(c_teams.get("home")) if isinstance(c_teams, dict) else ""
+        c_a = extract_team_name(c_teams.get("away")) if isinstance(c_teams, dict) else ""
 
         if m_h and m_a and c_h and c_a:
             h_score, a_score, is_inv = compare_teams_fuzzy(m_h, m_a, c_h, c_a, allow_inverted=True)
@@ -447,8 +455,8 @@ def calculate_match_score(
 
         # Test 1: Raw provider teams
         raw_teams = match.get("teams") or {}
-        raw_h = (raw_teams.get("home", {}).get("name") or "") if isinstance(raw_teams, dict) else ""
-        raw_a = (raw_teams.get("away", {}).get("name") or "") if isinstance(raw_teams, dict) else ""
+        raw_h = extract_team_name(raw_teams.get("home")) if isinstance(raw_teams, dict) else ""
+        raw_a = extract_team_name(raw_teams.get("away")) if isinstance(raw_teams, dict) else ""
         if raw_h and raw_a:
             h_score, a_score, is_inv = compare_teams_fuzzy(raw_h, raw_a, c_h, c_a, allow_inverted=True)
             if h_score >= 0.65 and a_score >= 0.65:

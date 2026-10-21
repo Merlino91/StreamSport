@@ -5,6 +5,7 @@ from app.services.canonical_competition_service import (
     is_simulcast_event,
     get_simulcast_info,
 )
+from app.services.team_matching import extract_team_name
 
 class GenreClassifier:
     """
@@ -361,8 +362,8 @@ class GenreClassifier:
         home = ""
         away = ""
         if isinstance(teams, dict) and teams.get("home") and teams.get("away"):
-            home = self._normalize_name(teams.get("home", {}).get("name", ""))
-            away = self._normalize_name(teams.get("away", {}).get("name", ""))
+            home = self._normalize_name(extract_team_name(teams.get("home")))
+            away = self._normalize_name(extract_team_name(teams.get("away")))
         elif " vs " in title_lower:
             parts = title_lower.split(" vs ", 1)
             home = self._normalize_name(re.sub(r"[\(-].*$", "", parts[0]).strip())
