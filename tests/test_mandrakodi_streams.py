@@ -202,6 +202,48 @@ class TestMandrakodiStreams(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(streams[3]["externalUrl"], "acestream://16519c3e10c7f1dddea05eb2dae6182cbdd34e4f")
         self.assertTrue(streams[3]["behaviorHints"]["notWebReady"])
 
+    async def test_fctv33_dict_teams_resolution_avoids_500(self):
+        """Verifies that FCTV33 matches with dict teams structure do not crash with 500 in JIT resolution."""
+        now_ts = int(time.time() * 1000)
+        fctv_match = {
+            "id": "streamsport:fctv33:4521897",
+            "title": "Boca Juniors vs River Plate",
+            "category": "football",
+            "_silo": "football",
+            "date": now_ts,
+            "_sport_type": 1,
+            "teams": {
+                "home": {"name": "Boca Juniors"},
+                "away": {"name": "River Plate"},
+            },
+            "sources": [
+                {
+                    "source": "fctv33",
+                    "id": "4521897",
+                    "match_id": "4521897",
+                    "stream_id": "stream_1",
+                    "name": "Canale 1",
+                }
+            ],
+            "_provider": "fctv33",
+        }
+
+        from app.services.catalog_service import catalog_service
+        catalog_service._cached_matches.append(fctv_match)
+
+        # Ensure Mandrakodi has a cached match or does not crash
+        mandrakodi_service._cached_matches = []
+        mandrakodi_service._last_fetch_time = time.time()
+
+        streams = await stream_service.get_streams_for_event(
+            "streamsport:fctv33:4521897",
+            ep_url="https://ep.bluccoj.com",
+            ep_pass="Z3r0EP"
+        )
+        self.assertIsInstance(streams, list)
+        self.assertGreaterEqual(len(streams), 1)
+        self.assertIn("FCTV33", streams[0]["name"])
+
 
 if __name__ == "__main__":
     unittest.main()

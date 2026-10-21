@@ -678,6 +678,15 @@ class MandrakodiService:
                 logger.error("Mandrakodi sync failed: %s", e)
                 return self._cached_matches
 
+    @staticmethod
+    def _extract_team_name(val: Any) -> str:
+        """Extracts and normalizes team name whether stored as a string or a dict {'name': '...'}."""
+        if isinstance(val, dict):
+            return str(val.get("name") or "").strip().lower()
+        if isinstance(val, str):
+            return val.strip().lower()
+        return ""
+
     async def resolve_live_match_streams(self, match: Dict[str, Any]) -> List[Dict[str, Any]]:
         """
         Just-In-Time resolution triggered when a user clicks on an active or pre-match card.
@@ -701,18 +710,18 @@ class MandrakodiService:
 
         # Find matching Mandrakodi match
         m_title = (match.get("title") or "").strip()
-        m_teams = match.get("teams") or {}
-        m_home = (m_teams.get("home") or "").strip().lower()
-        m_away = (m_teams.get("away") or "").strip().lower()
+        m_teams = match.get("teams") if isinstance(match.get("teams"), dict) else {}
+        m_home = self._extract_team_name(m_teams.get("home"))
+        m_away = self._extract_team_name(m_teams.get("away"))
 
         # Token set for comparison
         clean_tokens = set(re.findall(r"\b[a-zA-Z0-9]{3,}\b", m_title.lower()))
 
         for km in self._cached_matches:
             km_title = (km.get("title") or "").strip().lower()
-            km_teams = km.get("teams") or {}
-            km_home = (km_teams.get("home") or "").strip().lower()
-            km_away = (km_teams.get("away") or "").strip().lower()
+            km_teams = km.get("teams") if isinstance(km.get("teams"), dict) else {}
+            km_home = self._extract_team_name(km_teams.get("home"))
+            km_away = self._extract_team_name(km_teams.get("away"))
 
             matched = False
             # 1. Exact or partial home & away team match

@@ -117,6 +117,20 @@ class TestMandrakodiService(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(streams), 1)
         self.assertEqual(streams[0]["id"], "mandra_juv_mil")
 
+        # Test resolving with dict teams structure (e.g. FCTV33: {"home": {"name": "Juventus"}})
+        fctv_match = {
+            "id": "streamsport:fctv33:4521897",
+            "title": "Juventus vs Milan",
+            "teams": {
+                "home": {"name": "Juventus"},
+                "away": {"name": "Milan"},
+            },
+            "sources": [{"source": "fctv33", "id": "4521897"}]
+        }
+        fctv_streams = await mandrakodi_service.resolve_live_match_streams(fctv_match)
+        self.assertEqual(len(fctv_streams), 1)
+        self.assertEqual(fctv_streams[0]["id"], "mandra_juv_mil")
+
         # Test catalog reconciliation and timer reset
         old_sync_time = catalog_service._last_sync_time
         catalog_service._cached_matches = [
