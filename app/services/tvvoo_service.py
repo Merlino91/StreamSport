@@ -328,6 +328,7 @@ class TvVooService:
         "279": "tv8",                 # TV8 HD
         "280": "cielo",               # Cielo HD
         "295": "sportitalia solocalcio", # SOLOCALCIO (Sportitalia)
+        "32": "dmax",                 # DMAX HD
     }
 
     # Country-specific alias mapping (Silos) including official LCN numbering

@@ -139,5 +139,35 @@ class TestMandrakodiService(unittest.IsolatedAsyncioTestCase):
         mandrakodi_service._cached_matches = []
         catalog_service._cached_matches = []
 
+    async def test_italian_channels_sync(self):
+        """Verifies ingestion of Zona DAZN (AceStream), Mediaset 20 (ClearKey), and Rai 4K (Direct)."""
+        await mandrakodi_service.sync_channels(force=True)
+
+        # 1. Zona DAZN -> canonical "dazn 1" with acestream
+        dazn_streams = mandrakodi_service.get_channel_streams("dazn 1")
+        self.assertGreater(len(dazn_streams), 0)
+        ace_streams = [s for s in dazn_streams if s.get("source") == "acestream"]
+        self.assertGreater(len(ace_streams), 0)
+        self.assertTrue(ace_streams[0]["id"].startswith("16519c3e10c7f1dddea05eb2dae6182cbdd34e4f") or len(ace_streams[0]["id"]) == 40)
+        self.assertEqual(ace_streams[0]["country"], "Italia")
+
+        # 2. Mediaset 20 -> canonical "20 mediaset" with amstaff ClearKey
+        m20_streams = mandrakodi_service.get_channel_streams("20 mediaset")
+        self.assertGreater(len(m20_streams), 0)
+        self.assertEqual(m20_streams[0]["source"], "amstaff")
+        self.assertIn("kid", m20_streams[0]["stream_data"])
+        self.assertIn("key", m20_streams[0]["stream_data"])
+
+        # 3. Rai 4K -> canonical "rai 4k" with direct HLS
+        r4k_streams = mandrakodi_service.get_channel_streams("rai 4k")
+        self.assertGreater(len(r4k_streams), 0)
+        self.assertEqual(r4k_streams[0]["source"], "direct")
+        self.assertIn(".m3u8", r4k_streams[0]["stream_data"]["stream_url"])
+
+        # 4. Canale 5 -> canonical "canale 5" with direct HLS
+        c5_streams = mandrakodi_service.get_channel_streams("canale 5")
+        self.assertGreater(len(c5_streams), 0)
+        self.assertEqual(c5_streams[0]["source"], "direct")
+
 if __name__ == "__main__":
     unittest.main()

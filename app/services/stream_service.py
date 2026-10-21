@@ -523,7 +523,7 @@ class StreamService:
         acestream_streams: List[Dict[str, Any]] = []
         mandrakodi_sources = [
             s for s in sources
-            if s.get("provider") == "mandrakodi" or s.get("source") in ("amstaff", "acestream", "socceron")
+            if s.get("provider") == "mandrakodi" or s.get("source") in ("amstaff", "acestream", "socceron", "direct")
         ]
 
         for s in mandrakodi_sources:

@@ -132,6 +132,76 @@ class TestMandrakodiStreams(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("proxy", st["url"])
         self.assertNotIn("ep.bluccoj.com", st["url"])
 
+    async def test_stream_ordering_direct_amstaff_tvvoo_acestream(self):
+        """Verifies that Direct/Amstaff streams appear first, followed by TvVoo, and AceStreams at the end."""
+        now_ts = int(time.time() * 1000)
+        multi_stream_match = {
+            "id": "epg:test:multi",
+            "title": "Milan vs Inter",
+            "category": "football",
+            "_silo": "football",
+            "date": now_ts,
+            "sources": [
+                {
+                    "source": "acestream",
+                    "provider": "mandrakodi",
+                    "id": "16519c3e10c7f1dddea05eb2dae6182cbdd34e4f",
+                    "name": "Zona Dazn",
+                    "stream_data": {"ace_id": "16519c3e10c7f1dddea05eb2dae6182cbdd34e4f"},
+                    "country": "Italia",
+                },
+                {
+                    "source": "direct",
+                    "provider": "mandrakodi",
+                    "id": "https://stream.cdn/live.m3u8",
+                    "name": "Canale 5",
+                    "stream_data": {"stream_url": "https://stream.cdn/live.m3u8"},
+                    "country": "Italia",
+                },
+                {
+                    "source": "amstaff",
+                    "provider": "mandrakodi",
+                    "id": "https://live.mediaset/20.mpd",
+                    "name": "20 Mediaset",
+                    "stream_data": {"mpd_url": "https://live.mediaset/20.mpd", "kid": "kid1", "key": "key1"},
+                    "country": "Italia",
+                },
+                {
+                    "source": "tvvoo",
+                    "id": "canale 5",
+                    "name": "🇮🇹 Canale 5 HD",
+                    "url": "https://vavoo.to/play/123/index.m3u8",
+                    "country": "Italy",
+                }
+            ],
+            "_provider": "italian_epg",
+        }
+
+        from app.services.catalog_service import catalog_service
+        catalog_service._cached_matches.append(multi_stream_match)
+
+        streams = await stream_service.get_streams_for_event(
+            "epg:test:multi",
+            ep_url="https://ep.bluccoj.com",
+            ep_pass="Z3r0EP"
+        )
+        self.assertEqual(len(streams), 4)
+
+        # 1. Direct stream and Amstaff stream must be in top mandrakodi group
+        self.assertIn("Canale 5 [Diretto]", streams[0]["name"])
+        self.assertEqual(streams[0]["url"], "https://stream.cdn/live.m3u8")
+
+        self.assertIn("20 Mediaset [1080p 50fps]", streams[1]["name"])
+        self.assertIn("/proxy/mpd/manifest.m3u8", streams[1]["url"])
+
+        # 2. TvVoo stream comes next
+        self.assertIn("🇮🇹 Canale 5 HD", streams[2]["name"])
+
+        # 3. AceStream comes at the very end
+        self.assertIn("[AceStream] Zona Dazn", streams[3]["name"])
+        self.assertEqual(streams[3]["externalUrl"], "acestream://16519c3e10c7f1dddea05eb2dae6182cbdd34e4f")
+        self.assertTrue(streams[3]["behaviorHints"]["notWebReady"])
+
 
 if __name__ == "__main__":
     unittest.main()

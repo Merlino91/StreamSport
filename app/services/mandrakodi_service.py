@@ -218,6 +218,28 @@ class MandrakodiService:
             return "dmax"
         if "nba tv" in norm:
             return "nba tv"
+        if "zona dazn" in norm:
+            return "dazn 1"
+        if "20 mediaset" in norm or "mediaset 20" in norm:
+            return "20 mediaset"
+        if "rai 4k" in norm:
+            return "rai 4k"
+        if "canale 5" in norm:
+            return "canale 5"
+        if "italia 1" in norm:
+            return "italia 1"
+        if "rai 1" in norm:
+            return "rai 1"
+        if "rai 2" in norm:
+            return "rai 2"
+        if "rai 3" in norm:
+            return "rai 3"
+        if "tv8" in norm:
+            return "tv8"
+        if "rsi la1" in norm or "rsi la 1" in norm:
+            return "rsi la1"
+        if "rsi la2" in norm or "rsi la 2" in norm:
+            return "rsi la2"
 
         return norm if norm in self._channels_by_canonical else None
 
@@ -380,6 +402,8 @@ class MandrakodiService:
                     "ELEVEN SPORT",
                     "BEIN SPORT",
                     "SPORT TV",
+                    "DMAX",
+                    "NBA TV",
                 )
                 for it in f_data.get("items", []):
                     raw_title = it.get("title", "")
@@ -466,6 +490,91 @@ class MandrakodiService:
                         "quality": "4K" if "4K" in clean_title else "1080p",
                     }
                     channels_map.setdefault(canonical, []).append(stream_entry)
+
+            # 4. AceStream Channels from A1A134C (Zona DAZN, Eleven Sports, etc.)
+            if ENABLE_MANDRAKODI_ACESTREAM:
+                ace_data = await self._fetch_endpoint("A1A134C")
+                if ace_data and isinstance(ace_data, dict):
+                    for it in ace_data.get("items", []):
+                        raw_title = it.get("title", "")
+                        clean_title = re.sub(r"\[.*?\]", "", raw_title).strip()
+                        link = it.get("myresolve") or it.get("link") or ""
+                        if not link.startswith("acestream://"):
+                            continue
+                        ace_id = link.replace("acestream://", "").strip()
+                        if not ace_id:
+                            continue
+
+                        canonical = self.get_canonical_channel_key(clean_title)
+                        if not canonical:
+                            continue
+
+                        if any(s.get("id") == ace_id for s in channels_map.get(canonical, [])):
+                            continue
+
+                        t_upper = raw_title.upper()
+                        country = "Italia" if ("(ITA" in t_upper or "DAZN" in clean_title.upper()) else "Internazionale"
+                        is_4k = "4K" in clean_title.upper() or "[4K]" in raw_title.upper()
+                        stream_entry = {
+                            "source": "acestream",
+                            "provider": "mandrakodi",
+                            "id": ace_id,
+                            "name": clean_title,
+                            "stream_data": {"ace_id": ace_id},
+                            "country": country,
+                            "language": "ita" if country == "Italia" else "eng",
+                            "quality": "4K" if is_4k else "1080p",
+                        }
+                        channels_map.setdefault(canonical, []).append(stream_entry)
+
+            # 5. National Italian Broadcasters & DTT (A1A215: Mediaset 20 ClearKey, Rai 4K Direct, Canale 5, Italia 1, etc.)
+            ita_data = await self._fetch_endpoint("A1A215")
+            if ita_data and isinstance(ita_data, dict):
+                for it in ita_data.get("items", []):
+                    raw_title = it.get("title", "")
+                    clean_title = re.sub(r"\[.*?\]", "", raw_title).strip()
+                    link = it.get("myresolve") or it.get("link") or ""
+                    if not link or link == "ignore" or link.startswith("skyTV@@"):
+                        continue
+
+                    source_type = None
+                    stream_meta: Dict[str, Any] = {}
+                    if "amstaff@@" in link and ENABLE_MANDRAKODI_AMSTAFF:
+                        source_type, stream_meta = self._parse_amstaff_payload(link.split("amstaff@@", 1)[1])
+                        if not source_type:
+                            continue
+                    elif link.startswith("http"):
+                        source_type = "direct"
+                        stream_meta = {"stream_url": link.strip()}
+                    else:
+                        continue
+
+                    canonical = self.get_canonical_channel_key(clean_title)
+                    if not canonical:
+                        continue
+
+                    st_id = stream_meta.get("mpd_url") or stream_meta.get("stream_url")
+                    if st_id and any(s.get("id") == st_id for s in channels_map.get(canonical, [])):
+                        continue
+
+                    t_upper = clean_title.upper()
+                    country = "Svizzera" if "RSI" in t_upper else "Italia"
+                    is_4k = "4K" in t_upper
+                    stream_entry = {
+                        "source": source_type,
+                        "provider": "mandrakodi",
+                        "id": st_id,
+                        "name": clean_title,
+                        "stream_data": stream_meta,
+                        "country": country,
+                        "language": "ita",
+                        "quality": "4K" if is_4k else "1080p 50fps",
+                    }
+                    channels_map.setdefault(canonical, []).append(stream_entry)
+
+            # Prioritize Italian streams at the top of each canonical channel's list
+            for can, s_list in channels_map.items():
+                s_list.sort(key=lambda s: 0 if (s.get("country") == "Italia" or s.get("language") == "ita") else 1)
 
             self._channels_by_canonical = channels_map
             self._last_channels_sync = time.time()
