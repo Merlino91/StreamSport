@@ -440,6 +440,16 @@ class StreamService:
                     match = m
                     break
 
+        # 6. Check Mandrakodi (fallback)
+        if not match:
+            from app.services.mandrakodi_service import mandrakodi_service
+            mandra_matches = await mandrakodi_service.get_matches()
+            for m in mandra_matches:
+                mid = str(m.get("id", ""))
+                if mid == slug_id or any(mid.endswith(f"{d}{slug_id}") for d in delimiters):
+                    match = m
+                    break
+
         if not match:
             return []
 
@@ -490,6 +500,92 @@ class StreamService:
         # Match is LIVE or within 20 minutes before start!
         final_streams: List[Dict[str, Any]] = []
         sources = match.get("sources", [])
+
+        # 0. Process Mandrakodi (Amstaff ClearKey 1080p 50fps, Direct CDN, AceStream Media)
+        mandrakodi_streams: List[Dict[str, Any]] = []
+        acestream_streams: List[Dict[str, Any]] = []
+        mandrakodi_sources = [
+            s for s in sources
+            if s.get("provider") == "mandrakodi" or s.get("source") in ("amstaff", "acestream", "socceron")
+        ]
+
+        for s in mandrakodi_sources:
+            src_type = s.get("source")
+            ch_name = s.get("name") or match.get("title") or "Evento Live"
+            s_data = s.get("stream_data") or {}
+            flag = self.get_channel_flag(ch_name) or self.get_channel_flag(s.get("country", "")) or "🇮🇹"
+            flag_prefix = f"{flag} " if flag else ""
+
+            # Case A: Amstaff (MPEG-DASH with ClearKey DRM) -> via EasyProxy DASH
+            if src_type == "amstaff":
+                sky_chid = s.get("sky_channel_id")
+                mpd_url = s_data.get("mpd_url")
+                kid = s_data.get("kid")
+                key = s_data.get("key")
+
+                # If dynamic Sky channel, resolve dynamically via A1A159
+                if sky_chid and not mpd_url:
+                    from app.services.mandrakodi_service import mandrakodi_service
+                    res = await mandrakodi_service.resolve_sky_channel(sky_chid)
+                    if res:
+                        mpd_url = res.get("manifest")
+                        kid = res.get("kid")
+                        key = res.get("key")
+
+                if mpd_url and ep_url:
+                    encoded_mpd = urllib.parse.quote_plus(mpd_url)
+                    clearkey_param = f"{kid}:{key}" if (kid and key) else ""
+                    dash_url = f"{ep_url.rstrip('/')}/proxy/mpd/manifest.m3u8?d={encoded_mpd}"
+                    if clearkey_param:
+                        dash_url += f"&clearkey={clearkey_param}"
+                    if ep_pass:
+                        dash_url += f"&api_password={ep_pass}"
+
+                    mandrakodi_streams.append({
+                        "name": f"{flag_prefix}{ch_name} [1080p 50fps]",
+                        "title": f"{flag_prefix}Fonte: Mandrakodi (OTT Nativo) • Qualità: FHD 1080p @ 50fps\n🔐 DRM ClearKey Decifrato al volo",
+                        "url": dash_url,
+                        "behaviorHints": {"isLive": True, "notWebReady": False},
+                    })
+
+            # Case B: AceStream -> External URL opening AceStream Media App
+            elif src_type == "acestream":
+                ace_id = s_data.get("ace_id") or s.get("id")
+                if ace_id:
+                    ace_url = f"acestream://{ace_id}"
+                    quality_label = s.get("quality", "1080p")
+                    acestream_streams.append({
+                        "name": f"⚡ [AceStream] {ch_name} [{quality_label}]",
+                        "title": f"🌍 P2P BitTorrent Live • 📡 Fonte: Mandrakodi (AceStream Media)\n⚡ Reindirizza all'app AceStream Player / Media",
+                        "externalUrl": ace_url,
+                        "url": ace_url,
+                        "behaviorHints": {"isLive": True, "notWebReady": True},
+                    })
+
+            # Case C: Direct CDN (HLS Pubblico, es. Radio TV Serie A, SuperTennis)
+            elif src_type == "direct":
+                direct_url = s_data.get("stream_url") or s.get("id")
+                if direct_url and direct_url.startswith("http"):
+                    mandrakodi_streams.append({
+                        "name": f"{flag_prefix}📡 {ch_name} [Diretto]",
+                        "title": f"{flag_prefix}Fonte: Ufficiale CDN • Zero Carico Server\nQualità: HD Live",
+                        "url": direct_url,
+                        "behaviorHints": {"isLive": True, "notWebReady": False},
+                    })
+
+            # Case D: Socceron Web
+            elif src_type == "socceron":
+                soc_url = s_data.get("url") or s.get("id")
+                if soc_url and ep_url:
+                    stream_url = f"{ep_url.rstrip('/')}/proxy/manifest.m3u8?url={urllib.parse.quote_plus(soc_url)}"
+                    if ep_pass:
+                        stream_url += f"&api_password={ep_pass}"
+                    mandrakodi_streams.append({
+                        "name": f"{flag_prefix}[Socceron Web] {ch_name}",
+                        "title": f"{flag_prefix}Fonte: Socceron Web • Qualità: 720p Live",
+                        "url": stream_url,
+                        "behaviorHints": {"isLive": True, "notWebReady": False},
+                    })
 
         # 1. Process TvVoo (Vavoo) streams with top priority
         tvvoo_streams: List[Dict[str, Any]] = []
@@ -618,7 +714,14 @@ class StreamService:
         # 4. Process Streamed upstream sources (hotel, delta, etc.)
         streamed_streams: List[Dict[str, Any]] = []
         if ep_url:
-            other_sources = [(s.get("source"), s.get("id")) for s in sources if s.get("source") not in ("dlhd", "tvvoo", "fctv33") and s.get("source") and s.get("id")]
+            other_sources = [
+                (s.get("source"), s.get("id"))
+                for s in sources
+                if s.get("source") not in ("dlhd", "tvvoo", "fctv33", "amstaff", "acestream", "socceron", "direct")
+                and s.get("provider") != "mandrakodi"
+                and s.get("source")
+                and s.get("id")
+            ]
             if other_sources:
                 tasks = [streamed_api.get_streams_for_source(src_name, src_id) for src_name, src_id in other_sources]
                 results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -663,11 +766,11 @@ class StreamService:
         secondary_streams = dlhd_streams + fctv33_streams + streamed_streams
         secondary_streams.sort(key=lambda s: 0 if "🇮🇹" in s.get("name", "") else 1)
 
-        # Assemble final stream list: TvVoo first, then others
-        final_streams = tvvoo_streams + secondary_streams
+        # Assemble final stream list: Mandrakodi OTT & TvVoo first, then others, then AceStream
+        final_streams = mandrakodi_streams + tvvoo_streams + secondary_streams + acestream_streams
 
         if not final_streams:
-            if not ep_url and any(s.get("source") in ("dlhd", "fctv33", "streamed") for s in sources):
+            if not ep_url and any(s.get("source") in ("dlhd", "fctv33", "streamed", "amstaff") for s in sources):
                 return [
                     {
                         "name": "⚠️ EasyProxy non configurato",

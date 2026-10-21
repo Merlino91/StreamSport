@@ -47,6 +47,15 @@ ENABLE_FCTV33 = os.getenv("ENABLE_FCTV33", "true").lower() in ("true", "1", "yes
 FCTV33_API_BASE = os.getenv("FCTV33_API_BASE", "https://apis-data10.tcpwe138stya.ru")
 FCTV33_CACHE_TTL = int(os.getenv("FCTV33_CACHE_TTL", "3600"))  # 1 hour (in seconds)
 
+# Mandrakodi Provider Settings
+ENABLE_MANDRAKODI = os.getenv("ENABLE_MANDRAKODI", "true").lower() in ("true", "1", "yes")
+MANDRAKODI_PASSWORD = os.getenv("MANDRAKODI_PASSWORD", "UDvXkJqTBR")
+MANDRAKODI_DEVICE_ID = os.getenv("MANDRAKODI_DEVICE_ID", "ABC123XYZ456")
+MANDRAKODI_CACHE_TTL = int(os.getenv("MANDRAKODI_CACHE_TTL", "600"))  # 10 minutes (in seconds)
+ENABLE_MANDRAKODI_AMSTAFF = os.getenv("ENABLE_MANDRAKODI_AMSTAFF", "true").lower() in ("true", "1", "yes")
+ENABLE_MANDRAKODI_ACESTREAM = os.getenv("ENABLE_MANDRAKODI_ACESTREAM", "true").lower() in ("true", "1", "yes")
+ENABLE_MANDRAKODI_SOCCERON = os.getenv("ENABLE_MANDRAKODI_SOCCERON", "true").lower() in ("true", "1", "yes")
+
 
 
 # Addon Metadata

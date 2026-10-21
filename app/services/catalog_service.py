@@ -29,6 +29,7 @@ from app.services.tennis_poster_service import tennis_poster_service
 from app.services.thesportsdb_service import thesportsdb_service
 from app.services.tvvoo_service import tvvoo_service
 from app.services.fctv33_service import fctv33_service
+from app.services.mandrakodi_service import mandrakodi_service
 from app.services.italian_epg_service import italian_epg_service
 from app.services.diretta_service import diretta_service
 from app.services.canonical_competition_service import (
@@ -1064,7 +1065,7 @@ class CatalogService:
         if date_ms <= 0:
             return False
         title = (m.get("title") or "").lower()
-        if any(w in title for w in ("schedule", "channel", "24/7", "tv shows", "big brother", "live camera")):
+        if m.get("_provider") != "mandrakodi" and any(w in title for w in ("schedule", "channel", "24/7", "tv shows", "big brother", "live camera")):
             return False
         m_id = str(m.get("id") or "").lower()
         if m_id.startswith("admin-") or m_id.endswith("_live"):
@@ -1185,6 +1186,7 @@ class CatalogService:
                     italian_epg_service.get_matches(),
                     diretta_service.get_events(),
                     fctv33_service.get_matches(force=True),
+                    mandrakodi_service.get_matches(force=True),
                 ]
                 results = await asyncio.gather(*tasks, return_exceptions=True)
                 streamed_raw = results[0] if isinstance(results[0], list) else []
@@ -1193,16 +1195,20 @@ class CatalogService:
                 epg_raw = results[4] if isinstance(results[4], list) else []
                 diretta_events = results[5] if isinstance(results[5], list) else []
                 fctv33_raw = results[6] if isinstance(results[6], list) else []
+                mandrakodi_raw = results[7] if isinstance(results[7], list) else []
 
                 streamed_matches = [m for m in streamed_raw if self.is_real_match(m)]
                 daddylive_matches = [m for m in daddylive_raw if self.is_real_match(m)]
                 epg_matches = [m for m in epg_raw if self.is_real_match(m)]
                 fctv33_matches = [m for m in fctv33_raw if self.is_real_match(m)]
+                mandrakodi_matches = [m for m in mandrakodi_raw if self.is_real_match(m)]
 
                 # Merge streamed and daddylive matches silo-by-silo into combined fresh
                 combined_fresh = self.merge_and_deduplicate_by_silos(streamed_matches, daddylive_matches)
                 if fctv33_matches:
                     combined_fresh = self.merge_and_deduplicate_by_silos(combined_fresh, fctv33_matches)
+                if mandrakodi_matches:
+                    combined_fresh = self.merge_and_deduplicate_by_silos(combined_fresh, mandrakodi_matches)
 
                 # 2. Pull all active matches from DB to retain existing enriched posters
                 all_db_matches = [m for m in await db_service.get_active_matches_async() if self.is_real_match(m)]
