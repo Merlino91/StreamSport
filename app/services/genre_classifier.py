@@ -878,7 +878,7 @@ class GenreClassifier:
             # 3. EUROPEAN CUPS & UEFA TOURNAMENTS (Champions, Europa, Conference)
             # Evaluated first because teams come from different nations
             # --------------------------------------------------------------
-            is_uefa_cup = bool(re.search(r"\b(uefa\s*champions|champions\s*league|europa\s*league|conference\s*league|uefa\s*super\s*cup)\b", eval_text))
+            is_uefa_cup = bool(re.search(r"\b(uefa\s*champions|champions\s*league|ucl|uwcl|europa\s*league|uel|conference\s*league|uecl|uefa\s*super\s*cup)\b", eval_text))
             is_cross_national_clash = any(clash in title_lower for clash in (
                 "manchester city vs inter", "inter vs manchester city",
                 "real madrid vs bayern", "bayern vs real madrid",
@@ -892,7 +892,7 @@ class GenreClassifier:
                 "bayern vs psg", "psg vs bayern"
             ))
             if (is_uefa_cup or is_cross_national_clash) and not is_extra_eu_confed:
-                if is_cross_national_clash or re.search(r"\b(champions\s*league|uefa\s*champions)\b", eval_text):
+                if is_cross_national_clash or re.search(r"\b(champions\s*league|uefa\s*champions|ucl|uwcl)\b", eval_text):
                     return "calcio_estero", "Champions League"
                 return "calcio_estero", "Europa e Conference League"
 

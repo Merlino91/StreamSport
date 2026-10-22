@@ -3,7 +3,9 @@ import base64
 import datetime
 import json
 import logging
+import os
 import re
+import sys
 import time
 from typing import Any, Dict, List, Optional, Tuple, Set
 import urllib.parse
@@ -710,6 +712,66 @@ class MandrakodiService:
                         all_matches.extend(res)
                     elif isinstance(res, Exception):
                         logger.error("Error fetching Mandrakodi dynamic matches: %s", res)
+
+                # Validate dynamic standalone matches against Diretta.it of the CURRENT DAY:
+                # Mandrakodi dynamic events only specify HH:MM, implicitly assuming today's date in Rome.
+                # If Diretta/LiveSport does not have a confirmed match for the CURRENT DAY,
+                # the match is discarded as null/ghost/stale replay (e.g. yesterday's matches).
+                from app.services.diretta_service import diretta_service, extract_team_words
+
+                now_rome = datetime.datetime.now(ROME_TZ)
+                start_today_ms = datetime.datetime(now_rome.year, now_rome.month, now_rome.day, 0, 0, 0, tzinfo=ROME_TZ).timestamp() * 1000
+                end_today_ms = datetime.datetime(now_rome.year, now_rome.month, now_rome.day, 23, 59, 59, tzinfo=ROME_TZ).timestamp() * 1000
+
+                today_diretta: List[Dict[str, Any]] = []
+                try:
+                    diretta_events = getattr(diretta_service, "_cached_events", None) or []
+                    if not diretta_events and not ("unittest" in sys.modules or os.environ.get("STREAMSPORT_TESTING") == "1"):
+                        diretta_events = await diretta_service.get_events()
+                    today_diretta = [
+                        e for e in (diretta_events or [])
+                        if start_today_ms <= (e.get("date") or 0) <= end_today_ms
+                    ]
+                except Exception as e:
+                    logger.debug("Mandrakodi: could not load Diretta events for validation: %s", e)
+
+                validated_matches: List[Dict[str, Any]] = []
+                for m in all_matches:
+                    if m.get("_diretta_matched"):
+                        validated_matches.append(m)
+                        continue
+
+                    m_teams = m.get("teams", {})
+                    h_words = extract_team_words(m_teams.get("home", {}).get("name", "")) if isinstance(m_teams, dict) else set()
+                    a_words = extract_team_words(m_teams.get("away", {}).get("name", "")) if isinstance(m_teams, dict) else set()
+                    if (not h_words or not a_words) and " vs " in m.get("title", ""):
+                        parts = m.get("title", "").split(" vs ", 1)
+                        h_words = extract_team_words(parts[0])
+                        a_words = extract_team_words(parts[1])
+
+                    matched_de = None
+                    if h_words and a_words and today_diretta:
+                        for de in today_diretta:
+                            de_h = extract_team_words(de.get("home") or "")
+                            de_a = extract_team_words(de.get("away") or "")
+                            if (h_words & de_h) and (a_words & de_a):
+                                matched_de = de
+                                break
+
+                    if matched_de:
+                        m["_diretta_matched"] = True
+                        m["date"] = matched_de.get("date") or m["date"]
+                        if matched_de.get("competition"):
+                            m["competition"] = matched_de["competition"]
+                            m["_competition"] = matched_de["competition"]
+                        validated_matches.append(m)
+                    else:
+                        logger.info(
+                            "Mandrakodi: discarded match '%s' (no corresponding event found in Diretta/LiveSport for today).",
+                            m.get("title")
+                        )
+
+                all_matches = validated_matches
 
                 self._cached_matches = all_matches
                 self._last_fetch_time = time.time()
