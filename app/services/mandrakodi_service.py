@@ -300,8 +300,13 @@ class MandrakodiService:
             if not isinstance(sources, list):
                 continue
 
-            existing_stream_ids = {str(s.get("id")) for s in sources if isinstance(s, dict)}
+            existing_stream_ids = {str(s.get("id")) for s in sources if isinstance(s, dict) and s.get("id")}
             existing_sky_ids = {str(s.get("sky_channel_id")) for s in sources if isinstance(s, dict) and s.get("sky_channel_id")}
+            existing_urls = {
+                str(s.get("url") or s.get("stream_data", {}).get("stream_url") or s.get("stream_data", {}).get("mpd_url") or "")
+                for s in sources if isinstance(s, dict)
+            }
+            existing_urls.discard("")
 
             # Identify target channels from existing source names
             target_canonicals: Set[str] = set()
@@ -332,7 +337,8 @@ class MandrakodiService:
                 for st in streams:
                     st_id = str(st.get("id") or "")
                     sky_id = str(st.get("sky_channel_id") or "")
-                    if (st_id and st_id in existing_stream_ids) or (sky_id and sky_id in existing_sky_ids):
+                    st_url = str(st.get("url") or st.get("stream_data", {}).get("stream_url") or st.get("stream_data", {}).get("mpd_url") or "")
+                    if (st_id and st_id in existing_stream_ids) or (sky_id and sky_id in existing_sky_ids) or (st_url and st_url in existing_urls):
                         continue
 
                     # Copy and attach
@@ -342,6 +348,8 @@ class MandrakodiService:
                         existing_stream_ids.add(st_id)
                     if sky_id:
                         existing_sky_ids.add(sky_id)
+                    if st_url:
+                        existing_urls.add(st_url)
                     enriched_count += 1
 
         if enriched_count > 0:
@@ -368,7 +376,11 @@ class MandrakodiService:
                 or "-clr.isml" in mpd_url
             )
             if is_clear:
-                hls_url = mpd_url.replace("/manifest.mpd", "/manifest.m3u8").replace(".mpd", ".m3u8")
+                # Only Mediaset dual-manifest IIS Smooth Streaming streams support .mpd -> .m3u8 replacement
+                if "-clr.isml" in mpd_url or "mediaset.net" in mpd_url:
+                    hls_url = mpd_url.replace("/manifest.mpd", "/manifest.m3u8").replace(".mpd", ".m3u8")
+                else:
+                    hls_url = mpd_url
                 return "direct", {
                     "stream_url": hls_url,
                     "original_mpd": mpd_url,
@@ -506,6 +518,9 @@ class MandrakodiService:
                         source_type, stream_meta = self._parse_amstaff_payload(link.split("amstaff@@", 1)[1])
                         if not source_type:
                             continue
+                    elif link.startswith("http"):
+                        source_type = "direct"
+                        stream_meta = {"stream_url": link.strip()}
 
                     if not source_type:
                         continue
@@ -514,10 +529,29 @@ class MandrakodiService:
                     if not canonical:
                         continue
 
+                    st_id = (
+                        stream_meta.get("ace_id")
+                        or stream_meta.get("stream_url")
+                        or stream_meta.get("original_mpd")
+                        or stream_meta.get("mpd_url")
+                        or link
+                    )
+
+                    # Avoid duplicate streams under the same canonical channel
+                    if any(
+                        s.get("id") == st_id
+                        or (
+                            stream_meta.get("stream_url")
+                            and s.get("stream_data", {}).get("stream_url") == stream_meta.get("stream_url")
+                        )
+                        for s in channels_map.get(canonical, [])
+                    ):
+                        continue
+
                     stream_entry = {
                         "source": source_type,
                         "provider": "mandrakodi",
-                        "id": stream_meta.get("ace_id") or stream_meta.get("mpd_url"),
+                        "id": st_id,
                         "name": clean_title,
                         "stream_data": stream_meta,
                         "country": "Internazionale",
@@ -895,7 +929,12 @@ class MandrakodiService:
                     {
                         "source": source_type,
                         "provider": "mandrakodi",
-                        "id": stream_meta.get("mpd_url") or stream_meta.get("ace_id"),
+                        "id": (
+                            stream_meta.get("mpd_url")
+                            or stream_meta.get("ace_id")
+                            or stream_meta.get("stream_url")
+                            or stream_meta.get("original_mpd")
+                        ),
                         "name": f"Mandrakodi {source_type.upper()}",
                         "stream_data": stream_meta,
                         "country": current_country,

@@ -524,6 +524,8 @@ class StreamService:
         # 0. Process Mandrakodi (Amstaff ClearKey 1080p 50fps, Direct CDN, AceStream Media)
         mandrakodi_streams: List[Dict[str, Any]] = []
         acestream_streams: List[Dict[str, Any]] = []
+        seen_mandrakodi_urls: Set[str] = set()
+        seen_acestream_urls: Set[str] = set()
         mandrakodi_sources = [
             s for s in sources
             if s.get("provider") == "mandrakodi" or s.get("source") in ("amstaff", "acestream", "socceron", "direct")
@@ -560,13 +562,19 @@ class StreamService:
                     or ("-clr.isml" in str(mpd_url))
                 )
                 if is_clear and mpd_url:
-                    direct_hls = mpd_url.replace("/manifest.mpd", "/manifest.m3u8").replace(".mpd", ".m3u8")
-                    mandrakodi_streams.append({
-                        "name": f"{flag_prefix}📡 {ch_name} [Diretto]",
-                        "title": f"{flag_prefix}Fonte: Ufficiale CDN • Zero Carico Server\nQualità: HD Live (Flusso in chiaro)",
-                        "url": direct_hls,
-                        "behaviorHints": {"isLive": True, "notWebReady": False},
-                    })
+                    if "-clr.isml" in str(mpd_url) or "mediaset.net" in str(mpd_url):
+                        direct_hls = mpd_url.replace("/manifest.mpd", "/manifest.m3u8").replace(".mpd", ".m3u8")
+                    else:
+                        direct_hls = mpd_url
+
+                    if direct_hls not in seen_mandrakodi_urls:
+                        seen_mandrakodi_urls.add(direct_hls)
+                        mandrakodi_streams.append({
+                            "name": f"{flag_prefix}📡 {ch_name} [Diretto]",
+                            "title": f"{flag_prefix}Fonte: Ufficiale CDN • Zero Carico Server\nQualità: HD Live (Flusso in chiaro)",
+                            "url": direct_hls,
+                            "behaviorHints": {"isLive": True, "notWebReady": False},
+                        })
                     continue
 
                 if mpd_url and ep_url:
@@ -578,12 +586,14 @@ class StreamService:
                     if ep_pass:
                         dash_url += f"&api_password={ep_pass}"
 
-                    mandrakodi_streams.append({
-                        "name": f"{flag_prefix}{ch_name} [1080p 50fps]",
-                        "title": f"{flag_prefix}Fonte: Mandrakodi (OTT Nativo) • Qualità: FHD 1080p @ 50fps\n🔐 DRM ClearKey Decifrato al volo",
-                        "url": dash_url,
-                        "behaviorHints": {"isLive": True, "notWebReady": False},
-                    })
+                    if dash_url not in seen_mandrakodi_urls:
+                        seen_mandrakodi_urls.add(dash_url)
+                        mandrakodi_streams.append({
+                            "name": f"{flag_prefix}{ch_name} [1080p 50fps]",
+                            "title": f"{flag_prefix}Fonte: Mandrakodi (OTT Nativo) • Qualità: FHD 1080p @ 50fps\n🔐 DRM ClearKey Decifrato al volo",
+                            "url": dash_url,
+                            "behaviorHints": {"isLive": True, "notWebReady": False},
+                        })
 
             # Case B: AceStream -> External URL opening AceStream Media App
             elif src_type == "acestream":
@@ -591,24 +601,28 @@ class StreamService:
                 if ace_id:
                     ace_url = f"acestream://{ace_id}"
                     quality_label = s.get("quality", "1080p")
-                    acestream_streams.append({
-                        "name": f"{flag_prefix}⚡ [AceStream] {ch_name} [{quality_label}]",
-                        "title": f"🌍 P2P BitTorrent Live • 📡 Fonte: Mandrakodi (AceStream Media)\n⚡ Reindirizza all'app AceStream Player / Media",
-                        "externalUrl": ace_url,
-                        "url": ace_url,
-                        "behaviorHints": {"isLive": True, "notWebReady": True},
-                    })
+                    if ace_url not in seen_acestream_urls:
+                        seen_acestream_urls.add(ace_url)
+                        acestream_streams.append({
+                            "name": f"{flag_prefix}⚡ [AceStream] {ch_name} [{quality_label}]",
+                            "title": f"🌍 P2P BitTorrent Live • 📡 Fonte: Mandrakodi (AceStream Media)\n⚡ Reindirizza all'app AceStream Player / Media",
+                            "externalUrl": ace_url,
+                            "url": ace_url,
+                            "behaviorHints": {"isLive": True, "notWebReady": True},
+                        })
 
             # Case C: Direct CDN (HLS Pubblico, es. SuperTennis, Mediaset Clear)
             elif src_type == "direct":
                 direct_url = s_data.get("stream_url") or s.get("id")
                 if direct_url and direct_url.startswith("http"):
-                    mandrakodi_streams.append({
-                        "name": f"{flag_prefix}📡 {ch_name} [Diretto]",
-                        "title": f"{flag_prefix}Fonte: Ufficiale CDN • Zero Carico Server\nQualità: HD Live (Flusso in chiaro)",
-                        "url": direct_url,
-                        "behaviorHints": {"isLive": True, "notWebReady": False},
-                    })
+                    if direct_url not in seen_mandrakodi_urls:
+                        seen_mandrakodi_urls.add(direct_url)
+                        mandrakodi_streams.append({
+                            "name": f"{flag_prefix}📡 {ch_name} [Diretto]",
+                            "title": f"{flag_prefix}Fonte: Ufficiale CDN • Zero Carico Server\nQualità: HD Live (Flusso in chiaro)",
+                            "url": direct_url,
+                            "behaviorHints": {"isLive": True, "notWebReady": False},
+                        })
 
             # Case D: Socceron Web
             elif src_type == "socceron":
@@ -617,12 +631,14 @@ class StreamService:
                     stream_url = f"{ep_url.rstrip('/')}/proxy/manifest.m3u8?url={urllib.parse.quote_plus(soc_url)}"
                     if ep_pass:
                         stream_url += f"&api_password={ep_pass}"
-                    mandrakodi_streams.append({
-                        "name": f"{flag_prefix}[Socceron Web] {ch_name}",
-                        "title": f"{flag_prefix}Fonte: Socceron Web • Qualità: 720p Live",
-                        "url": stream_url,
-                        "behaviorHints": {"isLive": True, "notWebReady": False},
-                    })
+                    if stream_url not in seen_mandrakodi_urls:
+                        seen_mandrakodi_urls.add(stream_url)
+                        mandrakodi_streams.append({
+                            "name": f"{flag_prefix}[Socceron Web] {ch_name}",
+                            "title": f"{flag_prefix}Fonte: Socceron Web • Qualità: 720p Live",
+                            "url": stream_url,
+                            "behaviorHints": {"isLive": True, "notWebReady": False},
+                        })
 
         # Sort Mandrakodi and AceStream streams: Italian channels first
         mandrakodi_streams.sort(

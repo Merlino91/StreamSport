@@ -172,11 +172,11 @@ class TestMandrakodiService(unittest.IsolatedAsyncioTestCase):
         self.assertIn("kid", m20_streams[0]["stream_data"])
         self.assertIn("key", m20_streams[0]["stream_data"])
 
-        # 3. Rai 4K -> canonical "rai 4k" with direct HLS
+        # 3. Rai 4K -> canonical "rai 4k" with direct stream
         r4k_streams = mandrakodi_service.get_channel_streams("rai 4k")
         self.assertGreater(len(r4k_streams), 0)
         self.assertEqual(r4k_streams[0]["source"], "direct")
-        self.assertIn(".m3u8", r4k_streams[0]["stream_data"]["stream_url"])
+        self.assertTrue(r4k_streams[0]["stream_data"]["stream_url"].startswith("http"))
 
         # 4. Canale 5 -> canonical "canale 5" with direct HLS
         c5_streams = mandrakodi_service.get_channel_streams("canale 5")

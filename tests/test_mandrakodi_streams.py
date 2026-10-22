@@ -281,6 +281,53 @@ class TestMandrakodiStreams(unittest.IsolatedAsyncioTestCase):
         self.assertGreaterEqual(len(streams), 1)
         self.assertIn("FCTV33", streams[0]["name"])
 
+    async def test_non_mediaset_clear_mpd_keeps_mpd_url(self):
+        """Verifies that non-Mediaset clear MPD streams (like MSVDN) do NOT generate a broken .m3u8 URL."""
+        msvdn_payload = "https://421b2081187a40368f24e4fb496bfc26.msvdn.net/channel1/manifest.mpd|0000"
+        src_type, meta = mandrakodi_service._parse_amstaff_payload(msvdn_payload)
+        self.assertEqual(src_type, "direct")
+        self.assertTrue(meta.get("is_clear"))
+        self.assertEqual(meta.get("stream_url"), "https://421b2081187a40368f24e4fb496bfc26.msvdn.net/channel1/manifest.mpd")
+        self.assertNotIn(".m3u8", meta.get("stream_url"))
+
+    async def test_enrichment_idempotency_prevents_duplicates(self):
+        """Verifies that running enrichment multiple times does not produce duplicate streams."""
+        now_ts = int(time.time() * 1000)
+        match = {
+            "id": "tennis:test:dupe",
+            "title": "Kawa vs Bencic",
+            "category": "tennis",
+            "_silo": "tennis",
+            "date": now_ts,
+            "sources": [
+                {"source": "fctv33", "id": "2249457", "name": "FCTV33 Live"},
+                {"source": "tvvoo", "id": "supertennis", "name": "SuperTennis", "url": "https://vavoo.to/play/st1"}
+            ]
+        }
+        # Pre-populate registry with a direct stream
+        mandrakodi_service._channels_by_canonical["supertennis"] = [
+            {
+                "source": "direct",
+                "provider": "mandrakodi",
+                "id": "https://live-embed.supertennix.hiway.media/manifest.m3u8",
+                "name": "SuperTennis (ITA - M3U8)",
+                "stream_data": {"stream_url": "https://live-embed.supertennix.hiway.media/manifest.m3u8"},
+                "country": "Italia",
+                "language": "ita",
+                "quality": "1080p",
+            }
+        ]
+
+        # Pass 1
+        c1 = mandrakodi_service.enrich_matches_with_mandrakodi([match])
+        self.assertEqual(c1, 1)
+        self.assertEqual(len(match["sources"]), 3)
+
+        # Pass 2
+        c2 = mandrakodi_service.enrich_matches_with_mandrakodi([match])
+        self.assertEqual(c2, 0)
+        self.assertEqual(len(match["sources"]), 3)
+
 
 if __name__ == "__main__":
     unittest.main()
