@@ -226,21 +226,18 @@ class GenreClassifier:
                 canon = None
 
         if canon:
-            # Country-specific guard for homonym league names (Serie A, Serie B, Serie C)
+            # Country-specific guard for homonym league names
+            # If the event explicitly originates from a non-domestic country, invalidate canonical override
+            country_clean = (match.get("country") or "").strip().lower()
             if canon in ("football_serie_a", "football_serie_b", "football_serie_c"):
-                raw_eval = f"{title_lower} {(match.get('competition') or '').lower()}"
-                if any(x in raw_eval for x in ("brazil", "brasil", "ecuador", "colombia", "chile", "peru", "argentina", "mexico", "usa", "🇧🇷", "🇪🇨")):
-                    return "calcio_estero", "Americhe e Leghe Extra-UE"
-
-            if canon == "football_la_liga":
-                raw_eval = f"{title_lower} {(match.get('competition') or '').lower()}"
-                if any(x in raw_eval for x in ("chile", "argentina", "uruguay", "nicaragua", "peru", "colombia", "mexico")):
-                    return "calcio_estero", "Americhe e Leghe Extra-UE"
-
-            if canon == "football_premier_league":
-                raw_eval = f"{title_lower} {(match.get('competition') or '').lower()}"
-                if any(x in raw_eval for x in ("canada", "canadian", "egitto", "egypt", "armenia", "iraq", "jamaica", "giamaica", "kuwait", "bahrain", "bangladesh", "azerbaijan", "antigua", "ethiopia", "etiopia", "eswatini")):
-                    return "calcio_estero", "Americhe e Leghe Extra-UE"
+                if country_clean and country_clean not in ("italia", "italy"):
+                    canon = None
+            elif canon == "football_la_liga":
+                if country_clean and country_clean not in ("spagna", "spain"):
+                    canon = None
+            elif canon == "football_premier_league":
+                if country_clean and country_clean not in ("inghilterra", "england", "uk", "regno unito"):
+                    canon = None
 
             canon_map = {
                 "football_serie_a": ("calcio_italiano", "Serie A"),
@@ -912,7 +909,7 @@ class GenreClassifier:
                 country in ("italia", "italy")
                 or "🇮🇹" in eval_text
                 or is_ita_derby
-                or bool(re.search(r"\b(italy|italia|italian|serie\s*a|serie\s*b|serie\s*c|coppa\s*italia|supercoppa\s*italiana|primavera)\b", eval_text))
+                or bool(re.search(r"\b(italy|italia|italian|coppa\s*italia|supercoppa\s*italiana|primavera)\b", eval_text))
             )
             if is_ita_nation and not is_foreign and not is_extra_eu:
                 if is_women:
@@ -932,53 +929,91 @@ class GenreClassifier:
 
             # --------------------------------------------------------------
             # 6. PREMIER LEAGUE (DOPPIO FILTRO: 1° Nazione -> 2° Torneo)
-            # Gate 1: Country is England/UK OR explicit English indicator in text
-            # Gate 2: League is Premier League / FA Cup / Carabao
+            # Gate 1 (Positively England / UK): positive country, flag, known derby, or English keyword
+            # Gate 2 (Premier League / FA Cup / Carabao Cup)
+            # SCARTO: English lower leagues / discards -> 'Altri Campionati Europei'
             # --------------------------------------------------------------
-            is_epl_derby = any(d in title_lower for d in ("arsenal vs liverpool", "liverpool vs arsenal", "chelsea vs liverpool", "arsenal vs chelsea", "tottenham vs arsenal"))
-            is_other_european_country = bool(country and country in (self._EUROPEAN_COUNTRIES - {"inghilterra", "england", "uk"}))
+            is_epl_derby = any(d in title_lower for d in (
+                "arsenal vs liverpool", "liverpool vs arsenal",
+                "chelsea vs liverpool", "liverpool vs chelsea",
+                "arsenal vs chelsea", "chelsea vs arsenal",
+                "tottenham vs arsenal", "arsenal vs tottenham",
+                "manchester united vs liverpool", "liverpool vs manchester united",
+                "manchester city vs manchester united", "manchester united vs manchester city"
+            ))
             is_england = (
-                (country in ("inghilterra", "england", "uk") or "🏴󠁧󠁢󠁥󠁮󠁧󠁿" in eval_text or is_epl_derby or bool(re.search(r"\b(england|inghilterra|uk|epl)\b", eval_text)))
-                or (
-                    bool(re.search(r"\bpremier\s*league\b", eval_text))
-                    and not is_other_european_country
-                    and not any(k in eval_text for k in ("malta", "maltese", "russia", "russian", "ukraine", "wales", "cymru", "ireland", "irish", "scotland", "scottish"))
-                )
+                country in ("inghilterra", "england", "uk", "regno unito")
+                or "🏴󠁧󠁢󠁥󠁮󠁧󠁿" in eval_text
+                or is_epl_derby
+                or bool(re.search(r"\b(england|inghilterra|uk|regno\s*unito|epl|english)\b", eval_text))
             )
-            if is_england and not is_extra_eu and not is_other_european_country:
-                if re.search(r"\b(premier\s*league|epl|fa\s*cup|carabao|efl\s*cup)\b", eval_text) or is_epl_derby:
+            if is_england and not is_extra_eu:
+                if is_youth or bool(re.search(r"\b(u21|u23|u18|premier\s*league\s*2)\b", eval_text)):
+                    return "calcio_estero", "Europei Under 21 e Nazionali Giovanili"
+                if is_women:
+                    return "calcio_estero", "Altri Campionati Europei"
+                if is_epl_derby or bool(re.search(r"\b(premier\s*league|epl|fa\s*cup|carabao|efl\s*cup)\b", eval_text)):
                     return "calcio_estero", "Premier League"
+                # SCARTO: English domestic match that is not Premier League (e.g. Championship, League One, League Two)
+                # Re-routed directly to the European catch-all
+                return "calcio_estero", "Altri Campionati Europei"
 
             # --------------------------------------------------------------
             # 7. LA LIGA (DOPPIO FILTRO: 1° Nazione -> 2° Torneo)
-            # Gate 1: Country is Spain OR explicit Spain indicator in text
-            # Gate 2: League is LaLiga / Primera Division / Copa del Rey
+            # Gate 1 (Positively Spain): positive country, flag, known derby, or Spanish keyword
+            # Gate 2 (LaLiga / Primera Division / Copa del Rey / Supercopa)
+            # SCARTO: Spanish lower leagues / discards -> 'Altri Campionati Europei'
             # --------------------------------------------------------------
-            is_liga_derby = any(d in title_lower for d in ("real madrid vs barcelona", "barcelona vs real madrid", "el clasico", "real madrid vs atletico", "atletico vs real madrid"))
+            is_liga_derby = any(d in title_lower for d in (
+                "real madrid vs barcelona", "barcelona vs real madrid", "el clasico",
+                "real madrid vs atletico", "atletico vs real madrid",
+                "sevilla vs betis", "betis vs sevilla"
+            ))
             is_spain = (
                 country in ("spagna", "spain")
                 or "🇪🇸" in eval_text
                 or is_liga_derby
-                or bool(re.search(r"\b(spain|spagna|espana|españa|laliga|la\s*liga)\b", eval_text))
+                or bool(re.search(r"\b(spain|spagna|espana|españa|spanish|laliga)\b", eval_text))
             )
             if is_spain and not is_extra_eu:
-                if re.search(r"\b(laliga|la\s*liga|primera\s*division|copa\s*del\s*rey)\b", eval_text) or is_liga_derby:
+                if is_youth or bool(re.search(r"\b(u21|u23|u18|u19)\b", eval_text)):
+                    return "calcio_estero", "Europei Under 21 e Nazionali Giovanili"
+                if is_women:
+                    return "calcio_estero", "Altri Campionati Europei"
+                is_segunda = bool(re.search(r"\b(segunda|laliga\s*2|hypermotion|primera\s*rfef|rfef)\b", eval_text))
+                if not is_segunda and (is_liga_derby or bool(re.search(r"\b(laliga|la\s*liga|primera\s*division|copa\s*del\s*rey|supercopa)\b", eval_text))):
                     return "calcio_estero", "La Liga"
+                # SCARTO: Spanish domestic match that is not LaLiga (e.g. Segunda División, Hypermotion)
+                # Re-routed directly to the European catch-all
+                return "calcio_estero", "Altri Campionati Europei"
 
             # --------------------------------------------------------------
-            # 8. BUNDESLIGA E LIGUE 1 (DOPPIO FILTRO)
+            # 8. BUNDESLIGA E LIGUE 1 (DOPPIO FILTRO: 1° Nazione -> 2° Torneo)
+            # Gate 1 (Positively Germany or France)
+            # Gate 2 (Bundesliga / DFB-Pokal or Ligue 1 / Coupe de France)
+            # SCARTO: German or French lower leagues / discards -> 'Altri Campionati Europei'
             # --------------------------------------------------------------
             is_germany = (
                 country in ("germania", "germany")
-                or bool(re.search(r"\b(germany|germania|deutschland)\b", eval_text))
+                or "🇩🇪" in eval_text
+                or bool(re.search(r"\b(germany|germania|deutschland|german)\b", eval_text))
             )
             is_france = (
                 country in ("francia", "france")
-                or bool(re.search(r"\b(france|francia)\b", eval_text))
+                or "🇫🇷" in eval_text
+                or bool(re.search(r"\b(france|francia|french)\b", eval_text))
             )
             if (is_germany or is_france) and not is_extra_eu:
-                if re.search(r"\b(bundesliga|dfb\s*pokal|ligue\s*1|coupe\s*de\s*france)\b", eval_text):
+                if is_youth or bool(re.search(r"\b(u21|u23|u18|u19)\b", eval_text)):
+                    return "calcio_estero", "Europei Under 21 e Nazionali Giovanili"
+                if is_women:
+                    return "calcio_estero", "Altri Campionati Europei"
+                is_lower_div = bool(re.search(r"\b(2\.?\s*bundesliga|3\.?\s*liga|ligue\s*2|national)\b", eval_text))
+                if not is_lower_div and bool(re.search(r"\b(bundesliga|dfb\s*pokal|ligue\s*1|coupe\s*de\s*france|trophee\s*des\s*champions)\b", eval_text)):
                     return "calcio_estero", "Bundesliga e Ligue 1"
+                # SCARTO: German / French lower division match (e.g. 2. Bundesliga, Ligue 2)
+                # Re-routed directly to the European catch-all
+                return "calcio_estero", "Altri Campionati Europei"
 
             # --------------------------------------------------------------
             # 9. ALTRI CAMPIONATI EUROPEI (Strict Gate: European nation/league/flag required)
