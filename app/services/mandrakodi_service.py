@@ -819,27 +819,46 @@ class MandrakodiService:
         m_teams = match.get("teams") if isinstance(match.get("teams"), dict) else {}
         m_home = self._extract_team_name(m_teams.get("home"))
         m_away = self._extract_team_name(m_teams.get("away"))
+        m_silo = (match.get("_silo") or match.get("category") or "").lower().strip()
 
-        # Token set for comparison
-        clean_tokens = set(re.findall(r"\b[a-zA-Z0-9]{3,}\b", m_title.lower()))
+        # Stopwords that must never trigger cross-event false matches (especially in tennis/tournaments)
+        TENNIS_STOPWORDS = {
+            "wta", "atp", "itf", "open", "court", "campo", "tennis", "live", "tournament",
+            "men", "women", "singles", "doubles", "round", "rounds", "qualification",
+            "qualificazioni", "day", "giornata", "finals", "semi", "quarter"
+        }
+        clean_tokens = {
+            t for t in re.findall(r"\b[a-zA-Z0-9]{3,}\b", m_title.lower())
+            if t not in TENNIS_STOPWORDS
+        }
 
         for km in self._cached_matches:
             km_title = (km.get("title") or "").strip().lower()
             km_teams = km.get("teams") if isinstance(km.get("teams"), dict) else {}
             km_home = self._extract_team_name(km_teams.get("home"))
             km_away = self._extract_team_name(km_teams.get("away"))
+            km_silo = (km.get("_silo") or km.get("category") or "").lower().strip()
+
+            if m_silo and km_silo and m_silo != km_silo:
+                continue
 
             matched = False
-            # 1. Exact or partial home & away team match
-            if m_home and m_away and km_home and km_away:
+            is_1v1 = bool(m_home and m_away)
+            km_is_1v1 = bool(km_home and km_away)
+
+            # 1. Exact or partial home & away team match (required for 1v1 matches)
+            if is_1v1 and km_is_1v1:
                 if (m_home in km_home or km_home in m_home) and (m_away in km_away or km_away in m_away):
                     matched = True
                 elif (m_home in km_away or km_away in m_home) and (m_away in km_home or km_home in m_away):
                     matched = True
 
-            # 2. Token overlap if teams match is not conclusive
-            if not matched and clean_tokens:
-                km_tokens = set(re.findall(r"\b[a-zA-Z0-9]{3,}\b", km_title))
+            # 2. Token overlap if and only if NEITHER is a specific 1v1 match (e.g. multicourt tournament session)
+            elif not is_1v1 and not km_is_1v1 and clean_tokens:
+                km_tokens = {
+                    t for t in re.findall(r"\b[a-zA-Z0-9]{3,}\b", km_title)
+                    if t not in TENNIS_STOPWORDS
+                }
                 overlap = clean_tokens.intersection(km_tokens)
                 if len(overlap) >= 2 or (len(clean_tokens) == 1 and len(overlap) == 1):
                     matched = True

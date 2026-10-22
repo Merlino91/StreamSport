@@ -129,7 +129,6 @@ class TestSuperTennisAndMulticourt(unittest.TestCase):
             if not (
                 (m.get("_silo") == "tennis" or m.get("category") == "tennis")
                 and not bool(isinstance(m.get("teams"), dict) and m["teams"].get("home") and m["teams"].get("away"))
-                and not m.get("_certified_by_sky")
                 and m.get("_provider") != "italian_epg"
             )
         ]
@@ -138,6 +137,61 @@ class TestSuperTennisAndMulticourt(unittest.TestCase):
         self.assertIn("dlhd-kawa", remaining_ids)
         self.assertIn("sky-ningbo-session", remaining_ids)
         self.assertNotIn("dlhd-garbled", remaining_ids)
+
+    def test_mandrakodi_resolve_live_match_streams_isolates_1v1_matches(self):
+        """Verify Mandrakodi JIT resolver never attaches sources from different matches/courts via generic tournament stopwords."""
+        match_kawa = {
+            "id": "dlhd-kawa",
+            "title": "WTA Tokyo: Katarzyna Kawa vs Belinda Bencic",
+            "_silo": "tennis",
+            "category": "tennis",
+            "teams": {"home": "Katarzyna Kawa", "away": "Belinda Bencic"},
+        }
+
+        # Cached Mandrakodi matches: one for Court 1 (multicourt), one for a completely different match in Tokyo
+        mandrakodi_service._cached_matches = [
+            {
+                "id": "mandra-court1",
+                "title": "WTA Tokyo Court 1",
+                "_silo": "tennis",
+                "category": "tennis",
+                "teams": None,
+                "sources": [{"id": "s_court1", "name": "Court 1"}],
+            },
+            {
+                "id": "mandra-other-match",
+                "title": "WTA Tokyo: Qinwen Zheng vs Moyuka Uchijima",
+                "_silo": "tennis",
+                "category": "tennis",
+                "teams": {"home": "Qinwen Zheng", "away": "Moyuka Uchijima"},
+                "sources": [{"id": "s_zheng", "name": "Zheng vs Uchijima"}],
+            },
+            {
+                "id": "mandra-correct-match",
+                "title": "Katarzyna Kawa vs Belinda Bencic",
+                "_silo": "tennis",
+                "category": "tennis",
+                "teams": {"home": "Katarzyna Kawa", "away": "Belinda Bencic"},
+                "sources": [{"id": "s_bencic", "name": "Bencic vs Kawa Stream"}],
+            },
+        ]
+        mandrakodi_service._last_fetch_time = 9999999999.0  # skip re-fetch
+
+        # 1. Resolve for Kawa vs Bencic -> MUST ONLY return s_bencic!
+        res = asyncio.run(mandrakodi_service.resolve_live_match_streams(match_kawa))
+        self.assertEqual(len(res), 1)
+        self.assertEqual(res[0]["id"], "s_bencic")
+
+        # 2. When no matching player names exist -> MUST NOT attach Court 1 or Zheng vs Uchijima!
+        match_sabalenka = {
+            "id": "dlhd-saba",
+            "title": "WTA Tokyo: Aryna Sabalenka vs Iga Swiatek",
+            "_silo": "tennis",
+            "category": "tennis",
+            "teams": {"home": "Aryna Sabalenka", "away": "Iga Swiatek"},
+        }
+        res2 = asyncio.run(mandrakodi_service.resolve_live_match_streams(match_sabalenka))
+        self.assertEqual(len(res2), 0)
 
 
 if __name__ == "__main__":

@@ -1339,15 +1339,15 @@ class CatalogService:
                 # Enrich again with Mandrakodi in case EPG added new Italian Sky/Tivùsat channels
                 mandrakodi_service.enrich_matches_with_mandrakodi(all_matches)
 
-                # Purge uncertified provider multicourt / aggregated tennis events:
-                # Any non-1v1 tennis event from external streaming providers that did not match
-                # a certified tournament session in the official Sky/Tivùsat EPG is silenced.
+                # Purge uncertified or duplicate provider multicourt / aggregated tennis events:
+                # Standalone multicourt / aggregated tournament session cards in tennis are strictly
+                # reserved for the official Sky/Tivùsat EPG catalog items. External streaming providers
+                # (DaddyLive, Streamed, Mandrakodi) can only supply sources to the official Sky session.
                 all_matches = [
                     m for m in all_matches
                     if not (
                         (m.get("_silo") == "tennis" or m.get("category") == "tennis")
                         and not bool(isinstance(m.get("teams"), dict) and m["teams"].get("home") and m["teams"].get("away"))
-                        and not m.get("_certified_by_sky")
                         and m.get("_provider") != "italian_epg"
                     )
                 ]
