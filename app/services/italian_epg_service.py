@@ -525,6 +525,7 @@ class ItalianEPGService:
 
                 match_obj: Dict[str, Any] = {
                     "id": match_id,
+                    "_provider": "italian_epg",
                     "title": title,
                     "category": cat,
                     "_silo": silo,
@@ -671,6 +672,7 @@ class ItalianEPGService:
 
                 match_obj: Dict[str, Any] = {
                     "id": match_id,
+                    "_provider": "italian_epg",
                     "title": title,
                     "category": cat,
                     "_silo": silo,
@@ -912,15 +914,19 @@ class ItalianEPGService:
             m_teams = m.get("teams")
             m_title = m.get("title", "")
             m_tokens = self._clean_tokens(m_title)
-            m_is_sim = is_simulcast_event(m_title) or is_simulcast_event(str(m.get("id", "")))
+            m_is_1v1 = bool(m_teams and m_teams.get("home") and m_teams.get("away"))
+            m_is_sim = is_simulcast_event(m_title) or is_simulcast_event(str(m.get("id", ""))) or (m_silo == "tennis" and not m_is_1v1)
 
             matched_epg = None
             for ep in epg_events:
                 ep_title = ep.get("title", "")
-                ep_is_sim = is_simulcast_event(ep_title) or is_simulcast_event(str(ep.get("id", "")))
+                ep_teams = ep.get("teams")
+                ep_is_1v1 = bool(ep_teams and ep_teams.get("home") and ep_teams.get("away"))
+                ep_is_sim = is_simulcast_event(ep_title) or is_simulcast_event(str(ep.get("id", ""))) or ((ep.get("_silo") or ep.get("category") or "").lower() == "tennis" and not ep_is_1v1)
 
-                # CRITICAL: A simulcast show and a regular 1v1 match MUST NEVER match!
-                if m_is_sim != ep_is_sim:
+                # CRITICAL: A simulcast/session show and a regular 1v1 match MUST NEVER match!
+                # (Unless non-SuperTennis tennis bridge matches a tournament session to 1v1 court match)
+                if m_is_sim != ep_is_sim and not (m_silo == "tennis" and (ep.get("_silo") or ep.get("category") or "").lower() == "tennis"):
                     continue
 
                 ep_silo = (ep.get("_silo") or ep.get("category") or "").lower()
@@ -932,7 +938,7 @@ class ItalianEPGService:
 
                 ep_date = ep.get("date", 0)
                 if m_date and ep_date:
-                    if m_is_sim:
+                    if m_is_sim and ep_is_sim:
                         if abs(m_date - ep_date) > 240 * 60 * 1000:
                             continue
                     else:
@@ -955,6 +961,17 @@ class ItalianEPGService:
                             continue
 
                 if m_is_sim and ep_is_sim:
+                    if m_silo == "tennis" and ep_silo == "tennis":
+                        m_eval = f"{m.get('competition', '')} {m.get('title', '')} {m.get('canonical_competition', '')}"
+                        ep_eval = f"{ep.get('competition', '')} {ep.get('title', '')} {ep.get('eventSynopsis', '')}"
+                        m_circ, m_city = self._extract_tennis_circuit_and_city(m_eval)
+                        ep_circ, ep_city = self._extract_tennis_circuit_and_city(ep_eval)
+                        circ_match = (m_circ == ep_circ) if (m_circ and ep_circ) else True
+                        city_match = bool(m_city and ep_city and (m_city == ep_city or m_city in ep_eval.lower() or ep_city in m_eval.lower()))
+                        if circ_match and city_match:
+                            matched_epg = ep
+                            break
+                        continue
                     m_info = get_simulcast_info(m_title)
                     ep_info = get_simulcast_info(ep_title)
                     if m_info and ep_info and m_info["title"] == ep_info["title"]:
@@ -985,10 +1002,23 @@ class ItalianEPGService:
                 # Tennis Tournament Session Bridge:
                 # If ep is a general tournament session / main event (not a specific 1v1 match between different players)
                 # and both belong to the same circuit (ATP/WTA/Challenger/Slam) and city/venue,
-                # bridge the official TV channel (Sky Sport Tennis / SuperTennis) to the match.
+                # bridge the official TV channel to the match.
+                # NOTE: For SuperTennis, generic tournament sessions must NEVER bridge to individual 1v1 matches;
+                # individual matches receive SuperTennis strictly if Diretta.it certified it or if ep is a specific 1v1 match.
                 if not is_same and m_silo == "tennis" and ep_silo == "tennis":
                     is_ep_specific_match = bool(ep_teams and ep_teams.get("home") and ep_teams.get("away"))
-                    if not is_ep_specific_match:
+                    is_m_specific_match = bool(m_teams and m_teams.get("home") and m_teams.get("away"))
+
+                    ep_sources = ep.get("sources", [])
+                    is_supertennis_session = any(
+                        s.get("canonical") == "supertennis" or "supertennis" in (s.get("name") or "").lower()
+                        for s in ep_sources if isinstance(s, dict)
+                    )
+
+                    if is_supertennis_session and is_m_specific_match:
+                        # SuperTennis 24/7 channel rule: do not bridge general tournament sessions to individual court matches
+                        pass
+                    elif not is_ep_specific_match:
                         m_eval = f"{m.get('competition', '')} {m.get('title', '')} {m.get('canonical_competition', '')}"
                         ep_eval = f"{ep.get('competition', '')} {ep.get('title', '')} {ep.get('eventSynopsis', '')}"
                         m_circ, m_city = self._extract_tennis_circuit_and_city(m_eval)
@@ -1019,6 +1049,21 @@ class ItalianEPGService:
                     m["poster"] = matched_epg["poster"]
                     if not m.get("background"):
                         m["background"] = matched_epg.get("background") or matched_epg["poster"]
+
+                # If m is an aggregated multicourt event adopting a certified Sky tournament session:
+                ep_teams_obj = matched_epg.get("teams")
+                is_m_1v1 = bool(m_teams and m_teams.get("home") and m_teams.get("away"))
+                is_ep_1v1 = bool(ep_teams_obj and ep_teams_obj.get("home") and ep_teams_obj.get("away"))
+                if not is_m_1v1 and not is_ep_1v1 and m_silo == "tennis":
+                    m["title"] = matched_epg.get("title") or m.get("title")
+                    if matched_epg.get("competition"):
+                        m["competition"] = matched_epg["competition"]
+                    if matched_epg.get("eventSynopsis"):
+                        m["eventSynopsis"] = matched_epg["eventSynopsis"]
+                    if matched_epg.get("poster"):
+                        m["poster"] = matched_epg["poster"]
+                        m["background"] = matched_epg.get("background") or matched_epg["poster"]
+                    m["_certified_by_sky"] = True
 
                 existing_sources = m.setdefault("sources", [])
                 existing_keys = {

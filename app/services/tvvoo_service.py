@@ -442,7 +442,7 @@ class TvVooService:
             "sky sport 211": "eurosport 2",
             "211": "eurosport 2",
 
-            # SuperTennis (LCN 212)
+            # SuperTennis (LCN 212) - Linear 24/7 Channel
             "supertennis": "supertennis",
             "super tennis": "supertennis",
             "supertennis hd": "supertennis",
@@ -451,6 +451,16 @@ class TvVooService:
             "sky 212": "supertennis",
             "sky sport 212": "supertennis",
             "212": "supertennis",
+
+            # SuperTennis OTT Interactive Feeds (isolated from linear H24)
+            "supertennis 1": "supertennis 1",
+            "super tennis 1": "supertennis 1",
+            "supertennis 2": "supertennis 2",
+            "super tennis 2": "supertennis 2",
+            "supertennis 3": "supertennis 3",
+            "super tennis 3": "supertennis 3",
+            "supertennis 4": "supertennis 4",
+            "super tennis 4": "supertennis 4",
 
             # DAZN Italia (LCN 214, 215)
             # NOTE: Generic unnumbered 'dazn' / 'dazn it' represents the OTT streaming platform, NOT linear DAZN 1!

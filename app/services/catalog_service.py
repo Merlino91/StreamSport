@@ -1266,6 +1266,19 @@ class CatalogService:
                 if mandrakodi_matches:
                     combined_fresh = self.merge_and_deduplicate_by_silos(combined_fresh, mandrakodi_matches)
 
+                # Ingest certified multicourt tournament sessions and simulcasts from Italian EPG (Sky/Tivùsat)
+                epg_certified_sessions = [
+                    m for m in epg_matches
+                    if (
+                        (m.get("_silo") == "tennis" or m.get("category") == "tennis")
+                        and not bool(isinstance(m.get("teams"), dict) and m["teams"].get("home") and m["teams"].get("away"))
+                        and any(k in (m.get("title") or "").lower() for k in ("live", "wta", "atp", "masters", "slam"))
+                    )
+                    or is_simulcast_event(m.get("title", ""))
+                ]
+                if epg_certified_sessions:
+                    combined_fresh = self.merge_and_deduplicate_by_silos(combined_fresh, epg_certified_sessions)
+
                 # 2. Pull all active matches from DB to retain existing enriched posters
                 all_db_matches = [m for m in await db_service.get_active_matches_async() if self.is_real_match(m)]
                 # Transfer existing DB posters to fresh matches if missing
@@ -1315,6 +1328,19 @@ class CatalogService:
 
                 # Enrich again with Mandrakodi in case EPG added new Italian Sky/Tivùsat channels
                 mandrakodi_service.enrich_matches_with_mandrakodi(all_matches)
+
+                # Purge uncertified provider multicourt / aggregated tennis events:
+                # Any non-1v1 tennis event from external streaming providers that did not match
+                # a certified tournament session in the official Sky/Tivùsat EPG is silenced.
+                all_matches = [
+                    m for m in all_matches
+                    if not (
+                        (m.get("_silo") == "tennis" or m.get("category") == "tennis")
+                        and not bool(isinstance(m.get("teams"), dict) and m["teams"].get("home") and m["teams"].get("away"))
+                        and not m.get("_certified_by_sky")
+                        and m.get("_provider") != "italian_epg"
+                    )
+                ]
 
                 # Purge palpably conflicting Italian TV channels (aligned with asymmetric window)
                 italian_epg_service.filter_conflicting_italian_channels(all_matches)

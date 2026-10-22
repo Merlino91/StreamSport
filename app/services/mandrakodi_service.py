@@ -241,7 +241,17 @@ class MandrakodiService:
             return "dazn baloncesto 2"
         if "dazn baloncesto 3" in norm:
             return "dazn baloncesto 3"
-        if "supertennis" in norm:
+        # SuperTennis granular canonical mapping:
+        # Isolate OTT interactive feeds (1, 2, 3, 4) from the linear 24/7 broadcast channel
+        if "supertennis 1" in norm or "super tennis 1" in norm:
+            return "supertennis 1"
+        if "supertennis 2" in norm or "super tennis 2" in norm:
+            return "supertennis 2"
+        if "supertennis 3" in norm or "super tennis 3" in norm:
+            return "supertennis 3"
+        if "supertennis 4" in norm or "super tennis 4" in norm:
+            return "supertennis 4"
+        if "supertennis" in norm or "super tennis" in norm:
             return "supertennis"
         if "inter tv" in norm:
             return "inter tv"
