@@ -1025,15 +1025,16 @@ class ItalianEPGService:
                     (s.get("canonical", s.get("id")), s.get("tag", ""))
                     for s in existing_sources if isinstance(s, dict)
                 }
-                added_for_match = 0
+                new_sources = []
                 for s in matched_epg.get("sources", []):
                     k = (s.get("canonical", s.get("id")), s.get("tag", ""))
                     if k not in existing_keys:
                         existing_keys.add(k)
-                        existing_sources.insert(0, s)
-                        added_for_match += 1
+                        new_sources.append(s)
 
-                if added_for_match > 0:
+                if new_sources:
+                    # Prepend new EPG sources in their natural order without inverting
+                    m["sources"] = new_sources + existing_sources
                     enriched_count += 1
 
         if enriched_count > 0:

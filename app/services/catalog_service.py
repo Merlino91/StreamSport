@@ -732,13 +732,18 @@ class CatalogService:
                 existing_sources = existing.setdefault("sources", [])
                 existing_ids = {str(s.get("id")) for s in existing_sources if isinstance(s, dict)}
 
+                new_tvvoo = []
+                new_other = []
                 for s in m2.get("sources", []):
                     if isinstance(s, dict) and str(s.get("id")) not in existing_ids:
-                        if s.get("source") == "tvvoo":
-                            existing_sources.insert(0, s)
-                        else:
-                            existing_sources.append(s)
                         existing_ids.add(str(s.get("id")))
+                        if s.get("source") == "tvvoo":
+                            new_tvvoo.append(s)
+                        else:
+                            new_other.append(s)
+
+                if new_tvvoo or new_other:
+                    existing["sources"] = new_tvvoo + existing_sources + new_other
 
                 # Preserve all variant titles across merged providers
                 raw_titles = existing.setdefault("raw_titles", [])
