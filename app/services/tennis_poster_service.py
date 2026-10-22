@@ -498,49 +498,7 @@ class TennisPosterService:
             except Exception as e:
                 logger.debug("ESPN athlete search error for '%s': %s", search_query, e)
 
-            # 2. TheSportsDB Cutout Fallback (Rate Limited to 13.0s = max 4.6 calls/min for free test key 123)
-            async with self._tsdb_lock:
-                now = time.monotonic()
-                elapsed = now - self._last_tsdb_call
-                if elapsed < 13.0:
-                    await asyncio.sleep(13.0 - elapsed)
-                self._last_tsdb_call = time.monotonic()
-
-                try:
-                    tsdb_query = full_name_resolved or search_query
-                    tsdb_url = f"https://www.thesportsdb.com/api/v1/json/123/searchplayers.php?p={urllib.parse.quote(tsdb_query)}"
-                    res = await client.get(tsdb_url)
-                    if res.status_code == 429:
-                        logger.warning("TheSportsDB rate limit raggiunto (429) per '%s'. Proseguimento con silhouette.", tsdb_query)
-                    elif res.status_code == 200:
-                        data = res.json()
-                        players = data.get("player") or []
-                        for p in players:
-                            sport = str(p.get("strSport") or "").lower()
-                            # STRICT SPORT VALIDATION: Must be Tennis!
-                            if sport != "tennis":
-                                continue
-
-                            # STRICT ACTIVE VALIDATION: Exclude retired players
-                            status = str(p.get("strStatus") or "").lower()
-                            if status == "retired":
-                                continue
-                            team = str(p.get("strTeam") or "").lower()
-                            if "_retired" in team:
-                                continue
-
-                            # ONLY ACCEPT transparent cutout PNG. Never strThumb or strRender!
-                            cutout_url = p.get("strCutout")
-                            if cutout_url and cutout_url.startswith("http") and cutout_url.lower().endswith(".png"):
-                                img_res = await client.get(cutout_url)
-                                if img_res.status_code == 200:
-                                    img = Image.open(io.BytesIO(img_res.content)).convert("RGBA")
-                                    img.save(cached_file, "PNG")
-                                    return img
-                except Exception as e:
-                    logger.debug("TheSportsDB athlete search error for '%s': %s", search_query, e)
-
-        # In-memory negative cache only (no .missing files created on disk)
+        # Immediate silhouette fallback without slow 13s TheSportsDB sleeps
         self._missing_athletes.add(slug)
         return None
 
