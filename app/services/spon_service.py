@@ -191,7 +191,7 @@ class SPONService:
 
         return parsed_events
 
-    def _parse_silo_and_teams(self, raw_title: str) -> tuple[str, str, Dict[str, str] | List[str]]:
+    def _parse_silo_and_teams(self, raw_title: str) -> tuple[str, str, Dict[str, str]]:
         """Extracts sport silo, clean title, and structured teams from an event string."""
         title = raw_title.strip()
 
@@ -201,15 +201,15 @@ class SPONService:
             p_low = prefix.lower().strip()
             rest_clean = rest.strip()
             if "tennis" in p_low:
-                return "tennis", rest_clean, [rest_clean]
+                return "tennis", rest_clean, {}
             if any(k in p_low for k in ("motogp", "moto2", "moto3", "f1", "gp", "motor")):
-                return "motor-sports", f"{prefix}: {rest_clean}", [rest_clean]
+                return "motor-sports", f"{prefix}: {rest_clean}", {}
             if "nba" in p_low or "basket" in p_low:
                 silo = "basketball"
             elif "nfl" in p_low:
                 silo = "american-football"
             elif "golf" in p_low:
-                return "other", f"{prefix}: {rest_clean}", [rest_clean]
+                return "other", f"{prefix}: {rest_clean}", {}
             else:
                 silo = "other"
 
@@ -223,7 +223,7 @@ class SPONService:
             elif " x " in rest_clean.lower():
                 parts = re.split(r"\s+x\s+", rest_clean, flags=re.IGNORECASE)
                 return silo, f"{parts[0].strip()} vs {parts[1].strip()}", {"home": parts[0].strip(), "away": parts[1].strip()}
-            return silo, f"{prefix}: {rest_clean}", [rest_clean]
+            return silo, f"{prefix}: {rest_clean}", {}
 
         # Standard Calcio / 1v1 match ('Team A x Team B' or 'Team A vs Team B')
         if " x " in title:
@@ -235,7 +235,7 @@ class SPONService:
             home, away = parts[0].strip(), parts[1].strip()
             return "football", f"{home} vs {away}", {"home": home, "away": away}
 
-        return "football", title, [title]
+        return "football", title, {}
 
 
 spon_service = SPONService()

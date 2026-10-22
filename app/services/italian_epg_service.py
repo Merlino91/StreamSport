@@ -914,14 +914,14 @@ class ItalianEPGService:
             m_teams = m.get("teams")
             m_title = m.get("title", "")
             m_tokens = self._clean_tokens(m_title)
-            m_is_1v1 = bool(m_teams and m_teams.get("home") and m_teams.get("away"))
+            m_is_1v1 = bool(isinstance(m_teams, dict) and m_teams.get("home") and m_teams.get("away"))
             m_is_sim = is_simulcast_event(m_title) or is_simulcast_event(str(m.get("id", ""))) or (m_silo == "tennis" and not m_is_1v1)
 
             matched_epg = None
             for ep in epg_events:
                 ep_title = ep.get("title", "")
                 ep_teams = ep.get("teams")
-                ep_is_1v1 = bool(ep_teams and ep_teams.get("home") and ep_teams.get("away"))
+                ep_is_1v1 = bool(isinstance(ep_teams, dict) and ep_teams.get("home") and ep_teams.get("away"))
                 ep_is_sim = is_simulcast_event(ep_title) or is_simulcast_event(str(ep.get("id", ""))) or ((ep.get("_silo") or ep.get("category") or "").lower() == "tennis" and not ep_is_1v1)
 
                 # CRITICAL: A simulcast/session show and a regular 1v1 match MUST NEVER match!
