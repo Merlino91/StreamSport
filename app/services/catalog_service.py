@@ -32,6 +32,7 @@ from app.services.thesportsdb_service import thesportsdb_service
 from app.services.tvvoo_service import tvvoo_service
 from app.services.fctv33_service import fctv33_service
 from app.services.mandrakodi_service import mandrakodi_service
+from app.services.spon_service import spon_service
 from app.services.italian_epg_service import italian_epg_service
 from app.services.diretta_service import diretta_service
 from app.services.team_matching import extract_team_name
@@ -1253,6 +1254,7 @@ class CatalogService:
                     diretta_service.get_events(),
                     fctv33_service.get_matches(force=True),
                     mandrakodi_service.get_matches(force=True),
+                    spon_service.get_matches(force=True),
                 ]
                 results = await asyncio.gather(*tasks, return_exceptions=True)
                 streamed_raw = results[0] if isinstance(results[0], list) else []
@@ -1262,12 +1264,14 @@ class CatalogService:
                 diretta_events = results[5] if isinstance(results[5], list) else []
                 fctv33_raw = results[6] if isinstance(results[6], list) else []
                 mandrakodi_raw = results[7] if isinstance(results[7], list) else []
+                spon_raw = results[8] if isinstance(results[8], list) else []
 
                 streamed_matches = [m for m in streamed_raw if self.is_real_match(m)]
                 daddylive_matches = [m for m in daddylive_raw if self.is_real_match(m)]
                 epg_matches = [m for m in epg_raw if self.is_real_match(m)]
                 fctv33_matches = [m for m in fctv33_raw if self.is_real_match(m)]
                 mandrakodi_matches = [m for m in mandrakodi_raw if self.is_real_match(m)]
+                spon_matches = [m for m in spon_raw if self.is_real_match(m)]
 
                 # Merge streamed and daddylive matches silo-by-silo into combined fresh
                 combined_fresh = self.merge_and_deduplicate_by_silos(streamed_matches, daddylive_matches)
@@ -1275,6 +1279,8 @@ class CatalogService:
                     combined_fresh = self.merge_and_deduplicate_by_silos(combined_fresh, fctv33_matches)
                 if mandrakodi_matches:
                     combined_fresh = self.merge_and_deduplicate_by_silos(combined_fresh, mandrakodi_matches)
+                if spon_matches:
+                    combined_fresh = self.merge_and_deduplicate_by_silos(combined_fresh, spon_matches)
 
                 # Ingest certified multicourt tournament sessions and simulcasts from Italian EPG (Sky/Tivùsat)
                 epg_certified_sessions = [

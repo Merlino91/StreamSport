@@ -450,6 +450,16 @@ class StreamService:
                     match = m
                     break
 
+        # 7. Check Sportzonline (fallback)
+        if not match:
+            from app.services.spon_service import spon_service
+            spon_matches = await spon_service.get_matches()
+            for m in spon_matches:
+                mid = str(m.get("id", ""))
+                if mid == slug_id or any(mid.endswith(f"{d}{slug_id}") for d in delimiters):
+                    match = m
+                    break
+
         if not match:
             return []
 
@@ -782,13 +792,40 @@ class StreamService:
             # Sort FCTV33 streams: Italian channels first
             fctv33_streams.sort(key=lambda s: 0 if "🇮🇹" in s.get("name", "") else 1)
 
+        # 3b. Process Sportzonline (SPON) streams
+        spon_streams: List[Dict[str, Any]] = []
+        if ep_url:
+            spon_sources = [s for s in sources if s.get("source") in ("sportsonline", "spon")]
+            for idx, s in enumerate(spon_sources, 1):
+                raw_url = s.get("url") or s.get("id")
+                if not raw_url:
+                    continue
+                ch_name = s.get("channel") or f"HD{idx}"
+                lang = s.get("lang") or "Italiano"
+                flag = s.get("flag") or self.get_channel_flag(ch_name) or "🇮🇹"
+                flag_prefix = f"{flag} " if flag else ""
+
+                stream_url = f"{ep_url.rstrip('/')}/proxy/manifest.m3u8?url={urllib.parse.quote_plus(raw_url)}"
+                if ep_pass:
+                    stream_url += f"&api_password={urllib.parse.quote_plus(ep_pass)}"
+
+                spon_streams.append({
+                    "name": f"{flag_prefix}⚡ [Sportzonline] {ch_name} [720p]",
+                    "title": f"{flag_prefix}Fonte: Sportzonline • Qualità: 720p 30fps Real HD\n🌐 Audio: {lang} • Bypassa blocchi via EasyProxy",
+                    "url": stream_url,
+                    "behaviorHints": {"isLive": True, "notWebReady": False},
+                })
+
+            # Sort Sportzonline streams: Italian channels first
+            spon_streams.sort(key=lambda s: 0 if "🇮🇹" in s.get("name", "") else 1)
+
         # 4. Process Streamed upstream sources (hotel, delta, etc.)
         streamed_streams: List[Dict[str, Any]] = []
         if ep_url:
             other_sources = [
                 (s.get("source"), s.get("id"))
                 for s in sources
-                if s.get("source") not in ("dlhd", "tvvoo", "fctv33", "amstaff", "acestream", "socceron", "direct")
+                if s.get("source") not in ("dlhd", "tvvoo", "fctv33", "amstaff", "acestream", "socceron", "direct", "sportsonline", "spon")
                 and s.get("provider") != "mandrakodi"
                 and s.get("source")
                 and s.get("id")
@@ -844,13 +881,15 @@ class StreamService:
         # Assemble final stream list in strict provider priority:
         # 1. TvVoo (No-Freeze)
         # 2. Mandrakodi (OTT Nativo ClearKey / Direct CDN / Socceron)
-        # 3. DaddyLive (Capped at 6)
-        # 4. FCTV33
-        # 5. Streamed
-        # 6. AceStream (P2P external player)
+        # 3. Sportzonline (720p Real HD con audio italiano)
+        # 4. DaddyLive (Capped at 6)
+        # 5. FCTV33
+        # 6. Streamed
+        # 7. AceStream (P2P external player)
         final_streams = (
             tvvoo_streams
             + mandrakodi_streams
+            + spon_streams
             + dlhd_streams
             + fctv33_streams
             + streamed_streams
@@ -858,7 +897,7 @@ class StreamService:
         )
 
         if not final_streams:
-            if not ep_url and any(s.get("source") in ("dlhd", "fctv33", "streamed", "amstaff") for s in sources):
+            if not ep_url and any(s.get("source") in ("dlhd", "fctv33", "streamed", "amstaff", "sportsonline", "spon") for s in sources):
                 return [
                     {
                         "name": "⚠️ EasyProxy non configurato",
