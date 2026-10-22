@@ -2,7 +2,9 @@ import asyncio
 import datetime
 from difflib import SequenceMatcher
 import logging
+import os
 import re
+import sys
 import time
 import unicodedata
 import urllib.parse
@@ -113,9 +115,17 @@ class CatalogService:
         if not mandrakodi_matches:
             return
         if self._cached_matches:
-            self._cached_matches = self.merge_and_deduplicate_by_silos(self._cached_matches, mandrakodi_matches)
+            merged = self.merge_and_deduplicate_by_silos(self._cached_matches, mandrakodi_matches)
+            # Standalone uncertified Mandrakodi matches cannot create new orphan cards
+            self._cached_matches = [
+                m for m in merged
+                if not (str(m.get("id", "")).startswith("mandrakodi:") and not m.get("_diretta_matched"))
+            ]
         else:
-            self._cached_matches = list(mandrakodi_matches)
+            self._cached_matches = [
+                m for m in mandrakodi_matches
+                if m.get("_diretta_matched")
+            ]
 
         for m in self._cached_matches:
             mid = m.get("id")
@@ -1342,6 +1352,18 @@ class CatalogService:
                     )
                 ]
 
+                # Purge uncertified standalone Mandrakodi events:
+                # Dynamic/last-minute matches originating strictly from Mandrakodi that did NOT
+                # find validation in the official Diretta.it / LiveSport schedule are silenced (preventing ghost/replay cards).
+                all_matches = [
+                    m for m in all_matches
+                    if not (
+                        str(m.get("id", "")).startswith("mandrakodi:")
+                        and not m.get("_diretta_matched")
+                        and not m.get("_espn_matched")
+                    )
+                ]
+
                 # Purge palpably conflicting Italian TV channels (aligned with asymmetric window)
                 italian_epg_service.filter_conflicting_italian_channels(all_matches)
 
@@ -1524,6 +1546,8 @@ class CatalogService:
     async def ensure_synced(self):
         """Ensures that at least one sync has completed before serving requests."""
         if not self._cached_matches:
+            if "unittest" in sys.modules or os.environ.get("STREAMSPORT_TESTING") == "1":
+                return
             await self.sync_matches()
 
     async def get_catalog(

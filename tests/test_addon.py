@@ -3,6 +3,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import unittest
+from unittest.mock import patch, AsyncMock, MagicMock
 import base64
 import time
 from fastapi.testclient import TestClient
@@ -150,13 +151,27 @@ class StreamSportTestCase(unittest.TestCase):
             self.assertIn("MLB", m.get("genres", []))
 
     def test_catalog_genre_ampersand_resilience(self):
-        # Test path segment with raw &
-        response = client.get(f"/catalog/{CATALOG_TYPE}/calcio_estero/genre=Americhe & Altre Leghe.json")
-        self.assertEqual(response.status_code, 200)
-        data = response.json()
-        self.assertIn("metas", data)
-        # Even with raw ampersand in old URL, it must not crash or be truncated to 0 matches
-        self.assertTrue(len(data["metas"]) > 0)
+        orig_cached = list(catalog_service._cached_matches)
+        try:
+            catalog_service._cached_matches = [
+                {
+                    "id": "mock-americhe-1",
+                    "title": "Flamengo vs Fluminense",
+                    "date": int(time.time() * 1000) + 3600000,
+                    "_catalog": "calcio_estero",
+                    "_genre": "Americhe e Leghe Extra-UE",
+                    "sources": [{"id": "s1"}],
+                }
+            ]
+            # Test path segment with raw & and legacy genre name
+            response = client.get(f"/catalog/{CATALOG_TYPE}/calcio_estero/genre=Americhe & Altre Leghe.json")
+            self.assertEqual(response.status_code, 200)
+            data = response.json()
+            self.assertIn("metas", data)
+            # Even with raw ampersand in old URL, it must not crash or be truncated to 0 matches
+            self.assertTrue(len(data["metas"]) > 0)
+        finally:
+            catalog_service._cached_matches = orig_cached
 
     def test_genre_isolation_nazionali_vs_u21(self):
         """Verifies that senior Nations League / Nazionali matches NEVER bleed into Under 21 and vice-versa."""
@@ -683,41 +698,44 @@ class StreamSportTestCase(unittest.TestCase):
         # Mock in catalog_service._cached_matches
         orig_cached = list(catalog_service._cached_matches)
         try:
-            catalog_service._cached_matches = [mock_match]
+            with patch("app.services.mandrakodi_service.mandrakodi_service.resolve_live_match_streams", new_callable=AsyncMock, return_value=[]), \
+                 patch("app.services.mandrakodi_service.mandrakodi_service.get_matches", new_callable=AsyncMock, return_value=[]), \
+                 patch("app.services.daddylive_api.daddylive_api.get_active_domain", new_callable=AsyncMock, return_value="dlive.sx"):
 
-            streams = asyncio.run(stream_service.get_streams_for_event(
-                "test-flag-match",
-                ep_url="https://ep.example.com",
-                user_tz="Europe/Rome"
-            ))
+                catalog_service._cached_matches = [mock_match]
+                streams = asyncio.run(stream_service.get_streams_for_event(
+                    "test-flag-match",
+                    ep_url="https://ep.example.com",
+                    user_tz="Europe/Rome"
+                ))
 
-            self.assertEqual(len(streams), 3)
+                self.assertEqual(len(streams), 3)
 
-            # Italian stream MUST be sorted at index 0 (top of the list)
-            self.assertEqual(streams[0]["name"], "🇮🇹 Sky Sport Calcio IT")
-            self.assertEqual(streams[0]["title"], "📡 Fonte: DaddyLive • Qualità: Live TV")
+                # Italian stream MUST be sorted at index 0 (top of the list)
+                self.assertEqual(streams[0]["name"], "🇮🇹 Sky Sport Calcio IT")
+                self.assertEqual(streams[0]["title"], "📡 Fonte: DaddyLive • Qualità: Live TV")
 
-            # Foreign streams follow
-            stream_names = [s["name"] for s in streams]
-            self.assertIn("🇬🇧 Sky Sports Premier League UK", stream_names)
-            self.assertIn("🇷🇺 Match Premier Russia", stream_names)
+                # Foreign streams follow
+                stream_names = [s["name"] for s in streams]
+                self.assertIn("🇬🇧 Sky Sports Premier League UK", stream_names)
+                self.assertIn("🇷🇺 Match Premier Russia", stream_names)
 
-            # 3. Test empty streams behavior for a live event without streams
-            empty_match = {
-                "id": "test-empty-streams",
-                "title": "Unbroadcasted Event",
-                "date": now_ms - (10 * 60 * 1000),
-                "sources": [],
-            }
-            catalog_service._cached_matches = [empty_match]
-            empty_res = asyncio.run(stream_service.get_streams_for_event(
-                "test-empty-streams",
-                ep_url="https://ep.example.com",
-                user_tz="Europe/Rome"
-            ))
-            self.assertEqual(len(empty_res), 1)
-            self.assertIn("Partita in corso", empty_res[0]["name"])
-            self.assertTrue(empty_res[0].get("behaviorHints", {}).get("notWebReady"))
+                # 3. Test empty streams behavior for a live event without streams
+                empty_match = {
+                    "id": "test-empty-streams",
+                    "title": "Unbroadcasted Event",
+                    "date": now_ms - (10 * 60 * 1000),
+                    "sources": [],
+                }
+                catalog_service._cached_matches = [empty_match]
+                empty_res = asyncio.run(stream_service.get_streams_for_event(
+                    "test-empty-streams",
+                    ep_url="https://ep.example.com",
+                    user_tz="Europe/Rome"
+                ))
+                self.assertEqual(len(empty_res), 1)
+                self.assertIn("Partita in corso", empty_res[0]["name"])
+                self.assertTrue(empty_res[0].get("behaviorHints", {}).get("notWebReady"))
         finally:
             catalog_service._cached_matches = orig_cached
 
@@ -783,6 +801,79 @@ class StreamSportTestCase(unittest.TestCase):
             self.assertEqual(catalog[3]["id"], "streamsport:m_up_1500")
         finally:
             catalog_service._cached_matches = orig_cached
+
+    def test_safe_timezone_and_event_formatting(self):
+        """Verifies safe timezone resolution and graceful fallback on invalid user input."""
+        from app.services.catalog_service import get_safe_timezone
+        self.assertEqual(str(get_safe_timezone("America/New_York")), "America/New_York")
+        self.assertEqual(str(get_safe_timezone(None)), "Europe/Rome")
+        self.assertEqual(str(get_safe_timezone("")), "Europe/Rome")
+        self.assertEqual(str(get_safe_timezone("Invalid/NonExistent_Zone")), "Europe/Rome")
+
+        epoch_ms = 1770000000000
+        formatted = catalog_service.format_event_date(epoch_ms, user_tz="Malicious/Tz")
+        self.assertIsInstance(formatted, str)
+        self.assertTrue(len(formatted) > 5)
+
+    def test_sportvideo_infohash_resilience_and_cache(self):
+        """Verifies sportvideo torrent parsing resilience and LRU cache cap."""
+        from app.services.sportvideo_service import sportvideo_service
+        # Malformed bytes never loop
+        self.assertEqual(sportvideo_service.extract_info_hash(b"d4:infodi123456"), "")
+        self.assertEqual(sportvideo_service.extract_info_hash(b"d4:infod5abcdef"), "")
+
+        valid_torrent = b"d8:announce10:http://test4:infod4:name4:test12:piece lengthi16384e6:pieces0:ee"
+        self.assertEqual(len(sportvideo_service.extract_info_hash(valid_torrent)), 40)
+
+        # LRU cache cap
+        sportvideo_service.MAX_INFOHASH_CACHE = 5
+        sportvideo_service._infohash_cache.clear()
+        for idx in range(7):
+            url = f"https://www.sport-video.org.ua/match_{idx}.html"
+            info_hash = f"hash_{idx:040d}"
+            if len(sportvideo_service._infohash_cache) >= sportvideo_service.MAX_INFOHASH_CACHE:
+                sportvideo_service._infohash_cache.pop(next(iter(sportvideo_service._infohash_cache)), None)
+            sportvideo_service._infohash_cache[url] = info_hash
+
+        self.assertEqual(len(sportvideo_service._infohash_cache), 5)
+        self.assertNotIn("https://www.sport-video.org.ua/match_0.html", sportvideo_service._infohash_cache)
+        self.assertIn("https://www.sport-video.org.ua/match_6.html", sportvideo_service._infohash_cache)
+        sportvideo_service.MAX_INFOHASH_CACHE = 500
+
+    def test_daddylive_active_domain_fallback(self):
+        """Verifies DaddyLive active domain check caches fallback to prevent request spam."""
+        from app.services.daddylive_api import daddylive_api
+        import asyncio
+        daddylive_api._last_domain_check = 0.0
+
+        with patch("httpx.AsyncClient.get") as mock_get:
+            mock_resp = MagicMock()
+            mock_resp.status_code = 500
+            mock_get.return_value = mock_resp
+
+            domain = asyncio.run(daddylive_api.get_active_domain())
+            self.assertEqual(domain, "dlive.sx")
+            self.assertGreater(daddylive_api._last_domain_check, 0.0)
+
+            # Second call hits cache without HTTP
+            mock_get.reset_mock()
+            domain2 = asyncio.run(daddylive_api.get_active_domain())
+            self.assertEqual(domain2, "dlive.sx")
+            mock_get.assert_not_called()
+
+    def test_service_semaphores_and_db_directory(self):
+        """Verifies resolver concurrency limits and db data directory alignment."""
+        import asyncio
+        from app.services.youtube_service import youtube_service
+        from app.services.dailymotion_service import dailymotion_service
+        from app.services.db_service import DEFAULT_DATA_DIR
+        from app.config import PROJECT_DIR
+
+        self.assertIsInstance(youtube_service._semaphore, asyncio.Semaphore)
+        self.assertEqual(youtube_service._semaphore._value, 4)
+        self.assertIsInstance(dailymotion_service._semaphore, asyncio.Semaphore)
+        self.assertEqual(dailymotion_service._semaphore._value, 4)
+        self.assertEqual(DEFAULT_DATA_DIR, PROJECT_DIR / "data")
 
 if __name__ == "__main__":
     unittest.main()

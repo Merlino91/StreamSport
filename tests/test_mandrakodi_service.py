@@ -3,6 +3,7 @@ import asyncio
 import time
 from unittest.mock import patch, MagicMock
 from app.services.mandrakodi_service import mandrakodi_service, xor_decrypt
+from app.services.catalog_service import catalog_service
 
 class TestMandrakodiService(unittest.IsolatedAsyncioTestCase):
 
@@ -182,6 +183,65 @@ class TestMandrakodiService(unittest.IsolatedAsyncioTestCase):
         c5_streams = mandrakodi_service.get_channel_streams("canale 5")
         self.assertGreater(len(c5_streams), 0)
         self.assertEqual(c5_streams[0]["source"], "direct")
+
+    def test_uncertified_mandrakodi_live_matches_purged(self):
+        """Verifies that standalone uncertified Mandrakodi matches (e.g. replays/fakes) cannot create orphan cards."""
+        orig_cached = list(catalog_service._cached_matches)
+        try:
+            # 1. Existing verified match from DaddyLive
+            existing = {
+                "id": "dlhd-inter-milan",
+                "title": "Inter vs Milan",
+                "teams": {"home": {"name": "Inter"}, "away": {"name": "Milan"}},
+                "category": "football",
+                "date": 1780000000000,
+                "sources": [{"id": "dl1", "provider": "daddylive"}],
+            }
+            catalog_service._cached_matches = [existing]
+
+            # 2. Mandrakodi feeds: 1 matching existing, 1 fake/replay uncertified, 1 certified by Diretta
+            m_matched = {
+                "id": "mandrakodi:lm:matched",
+                "title": "Inter vs Milan",
+                "teams": {"home": {"name": "Inter"}, "away": {"name": "Milan"}},
+                "category": "football",
+                "date": 1780000000000,
+                "sources": [{"id": "mk1", "provider": "mandrakodi"}],
+            }
+            m_fake_replay = {
+                "id": "mandrakodi:lm:fake_replay",
+                "title": "Inter vs Shakhtar Donetsk",
+                "teams": {"home": {"name": "Inter"}, "away": {"name": "Shakhtar Donetsk"}},
+                "category": "football",
+                "date": 1780000000000,
+                "sources": [{"id": "mk_fake", "provider": "mandrakodi"}],
+                # No _diretta_matched!
+            }
+            m_certified_solo = {
+                "id": "mandrakodi:lm:certified_solo",
+                "title": "Catanzaro vs Cosenza",
+                "teams": {"home": {"name": "Catanzaro"}, "away": {"name": "Cosenza"}},
+                "category": "football",
+                "date": 1780000000000,
+                "sources": [{"id": "mk_solo", "provider": "mandrakodi"}],
+                "_diretta_matched": True,  # Certified by Diretta!
+            }
+
+            catalog_service.reconcile_mandrakodi_live_matches([m_matched, m_fake_replay, m_certified_solo])
+
+            # The matched one should be merged into existing (now 2 sources)
+            cached_ids = [m["id"] for m in catalog_service._cached_matches]
+            self.assertIn("dlhd-inter-milan", cached_ids)
+            inter_milan = next(m for m in catalog_service._cached_matches if m["id"] == "dlhd-inter-milan")
+            self.assertEqual(len(inter_milan["sources"]), 2)
+
+            # The fake replay uncertified MUST NOT be in cached matches
+            self.assertNotIn("mandrakodi:lm:fake_replay", cached_ids)
+
+            # The certified solo Mandrakodi match MUST be accepted
+            self.assertIn("mandrakodi:lm:certified_solo", cached_ids)
+        finally:
+            catalog_service._cached_matches = orig_cached
 
 if __name__ == "__main__":
     unittest.main()

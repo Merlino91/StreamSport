@@ -176,3 +176,51 @@ chunk_102.ts
         self.assertEqual(len(results), 30)
         for r in results:
             self.assertIsNotNone(r)
+
+    def test_live_manifest_manager_lru_eviction(self):
+        """Verifies that LiveManifestManager enforces a strict LRU cap when sessions exceed limit."""
+        import time
+        manager = LiveManifestManager(tvvoo_service)
+        manager.MAX_SESSIONS = 5
+
+        base_time = time.time()
+        for idx in range(7):
+            key = f"https://vavoo.to/play/ch_{idx}:default"
+            manager.sessions[key] = LiveStreamSession(
+                play_url=f"https://vavoo.to/play/ch_{idx}",
+                client_ip=None,
+                stream_url="https://edge.vavoo.to/live/index.m3u8",
+                base_url="https://edge.vavoo.to/live/",
+                valid_until=base_time + 1000,
+                last_fetched_at=base_time + (idx * 10),
+            )
+
+        manager.cleanup()
+        self.assertEqual(len(manager.sessions), 5)
+        self.assertNotIn("https://vavoo.to/play/ch_0:default", manager.sessions)
+        self.assertNotIn("https://vavoo.to/play/ch_1:default", manager.sessions)
+        self.assertIn("https://vavoo.to/play/ch_5:default", manager.sessions)
+        self.assertIn("https://vavoo.to/play/ch_6:default", manager.sessions)
+
+    async def test_persistent_client_for_live_manifest(self):
+        """Verifies LiveManifestManager uses a persistent HTTP client for upstream polling."""
+        manager = LiveManifestManager(tvvoo_service)
+        client = manager._client
+        self.assertIsNotNone(client)
+        self.assertFalse(client.is_closed)
+
+        with patch.object(client, "get", new_callable=AsyncMock) as mock_get:
+            mock_res = MagicMock()
+            mock_res.status_code = 200
+            mock_res.text = "#EXTM3U\n#EXTINF:8.0,\nchunk.ts\n"
+            mock_get.return_value = mock_res
+
+            res1 = await manager._fetch_upstream("https://edge.vavoo.to/live/index.m3u8")
+            res2 = await manager._fetch_upstream("https://edge.vavoo.to/live/index.m3u8")
+
+            self.assertEqual(mock_get.call_count, 2)
+            self.assertEqual(res1, res2)
+            self.assertIs(manager._client, client)
+
+        await manager.close()
+        self.assertTrue(client.is_closed)

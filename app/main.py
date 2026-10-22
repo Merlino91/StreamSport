@@ -47,9 +47,12 @@ logger = logging.getLogger("streamsport")
 # Lifespan context manager for graceful shutdown and background tasks
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    catalog_service.start_background_sync()
+    is_testing = "unittest" in sys.modules or os.environ.get("STREAMSPORT_TESTING") == "1"
+    if not is_testing:
+        catalog_service.start_background_sync()
     yield
-    catalog_service.stop_background_sync()
+    if not is_testing:
+        catalog_service.stop_background_sync()
     await tvvoo_service.manifest_manager.close()
     await doh_client.close()
     await mandrakodi_service.close()
