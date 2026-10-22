@@ -6,6 +6,7 @@ import logging
 import os
 from pathlib import Path
 import re
+import tempfile
 import time
 from typing import Any, Dict, Optional, Set, Tuple
 
@@ -39,7 +40,19 @@ class BannerService:
     def __init__(self):
         self.data_dir = PROJECT_DIR / "data"
         self.banners_dir = self.data_dir / "posters" / "banners"
-        self.banners_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            self.banners_dir.mkdir(parents=True, exist_ok=True)
+            test_file = self.banners_dir / ".write_test"
+            test_file.touch()
+            test_file.unlink()
+        except Exception:
+            fallback_dir = Path(tempfile.gettempdir()) / "streamsport_data" / "posters" / "banners"
+            try:
+                fallback_dir.mkdir(parents=True, exist_ok=True)
+                self.banners_dir = fallback_dir
+                logger.info("BannerService: switched to fallback banner cache directory in temp storage: %s", self.banners_dir)
+            except Exception as e:
+                logger.warning("BannerService: could not initialize fallback banner directory: %s", e)
 
         self._font_bold_path = self._find_font(bold=True)
         self._font_regular_path = self._find_font(bold=False)
@@ -118,9 +131,21 @@ class BannerService:
         poster_bytes = await self._generate_poster(match, status, time_str, has_tvvoo)
         if poster_bytes:
             try:
+                cache_file.parent.mkdir(parents=True, exist_ok=True)
                 cache_file.write_bytes(poster_bytes)
             except Exception as e:
-                logger.warning("Failed to save banner cache to %s: %s", cache_file, e)
+                # If primary directory failed to write, transparently switch to temp storage
+                if "streamsport_data" not in str(self.banners_dir):
+                    fallback_dir = Path(tempfile.gettempdir()) / "streamsport_data" / "posters" / "banners"
+                    try:
+                        fallback_dir.mkdir(parents=True, exist_ok=True)
+                        self.banners_dir = fallback_dir
+                        fallback_file = self.banners_dir / cache_file.name
+                        fallback_file.write_bytes(poster_bytes)
+                    except Exception as e2:
+                        logger.warning("Failed to save banner cache to fallback %s: %s", self.banners_dir, e2)
+                else:
+                    logger.warning("Failed to save banner cache to %s: %s", cache_file, e)
             return poster_bytes
 
         return None
