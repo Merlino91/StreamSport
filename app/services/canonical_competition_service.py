@@ -74,13 +74,22 @@ CANONICAL_LEAGUES = {
             r"\bserie\s*b.*?🇪🇨",
         ],
     },
+    "football_serie_a_women": {
+        "display": "Serie A Femminile",
+        "silo": "football",
+        "patterns": [
+            r"serie\s*a\s*(?:women|femminile|femm|frauen|dames|femenino)",
+            r"(?:italian|italy)\s*women['']?s?\s*serie\s*a",
+            r"serie\s*a\s*femminile",
+        ],
+    },
     "football_serie_a": {
         "display": "Serie A",
         "silo": "football",
         "patterns": [
-            r"italy\s*-\s*serie\s*a",
-            r"italy\s+serie\s*a",
-            r"(?<!brazil\s)(?<!brazil\s-\s)(?<!brasil\s)(?<!brasil\s-\s)(?<!ecuador\s)(?<!ecuador\s-\s)\bserie\s*a\b(?!\s*brazil)(?!\s*brasil)(?!\s*ecuador)",
+            r"italy\s*-\s*serie\s*a\b(?!\s*women)(?!\s*femminile)",
+            r"italy\s+serie\s*a\b(?!\s*women)(?!\s*femminile)",
+            r"(?<!brazil\s)(?<!brazil\s-\s)(?<!brasil\s)(?<!brasil\s-\s)(?<!ecuador\s)(?<!ecuador\s-\s)\bserie\s*a\b(?!\s*brazil)(?!\s*brasil)(?!\s*ecuador)(?!\s*women)(?!\s*femminile)(?!\s*femm)(?!\s*frauen)(?!\s*dames)",
         ],
     },
     "football_serie_b": {

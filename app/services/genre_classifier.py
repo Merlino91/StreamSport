@@ -203,6 +203,12 @@ class GenreClassifier:
         """
         title = (match.get("title") or "").strip()
         title_lower = title.lower()
+        comp = (match.get("competition") or match.get("_competition") or "").lower().strip()
+        country = (match.get("country") or match.get("_country") or "").lower().strip()
+        raw_title_lower = (match.get("raw_title") or "").strip().lower()
+        eval_text = f"{title_lower} {country} {comp} {raw_title_lower}".strip()
+        is_women = bool(self._WOMEN_REGEX.search(eval_text)) or match.get("_gender") == "+"
+        is_youth = bool(self._YOUTH_REGEX.search(eval_text)) or match.get("_age") == "+"
 
         # 0. Early Simulcast & Multi-match show routing (NFL RedZone, Golazo, Diretta Gol, etc.)
         sim_info = get_simulcast_info(title_lower, match.get("category") or match.get("_silo")) or get_simulcast_info(str(match.get("id", "")))
@@ -226,6 +232,15 @@ class GenreClassifier:
                 canon = None
 
         if canon:
+            # Women & Youth safety guards on canonical routing:
+            # A men's senior canonical competition must NEVER hijack a women or youth event!
+            if is_women:
+                if canon in ("football_serie_a", "football_serie_b", "football_serie_c", "football_serie_a_women"):
+                    return "calcio_italiano", "Calcio Femminile"
+            if is_youth:
+                if canon in ("football_serie_a", "football_serie_b", "football_serie_c", "football_primavera"):
+                    return "calcio_italiano", "Primavera e Giovanili"
+
             # Country-specific guard for homonym league names
             # If the event explicitly originates from a non-domestic country, invalidate canonical override
             country_clean = (match.get("country") or "").strip().lower()
@@ -241,6 +256,7 @@ class GenreClassifier:
 
             canon_map = {
                 "football_serie_a": ("calcio_italiano", "Serie A"),
+                "football_serie_a_women": ("calcio_italiano", "Calcio Femminile"),
                 "football_serie_b": ("calcio_italiano", "Serie B"),
                 "football_serie_c": ("calcio_italiano", "Serie C"),
                 "football_coppa_italia": ("calcio_italiano", "Coppa Italia e Supercoppa"),
