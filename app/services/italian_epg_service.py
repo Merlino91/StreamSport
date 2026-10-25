@@ -521,7 +521,7 @@ class ItalianEPGService:
                     }
                     chosen_img = img_dict.get("scene_key_art") or img_dict.get("background") or img_dict.get("cover")
                     if chosen_img:
-                        sky_poster = f"https://apid.sky.it{chosen_img}" if chosen_img.startswith("/") else chosen_img
+                        sky_poster = f"https://guidatv.sky.it{chosen_img}" if chosen_img.startswith("/") else chosen_img
 
                 match_obj: Dict[str, Any] = {
                     "id": match_id,
@@ -1044,25 +1044,28 @@ class ItalianEPGService:
                     break
 
             if matched_epg:
-                # Inherit official 16:9 HD poster from Sky/Tivùsat if the match does not already have a valid poster
-                if (not m.get("poster") or "unknown" in str(m.get("poster")).lower()) and matched_epg.get("poster"):
-                    m["poster"] = matched_epg["poster"]
-                    if not m.get("background"):
-                        m["background"] = matched_epg.get("background") or matched_epg["poster"]
+                # Poster inheritance from Sky/Tivùsat: strictly restricted to non-1v1 events (e.g. tournament sessions, Diretta Goal).
+                # 1v1 matches must NEVER inherit EPG artwork (they belong exclusively to TheSportsDB / athlete poster generators).
+                is_m_1v1 = bool(
+                    (isinstance(m_teams, dict) and m_teams.get("home") and m_teams.get("away"))
+                    or (re.search(r"\b(vs\.?| v\. )\b", m_title, re.IGNORECASE) and not m_is_sim)
+                )
+
+                if not is_m_1v1 and matched_epg.get("poster"):
+                    if not m.get("poster") or "unknown" in str(m.get("poster")).lower():
+                        m["poster"] = matched_epg["poster"]
+                        if not m.get("background"):
+                            m["background"] = matched_epg.get("background") or matched_epg["poster"]
 
                 # If m is an aggregated multicourt event adopting a certified Sky tournament session:
                 ep_teams_obj = matched_epg.get("teams")
-                is_m_1v1 = bool(m_teams and m_teams.get("home") and m_teams.get("away"))
-                is_ep_1v1 = bool(ep_teams_obj and ep_teams_obj.get("home") and ep_teams_obj.get("away"))
+                is_ep_1v1 = bool(isinstance(ep_teams_obj, dict) and ep_teams_obj.get("home") and ep_teams_obj.get("away"))
                 if not is_m_1v1 and not is_ep_1v1 and m_silo == "tennis":
                     m["title"] = matched_epg.get("title") or m.get("title")
                     if matched_epg.get("competition"):
                         m["competition"] = matched_epg["competition"]
                     if matched_epg.get("eventSynopsis"):
                         m["eventSynopsis"] = matched_epg["eventSynopsis"]
-                    if matched_epg.get("poster"):
-                        m["poster"] = matched_epg["poster"]
-                        m["background"] = matched_epg.get("background") or matched_epg["poster"]
                     m["_certified_by_sky"] = True
 
                 existing_sources = m.setdefault("sources", [])

@@ -1298,7 +1298,11 @@ class CatalogService:
                 # 2. Pull all active matches from DB to retain existing enriched posters
                 all_db_matches = [m for m in await db_service.get_active_matches_async() if self.is_real_match(m)]
                 # Transfer existing DB posters to fresh matches if missing
-                db_posters = {m["id"]: m["poster"] for m in all_db_matches if m.get("id") and m.get("poster")}
+                db_posters = {
+                    m["id"]: m["poster"]
+                    for m in all_db_matches
+                    if m.get("id") and m.get("poster") and "apid.sky.it" not in str(m.get("poster"))
+                }
                 for m in combined_fresh:
                     m_id = m.get("id")
                     if m_id and m_id in db_posters and not m.get("poster"):

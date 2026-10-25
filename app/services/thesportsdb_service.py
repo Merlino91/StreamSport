@@ -701,7 +701,7 @@ class TheSportsDBService:
             if best_match:
                 # 1. Poster assignment
                 cal_thumb = best_match.get("thumb")
-                if cal_thumb and (not m.get("poster") or "nostream" in m.get("poster", "") or not str(m.get("poster")).startswith("http")):
+                if cal_thumb and (not m.get("poster") or "nostream" in m.get("poster", "") or "apid.sky.it" in str(m.get("poster")) or not str(m.get("poster")).startswith("http")):
                     m["poster"] = cal_thumb
                     db_service.update_match_poster(m["id"], cal_thumb)
                     q_key = f"{best_match['home']} vs {best_match['away']}"
@@ -1012,7 +1012,7 @@ class TheSportsDBService:
         max_future_ms = now_ms + (3 * 24 * 3600 * 1000)
         orphans = [
             m for m in matches
-            if (not m.get("poster") or "nostream" in m.get("poster", "") or not str(m.get("poster")).startswith("http"))
+            if (not m.get("poster") or "nostream" in m.get("poster", "") or "apid.sky.it" in str(m.get("poster")) or not str(m.get("poster")).startswith("http"))
             and (not m.get("date") or m.get("date") <= max_future_ms)
         ]
         if not orphans:

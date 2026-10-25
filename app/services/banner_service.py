@@ -26,7 +26,7 @@ logger = logging.getLogger("streamsport.banner")
 
 CANVAS_WIDTH = 889
 CANVAS_HEIGHT = 500
-BANNER_VERSION = 6
+BANNER_VERSION = 7
 
 
 class BannerService:
