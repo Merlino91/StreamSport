@@ -225,9 +225,9 @@ class GenreClassifier:
             if event_silo in ("soccer",): event_silo = "football"
             if event_silo in ("basket",): event_silo = "basketball"
             if event_silo in ("motorsport", "motori"): event_silo = "motor-sports"
-            if event_silo in ("volley",): event_silo = "volleyball"
+            if event_silo in ("volleyball",): event_silo = "volley"
             if event_silo in ("combattimento", "boxe", "mma"): event_silo = "fight"
-            DEDICATED_SILOS = {"hockey", "basketball", "tennis", "motor-sports", "volleyball", "baseball", "fight", "american-football"}
+            DEDICATED_SILOS = {"hockey", "basketball", "tennis", "motor-sports", "volley", "baseball", "fight", "american-football"}
             if event_silo in DEDICATED_SILOS and canon_silo and canon_silo != event_silo:
                 canon = None
 
@@ -351,8 +351,10 @@ class GenreClassifier:
                 "fight_boxing": ("combattimento", "Boxe"),
                 "fight_wwe": ("combattimento", "Wrestling e WWE"),
                 "fight_mma": ("combattimento", "MMA"),
-                "volleyball_superlega": ("volley", "SuperLega Maschile"),
-                "volleyball_serie_a1_femm": ("volley", "Serie A1 Femminile"),
+                "volleyball_superlega": ("volley", "Superlega e Serie A1"),
+                "volleyball_serie_a2": ("volley", "Superlega e Serie A1"),
+                "volleyball_serie_a1_femm": ("volley", "Volley Femminile"),
+                "volleyball_cev_cl": ("volley", "Champions League Volley"),
                 "rugby_six_nations": ("altri_sport", "Rugby e AFL"),
                 "rugby_top_14": ("altri_sport", "Rugby e AFL"),
                 "afl_footy": ("altri_sport", "Rugby e AFL"),
@@ -564,9 +566,13 @@ class GenreClassifier:
         eval_volley = f"{title_lower} {comp}".strip()
         if (
             cat in ("volleyball", "volley")
-            or silo == "volleyball"
-            or bool(re.search(r"\b(volleyball|volley|pallavolo|superlega|cev|plusliga)\b", eval_volley))
+            or silo in ("volleyball", "volley")
+            or bool(re.search(r"\b(volleyball|volley|pallavolo|superlega|plusliga)\b", eval_volley))
         ):
+            # --------------------------------------------------------------
+            # LIVELLO 1: Tornei Internazionali, Coppe Europee e Femminile
+            # --------------------------------------------------------------
+
             # 1. Volley Femminile
             if is_women or bool(re.search(r"\b(women(?:['’]s)?|femminile|femenil|dames|frauen|ladies|a1\s*femm|serie\s*a1\s*f)\b", eval_text)):
                 return "volley", "Volley Femminile"
@@ -579,17 +585,41 @@ class GenreClassifier:
             if re.search(r"\b(vnl|nations\s*league|mondiali|europei|olympics|world\s*championship|world\s*cup|qualif|national\s*team)\b", eval_text):
                 return "volley", "Nazionali e Internazionale"
 
-            # 4. Superlega e Serie A1 (Campionato Italiano Maschile)
-            is_italy_volley = (
+            # --------------------------------------------------------------
+            # LIVELLO 2: Campionati Nazionali Maschili (DOPPIO FILTRO: 1° Nazione -> 2° Torneo)
+            # --------------------------------------------------------------
+
+            # Segnali di campionati esteri noti (Country o Sigle competizioni)
+            is_foreign_country = country in (
+                "poland", "polonia", "pl", "turkey", "turchia", "tr", "russia", "ru",
+                "brazil", "brasile", "br", "france", "francia", "fr", "germany", "germania", "de",
+                "japan", "giappone", "jp", "belgium", "belgio", "be", "austria", "at",
+                "czech", "cechia", "cz", "slovenia", "si", "serbia", "rs"
+            )
+            is_foreign_league = bool(re.search(
+                r"\b(plusliga|tauron|sultanlar|superliga\s*russia|pro\s*a|bundesliga|volley\s*league|extraliga)\b",
+                eval_text
+            ))
+
+            if is_foreign_country and country not in ("italia", "italy"):
+                return "volley", "Nazionali e Internazionale"
+            if is_foreign_league:
+                return "volley", "Nazionali e Internazionale"
+
+            # B) Italia: 1° Nazione -> 2° Torneo
+            is_italy = (
                 country in ("italy", "italia")
                 or "🇮🇹" in eval_text
-                or bool(re.search(r"\b(italy|italia|italian|trentino|trento|perugia|civitanova|lube|modena|piacenza|verona|padova|cisterna|taranto|grottazzolina|superlega)\b", eval_text))
+                or bool(re.search(r"\b(italy|italia|italian)\b", eval_text))
             )
-            is_superlega_comp = bool(re.search(r"\b(superlega|serie\s*a[123]|coppa\s*italia\s*volley|supercoppa\s*volley)\b", eval_text))
-            if is_superlega_comp or (is_italy_volley and not bool(re.search(r"\b(plusliga|pro\s*a|bundesliga|superliga\s*russia)\b", eval_text))):
+            is_superlega_comp = bool(re.search(
+                r"\b(superlega|super\s*lega|serie\s*a[123]|italian\s*volleyball\s*league|italy\s*super\s*lega|coppa\s*italia\s*volley|supercoppa\s*volley)\b",
+                eval_text
+            ))
+            if is_superlega_comp or (is_italy and not is_foreign_league):
                 return "volley", "Superlega e Serie A1"
 
-            # 5. Fallback per campionati esteri maschili (PlusLiga polacca, Francia, Brasile, ecc.)
+            # Fallback
             return "volley", "Nazionali e Internazionale"
 
         # ------------------------------------------------------------------

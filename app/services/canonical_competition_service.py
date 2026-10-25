@@ -679,12 +679,38 @@ CANONICAL_LEAGUES = {
     "volleyball_superlega": {
         "display": "SuperLega",
         "silo": "volley",
-        "patterns": [r"superlega", r"serie\s*a1\s*maschile", r"super\s*lega"],
+        "patterns": [
+            r"superlega",
+            r"super\s*lega",
+            r"serie\s*a1\s*maschile",
+            r"italian\s*volleyball\s*league",
+            r"italy\s*super\s*lega",
+            r"italy\s*-\s*superlega",
+            r"lega\s*pallavolo\s*serie\s*a",
+        ],
+    },
+    "volleyball_serie_a2": {
+        "display": "Serie A2 Volley",
+        "silo": "volley",
+        "patterns": [
+            r"italy\s*serie\s*a2\b",
+            r"serie\s*a2\s*volley",
+            r"serie\s*a2\s*maschile",
+            r"serie\s*a2\s*femm",
+        ],
     },
     "volleyball_serie_a1_femm": {
         "display": "Serie A1 Femminile Volley",
         "silo": "volley",
-        "patterns": [r"serie\s*a1\s*femminile", r"a1\s*femminile\s*volley"],
+        "patterns": [
+            r"serie\s*a1\s*femminile",
+            r"a1\s*femminile\s*volley",
+            r"italy\s*serie\s*a1\s*women",
+            r"italian\s*serie\s*a1\s*women",
+            r"serie\s*a1\s*women",
+            r"serie\s*a1\s*w\b",
+            r"a1\s*femm\b",
+        ],
     },
     "volleyball_cev_cl": {
         "display": "CEV Champions League",
@@ -975,7 +1001,7 @@ def detect_canonical_competition(text: str, silo_hint: Optional[str] = None) -> 
         if norm_silo in ("soccer",): norm_silo = "football"
         if norm_silo in ("basket",): norm_silo = "basketball"
         if norm_silo in ("motorsport", "motori"): norm_silo = "motor-sports"
-        if norm_silo in ("volley",): norm_silo = "volleyball"
+        if norm_silo in ("volleyball",): norm_silo = "volley"
         if norm_silo in ("combattimento", "boxe", "mma"): norm_silo = "fight"
 
         for slug, s_silo, display, regexes in _COMPILED_PATTERNS:

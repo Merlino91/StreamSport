@@ -15,26 +15,20 @@ from app.services.tvvoo_service import tvvoo_service
 
 logger = logging.getLogger("streamsport.diretta")
 
-# Flashscore Italian feeds (Project 400 - Diretta.it): extracts Italian names & Italian TV channels
-FS_IT_SPORTS: Dict[int, Tuple[str, str]] = {
-    1: ("Calcio", "football"),
-    2: ("Tennis", "tennis"),
-    3: ("Basket", "basketball"),
-    12: ("Volley", "volley"),
-}
-
-# Flashscore English feeds (Project 2 - Flashscore Global): English team names, TV channels disabled
-FS_EN_SPORTS: Dict[int, Tuple[str, str]] = {
+# Universal multi-sport mapping for Diretta.it and Flashscore Global
+FS_SUPPORTED_SPORTS: Dict[int, Tuple[str, str]] = {
     1: ("Calcio", "football"),
     2: ("Tennis", "tennis"),
     3: ("Basket", "basketball"),
     4: ("Hockey", "hockey"),
     5: ("Football Americano", "american-football"),
     6: ("Baseball", "baseball"),
+    12: ("Volley", "volley"),
 }
 
-# Combined mapping for backward compatibility
-FS_SPORTS: Dict[int, Tuple[str, str]] = {**FS_IT_SPORTS, **FS_EN_SPORTS}
+FS_IT_SPORTS: Dict[int, Tuple[str, str]] = FS_SUPPORTED_SPORTS
+FS_EN_SPORTS: Dict[int, Tuple[str, str]] = FS_SUPPORTED_SPORTS
+FS_SPORTS: Dict[int, Tuple[str, str]] = FS_SUPPORTED_SPORTS
 
 class DirettaService:
     """
@@ -448,7 +442,7 @@ class DirettaService:
                     m["date"] = chosen["date"]
 
                 # Adopt country from chosen validator candidate
-                if chosen.get("country") and not m.get("country"):
+                if chosen.get("country"):
                     m["country"] = chosen["country"]
                     m["_country"] = chosen["country"]
 
@@ -459,14 +453,13 @@ class DirettaService:
                 if re.search(r"\b(u-?1[5-9]|u-?2[01]|under\s*1[5-9]|under\s*2[01]|youth|primavera|junior)\b", c_text):
                     m["_age"] = "+"
 
-                # Adopt official Italian competition ONLY if missing or generic (Livesport English competition is dominant)
-                current_comp = m.get("competition")
-                if self.is_generic_competition(current_comp):
+                # Adopt official competition from chosen validator candidate (Diretta is authoritative)
+                if chosen.get("competition") and not self.is_generic_competition(chosen["competition"]):
                     m["competition"] = chosen["competition"]
                     m["_competition"] = chosen["competition"]
 
-                # Enrich canonical competition tag if still missing
-                if not m.get("canonical_competition") and chosen.get("competition"):
+                # Enrich canonical competition tag using confirmed official competition
+                if chosen.get("competition"):
                     canon = detect_canonical_competition(
                         f"{chosen['competition']} : {m['title']}", silo_hint=silo
                     )

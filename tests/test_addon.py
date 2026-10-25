@@ -107,7 +107,7 @@ class StreamSportTestCase(unittest.TestCase):
             ({"title": "Petr Bar Biryukov vs Andre Ilagan (ATP - Singles)", "category": "tennis"}, ("tennis", "ATP")),
             ({"title": "Elena Rybakina vs Aryna Sabalenka (WTA - Singles)", "category": "tennis"}, ("tennis", "WTA")),
             ({"title": "Italy vs Netherlands - Billie Jean King Cup", "category": "tennis"}, ("tennis", "Coppa Davis e BJK Cup")),
-            ({"title": "Itas Trentino vs Sir Susa Vim Perugia", "category": "volleyball"}, ("volley", "Superlega e Serie A1")),
+            ({"title": "Itas Trentino vs Sir Susa Vim Perugia", "category": "volleyball", "country": "Italia"}, ("volley", "Superlega e Serie A1")),
             ({"title": "New York Yankees vs Boston Red Sox", "category": "baseball"}, ("baseball", "MLB")),
             ({"title": "Texas Longhorns vs LSU Tigers Baseball", "category": "baseball"}, ("baseball", "NCAA College Baseball")),
             ({"title": "Edmonton Oilers vs Florida Panthers", "category": "hockey"}, ("hockey", "NHL")),
@@ -598,8 +598,8 @@ class StreamSportTestCase(unittest.TestCase):
         self.assertEqual(CatalogService.get_live_window_minutes({"category": "football", "title": "Inter vs Milan"}), 160)
         self.assertEqual(CatalogService.get_live_window_minutes({"category": "football", "title": "Real Madrid vs Man City (Champions League)"}), 160)
         self.assertEqual(CatalogService.get_live_window_minutes({"category": "football", "title": "Juventus vs Lazio (Coppa Italia)"}), 160)
-        # Basket: 150 minutes
-        self.assertEqual(CatalogService.get_live_window_minutes({"category": "basketball", "title": "Olimpia Milano vs Virtus Bologna"}), 150)
+        # Basket: 180 minutes
+        self.assertEqual(CatalogService.get_live_window_minutes({"category": "basketball", "title": "Olimpia Milano vs Virtus Bologna"}), 180)
         # Motori GP: 160 minutes
         self.assertEqual(CatalogService.get_live_window_minutes({"category": "motor-sports", "title": "Gran Premio d'Italia Gara"}), 160)
         # Motori Practice / Qualifying: 80 minutes
