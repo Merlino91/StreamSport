@@ -224,9 +224,9 @@ class CatalogService:
         if silo == "football":
             return 160
 
-        # 2. Basket (Basketball): 150 minutes (~2h 30m covers 4 quarters + overtime)
+        # 2. Basket (Basketball): 180 minutes (~3h covers 4 quarters + overtime + post-match)
         if silo == "basketball":
-            return 150
+            return 180
 
         # 3. Tennis: 160 minutes for VS matches, 360 minutes (6 hours) for tournament sessions / main events
         if silo == "tennis":
