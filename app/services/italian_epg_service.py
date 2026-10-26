@@ -519,7 +519,18 @@ class ItalianEPGService:
                         item.get("key"): item.get("img", {}).get("url")
                         for item in images_map if isinstance(item, dict)
                     }
-                    chosen_img = img_dict.get("scene_key_art") or img_dict.get("background") or img_dict.get("cover")
+                    # Filter out dead placeholder images that return HTTP 403 (e.g. SportCalcio_Scene, Generic_Scene)
+                    valid_imgs = {
+                        k: v for k, v in img_dict.items()
+                        if v and re.search(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}", v)
+                    }
+                    chosen_img = (
+                        valid_imgs.get("scene_key_art")
+                        or valid_imgs.get("scene")
+                        or valid_imgs.get("cover_clean")
+                        or valid_imgs.get("background")
+                        or valid_imgs.get("cover")
+                    )
                     if chosen_img:
                         sky_poster = f"https://guidatv.sky.it{chosen_img}" if chosen_img.startswith("/") else chosen_img
 
@@ -777,6 +788,9 @@ class ItalianEPGService:
                         if k not in exist_keys:
                             exist_keys.add(k)
                             duplicate["sources"].append(s)
+                    if not duplicate.get("poster") and m.get("poster"):
+                        duplicate["poster"] = m["poster"]
+                        duplicate["background"] = m.get("background") or m["poster"]
                 else:
                     merged_epg.append(m)
 
@@ -1052,7 +1066,7 @@ class ItalianEPGService:
                 )
 
                 if not is_m_1v1 and matched_epg.get("poster"):
-                    if not m.get("poster") or "unknown" in str(m.get("poster")).lower():
+                    if not m.get("poster") or "unknown" in str(m.get("poster")).lower() or "nostream" in str(m.get("poster")).lower():
                         m["poster"] = matched_epg["poster"]
                         if not m.get("background"):
                             m["background"] = matched_epg.get("background") or matched_epg["poster"]
@@ -1060,7 +1074,7 @@ class ItalianEPGService:
                 # If m is an aggregated multicourt event adopting a certified Sky tournament session:
                 ep_teams_obj = matched_epg.get("teams")
                 is_ep_1v1 = bool(isinstance(ep_teams_obj, dict) and ep_teams_obj.get("home") and ep_teams_obj.get("away"))
-                if not is_m_1v1 and not is_ep_1v1 and m_silo == "tennis":
+                if not is_m_1v1 and not is_ep_1v1:
                     m["title"] = matched_epg.get("title") or m.get("title")
                     if matched_epg.get("competition"):
                         m["competition"] = matched_epg["competition"]

@@ -20,7 +20,7 @@ def extract_team_name(val: Any) -> str:
 MASTER_CLUB_ALIASES: Dict[str, str] = {
     # Italian Top Clubs
     r"\binternazionale(?:\s*milano)?\b": "inter",
-    r"\binter milan\b": "inter",
+    r"\binter\s*(?:milan|milano)\b": "inter",
     r"\bfc internazionale\b": "inter",
     r"\bjuve\b": "juventus",
     r"\bmilan\b": "ac milan",
@@ -306,6 +306,23 @@ def calculate_match_score(
 
         c_h = candidate.get("home") or ""
         c_a = candidate.get("away") or ""
+        if not c_h or not c_a:
+            c_teams = candidate.get("teams") or {}
+            if isinstance(c_teams, dict):
+                c_h = c_h or extract_team_name(c_teams.get("home"))
+                c_a = c_a or extract_team_name(c_teams.get("away"))
+            if not c_h or not c_a:
+                c_t = candidate.get("title") or ""
+                clean_ct = re.sub(r"^[0-9:\s-]+(?:\s*:\s*)?", "", c_t)
+                clean_ct = re.sub(r"\([^)]*\)", "", clean_ct)
+                if re.search(r"\s+vs\.?\s+", clean_ct, re.IGNORECASE):
+                    c_parts = re.split(r"\s+vs\.?\s+", clean_ct, maxsplit=1, flags=re.IGNORECASE)
+                    c_h = c_h or c_parts[0].strip()
+                    c_a = c_a or c_parts[1].strip()
+                elif re.search(r"\s+[\-–—]\s+", clean_ct):
+                    c_parts = re.split(r"\s+[\-–—]\s+", clean_ct, maxsplit=1)
+                    c_h = c_h or c_parts[0].strip()
+                    c_a = c_a or c_parts[1].strip()
 
         if not m_h or not m_a or not c_h or not c_a:
             result["reason"] = "missing_team_names"

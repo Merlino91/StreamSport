@@ -121,18 +121,39 @@ class BannerService:
             return None
 
         cache_file = self.get_cache_path(match_id, status, time_str, has_tvvoo)
+        fallback_marker = cache_file.with_suffix(".fallback")
+
         if cache_file.exists() and cache_file.stat().st_size > 1000:
-            try:
-                return cache_file.read_bytes()
-            except Exception as e:
-                logger.debug("Error reading banner cache %s: %s", cache_file, e)
+            # If cached as fallback, but match now has an official poster, invalidate and regenerate
+            has_real_poster = bool(match and match.get("poster") and "nostream" not in str(match.get("poster")))
+            if fallback_marker.exists() and has_real_poster:
+                try:
+                    fallback_marker.unlink(missing_ok=True)
+                    cache_file.unlink(missing_ok=True)
+                except Exception:
+                    pass
+            else:
+                try:
+                    return cache_file.read_bytes()
+                except Exception as e:
+                    logger.debug("Error reading banner cache %s: %s", cache_file, e)
 
         # Generate poster
-        poster_bytes = await self._generate_poster(match, status, time_str, has_tvvoo)
+        poster_bytes, has_base = await self._generate_poster(match, status, time_str, has_tvvoo)
         if poster_bytes:
             try:
                 cache_file.parent.mkdir(parents=True, exist_ok=True)
                 cache_file.write_bytes(poster_bytes)
+                if not has_base:
+                    try:
+                        fallback_marker.touch()
+                    except Exception:
+                        pass
+                else:
+                    try:
+                        fallback_marker.unlink(missing_ok=True)
+                    except Exception:
+                        pass
             except Exception as e:
                 # If primary directory failed to write, transparently switch to temp storage
                 if "streamsport_data" not in str(self.banners_dir):
@@ -175,24 +196,37 @@ class BannerService:
 
         return None
 
+    def invalidate_match(self, match_id: str):
+        """Invalidates all cached banners for a given match ID (e.g. when an official poster is assigned)."""
+        clean_id = str(match_id).replace("streamsport:", "")
+        try:
+            for p in self.banners_dir.glob(f"{clean_id}*.jpg"):
+                try:
+                    p.unlink()
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
     async def _generate_poster(
         self,
         match: Optional[Dict[str, Any]],
         status: str,
         time_str: str,
         has_tvvoo: bool,
-    ) -> Optional[bytes]:
+    ) -> Tuple[Optional[bytes], bool]:
         try:
             m = match or {}
             base_url = m.get("poster")
             base_im = await self._fetch_base_image(base_url)
 
             # Offload CPU-intensive Pillow rendering and JPEG compression to thread pool
-            return await asyncio.to_thread(self._render_poster_sync, base_im, m, status, time_str, has_tvvoo)
+            rendered = await asyncio.to_thread(self._render_poster_sync, base_im, m, status, time_str, has_tvvoo)
+            return rendered, (base_im is not None)
 
         except Exception as e:
             logger.error("Error generating banner poster for match: %s", e, exc_info=True)
-            return None
+            return None, False
 
     def _render_poster_sync(
         self,
@@ -230,7 +264,7 @@ class BannerService:
         im = Image.new("RGB", (CANVAS_WIDTH, CANVAS_HEIGHT), (12, 15, 20))
         draw = ImageDraw.Draw(im)
 
-        title = (match.get("title") or "Live Sports").strip()
+        title = (match.get("display_title_it") or match.get("_italian_title") or match.get("title") or "Live Sports").strip()
         comp = (match.get("competition") or match.get("_competition") or "").strip().upper()
 
         # Clean title from redundant prefixes

@@ -668,13 +668,13 @@ class MandrakodiService:
     def get_sync_interval(self) -> int:
         """
         Dynamic sync interval based on Rome time:
-        - 12:00 to 22:59 (12 <= hour <= 22): 900 seconds (15 minutes).
-        - 23:00 to 11:59: 3600 seconds (1 hour).
+        - 12:00 to 23:59: 3600 seconds (1 hour).
+        - 00:00 to 11:59: 14400 seconds (4 hours).
         """
         now_rome = datetime.datetime.now(ROME_TZ)
-        if 12 <= now_rome.hour <= 22:
-            return 900
-        return 3600
+        if 12 <= now_rome.hour <= 23:
+            return 3600
+        return 14400
 
     async def get_matches(self, force: bool = False) -> List[Dict[str, Any]]:
         """

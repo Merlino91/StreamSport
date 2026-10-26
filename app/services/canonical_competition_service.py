@@ -499,10 +499,15 @@ CANONICAL_LEAGUES = {
         "silo": "tennis",
         "patterns": [r"\bwimbledon\b", r"us\s*open", r"roland\s*garros", r"australian\s*open"],
     },
+    "tennis_challenger": {
+        "display": "Challenger & ITF",
+        "silo": "tennis",
+        "patterns": [r"\bchallenger\b", r"\bitf\b"],
+    },
     "tennis_atp": {
         "display": "ATP",
         "silo": "tennis",
-        "patterns": [r"\batp\b", r"atp\s*1000", r"atp\s*500", r"atp\s*250", r"atp\s*finals"],
+        "patterns": [r"\batp\b(?!\s*challenger)", r"atp\s*1000", r"atp\s*500", r"atp\s*250", r"atp\s*finals"],
     },
     "tennis_wta": {
         "display": "WTA",
@@ -513,11 +518,6 @@ CANONICAL_LEAGUES = {
         "display": "Coppa Davis & BJK",
         "silo": "tennis",
         "patterns": [r"davis\s*cup", r"coppa\s*davis", r"billie\s*jean\s*king", r"\bbjk\s*cup\b", r"laver\s*cup"],
-    },
-    "tennis_challenger": {
-        "display": "Challenger & ITF",
-        "silo": "tennis",
-        "patterns": [r"\bchallenger\b", r"\bitf\b"],
     },
 
     # --------------------------------------------------------------------------
@@ -1057,3 +1057,228 @@ def is_competition_conflict(canon1: Optional[str], canon2: Optional[str]) -> boo
 
     # If both belong to the same sport silo but are different competitions, it's a conflict!
     return silo1 is not None and silo2 is not None and silo1 == silo2
+
+
+def is_tier_match(m: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
+    """
+    Evaluates whether an official match belongs to the agreed Tier 1 or Tier 2 competitions.
+    Uses 2-level taxonomy (Country -> League) and sport silo to eliminate lower-tier noise
+    (e.g. Serie D, Challenger/ITF tennis, college FCS, minor youth leagues).
+    Returns (True, canonical_slug) if admitted, or (False, None) if excluded.
+    """
+    silo = (m.get("_silo") or m.get("category") or "").lower().strip()
+    country = (m.get("country") or "").lower().strip()
+    league = (m.get("league") or m.get("competition") or "").lower().strip()
+    sport = (m.get("sport") or "").lower().strip()
+
+    # ========================== CALCIO ==========================
+    if silo == "football" or "calcio" in sport or "soccer" in sport:
+        # Exclude youth, reserve, amateur, and fourth/fifth tier divisions
+        if any(w in league for w in (
+            "u15", "u16", "u17", "u18", "u19", "u20", "u21", "u23",
+            "primavera", "next pro", "amatori", "dilettanti", "eccellenza", "promozione", "tercera"
+        )):
+            return False, None
+
+        # 1. Italia (Tier 1 & 2 - Serie D strictly excluded)
+        if country in ("italia", "italy"):
+            if "serie a" in league and not any(w in league for w in ("femminile", "women", "dame")):
+                return True, "football_serie_a"
+            if "serie b" in league:
+                return True, "football_serie_b"
+            if "serie c" in league or "coppa italia serie c" in league:
+                return True, "football_serie_c"
+            if "coppa italia" in league or "supercoppa italiana" in league:
+                return True, "football_coppa_italia"
+            if "serie a" in league and any(w in league for w in ("femminile", "women")):
+                return True, "football_serie_a_women"
+            return False, None
+
+        # 2. Inghilterra / UK
+        if country in ("inghilterra", "england", "regno unito", "uk"):
+            if "premier league" in league and "2" not in league:
+                return True, "football_premier_league"
+            if "championship" in league:
+                return True, "football_championship"
+            if any(w in league for w in ("fa cup", "carabao cup", "efl cup")):
+                return True, "football_fa_cup"
+            return False, None
+
+        # 3. Spagna
+        if country in ("spagna", "spain"):
+            if "laliga" in league or "la liga" in league or "primera division" in league:
+                if "2" in league or "hypermotion" in league:
+                    return True, "football_segunda"
+                return True, "football_la_liga"
+            if any(w in league for w in ("copa del rey", "supercoppa", "supercopa")):
+                return True, "football_copa_del_rey"
+            return False, None
+
+        # 4. Germania
+        if country in ("germania", "germany"):
+            if "bundesliga" in league:
+                if "2." in league or "2 " in league:
+                    return True, "football_2_bundesliga"
+                return True, "football_bundesliga"
+            if "dfb-pokal" in league or "dfb pokal" in league or "supercup" in league:
+                return True, "football_dfb_pokal"
+            return False, None
+
+        # 5. Francia
+        if country in ("francia", "france"):
+            if "ligue 1" in league:
+                return True, "football_ligue_1"
+            if "ligue 2" in league:
+                return True, "football_ligue_2"
+            if any(w in league for w in ("coupe de france", "trophee des champions", "supercoppa")):
+                return True, "football_coupe_de_france"
+            return False, None
+
+        # 6. Coppe Europee & Internazionali
+        if country in ("europa", "europe", "mondo", "world", "sud america", "south america", "asia"):
+            if "champions league" in league:
+                if any(w in league for w in ("donne", "women", "femminile")):
+                    return True, "football_uwcl"
+                return True, "football_uefa_cl"
+            if "europa league" in league:
+                return True, "football_uefa_el"
+            if "conference league" in league:
+                return True, "football_uefa_ecl"
+            if "supercoppa uefa" in league or "uefa super cup" in league:
+                return True, "football_uefa_super_cup"
+            if "nations league" in league:
+                return True, "football_uefa_nations"
+            if "copa libertadores" in league:
+                return True, "football_copa_libertadores"
+            if "copa sudamericana" in league:
+                return True, "football_copa_sudamericana"
+            if any(w in league for w in ("mondiali", "world cup", "qualificazioni mondiali")):
+                return True, "football_world_cup"
+            if any(w in league for w in ("europei", "euro ", "qualificazioni europei")):
+                return True, "football_euro"
+            return False, None
+
+        # 7. Altre Leghe Tier 2
+        if country in ("portogallo", "portugal") and ("liga portugal" in league or "primeira liga" in league or "taca de portugal" in league):
+            if "2" not in league:
+                return True, "football_primeira_liga"
+        if country in ("olanda", "netherlands", "paesi bassi") and ("eredivisie" in league or "knvb beker" in league):
+            return True, "football_eredivisie"
+        if country in ("arabia saudita", "saudi arabia") and ("saudi pro league" in league or "professional league" in league or "king cup" in league):
+            return True, "football_saudi_pro"
+        if country in ("usa", "stati uniti") and ("mls" in league or "major league soccer" in league) and "next pro" not in league:
+            return True, "football_mls"
+        if country in ("brasile", "brazil") and ("serie a" in league or "brasileirao" in league or "copa do brasil" in league):
+            return True, "football_brasileirao"
+        if country in ("argentina",) and ("liga profesional" in league or "copa de la liga" in league):
+            return True, "football_liga_profesional_arg"
+
+        return False, None
+
+    # ========================== TENNIS ==========================
+    if silo == "tennis" or "tennis" in sport:
+        if any(w in league for w in ("challenger", "itf", "utr", "exhibition", "esibizione")):
+            return False, None
+        if any(w in league for w in ("wimbledon", "us open", "roland garros", "australian open")):
+            return True, "tennis_grand_slam"
+        if "atp" in league:
+            return True, "tennis_atp"
+        if "wta" in league:
+            return True, "tennis_wta"
+        if any(w in league for w in ("davis", "billie jean king", "bjk cup", "laver cup")):
+            return True, "tennis_davis_bjk"
+        return False, None
+
+    # ========================== BASKET ==========================
+    if silo == "basketball" or "basket" in sport:
+        if "nba" in league:
+            return True, "basketball_nba"
+        if "euroleague" in league:
+            return True, "basketball_euroleague"
+        if "eurocup" in league:
+            return True, "basketball_eurocup"
+        if "champions league" in league:
+            return True, "basketball_bcl"
+        if country in ("italia", "italy") and ("serie a" in league or "lba" in league or "coppa italia" in league):
+            return True, "basketball_lba_serie_a"
+        if country in ("italia", "italy") and "serie a2" in league:
+            return True, "basketball_serie_a2"
+        if country in ("spagna", "spain") and ("acb" in league or "liga endesa" in league):
+            return True, "basketball_acb"
+        if country in ("mondo", "world", "europa", "europe") and ("fiba" in league or "mondiali" in league or "europei" in league or "qualificazioni" in league):
+            return True, "basketball_fiba"
+        return False, None
+
+    # ========================== VOLLEY ==========================
+    if silo == "volley" or "pallavolo" in sport or "volleyball" in sport:
+        if country in ("italia", "italy"):
+            if "superlega" in league or ("serie a1" in league and "femminile" not in league):
+                return True, "volleyball_superlega"
+            if "serie a1" in league and "femminile" in league:
+                return True, "volleyball_serie_a1_femm"
+            if "serie a2" in league:
+                return True, "volleyball_serie_a2"
+            if "coppa italia" in league:
+                return True, "volleyball_coppa_italia"
+            return False, None
+        if country in ("europa", "europe") and ("champions league" in league or "cev" in league or "challenge cup" in league):
+            return True, "volleyball_cev_cl"
+        if country in ("mondo", "world") and ("vnl" in league or "nations league" in league or "mondiali" in league or "europei" in league):
+            return True, "volleyball_international"
+        return False, None
+
+    # ========================== MOTORI ==========================
+    if silo in ("motorsport", "motor-sports") or any(w in sport for w in ("motori", "f1", "motogp", "auto", "moto")):
+        if any(w in league for w in ("formula 1", "formula one", "f1")):
+            return True, "motorsport_f1"
+        if "motogp" in league:
+            return True, "motorsport_motogp"
+        if any(w in league for w in ("superbike", "wsbk", "sbk")):
+            return True, "motorsport_sbk"
+        if "formula 2" in league or "f2" in league:
+            return True, "motorsport_f2"
+        if "formula 3" in league or "f3" in league:
+            return True, "motorsport_f3"
+        if "wec" in league or "endurance" in league:
+            return True, "motorsport_wec"
+        if "indycar" in league:
+            return True, "motorsport_indycar"
+        if "wrc" in league or "rally" in league:
+            return True, "motorsport_rally_wrc"
+        return False, None
+
+    # ========================== FOOTBALL AMERICANO ==========================
+    if silo in ("american_football", "am_football", "american-football") or "football americano" in sport:
+        if "nfl" in league:
+            return True, "am_football_nfl"
+        if "ncaa" in league:
+            # Division 1 FBS only - strictly exclude FCS or lower divisions
+            if not any(w in league for w in ("fcs", "div ii", "div iii", "division ii", "division iii")):
+                return True, "am_football_ncaa"
+        return False, None
+
+    # ========================== HOCKEY ==========================
+    if silo == "hockey" or "hockey" in sport:
+        if "nhl" in league:
+            return True, "hockey_nhl"
+        return False, None
+
+    # ========================== BASEBALL ==========================
+    if silo == "baseball" or "baseball" in sport:
+        if "mlb" in league:
+            return True, "baseball_mlb"
+        return False, None
+
+    # ========================== RUGBY ==========================
+    if silo == "rugby" or "rugby" in sport:
+        if any(w in league for w in ("sei nazioni", "six nations", "urc", "united rugby championship", "top 14", "champions cup", "rugby championship")):
+            return True, "rugby_major"
+        return False, None
+
+    # ========================== COMBAT / UFC ==========================
+    if silo in ("fight", "combat") or any(w in sport for w in ("ufc", "boxe", "boxing", "mma")):
+        if any(w in league for w in ("ufc", "boxing", "boxe")):
+            return True, "fight_ufc"
+        return False, None
+
+    return False, None

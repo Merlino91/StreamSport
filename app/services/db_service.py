@@ -184,6 +184,8 @@ class DBService:
                     UPDATE matches SET poster = ?, updated_at = ? WHERE id = ?
                 """, (poster_url, now, match_id))
                 conn.commit()
+            from app.services.banner_service import banner_service
+            banner_service.invalidate_match(match_id)
         except Exception as e:
             logger.error("Failed to update match poster for %s: %s", match_id, e)
 

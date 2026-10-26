@@ -67,25 +67,25 @@ class TestMandrakodiService(unittest.IsolatedAsyncioTestCase):
         from app.services.catalog_service import catalog_service
         # Test interval calculation in catalog_service and mandrakodi_service
         with patch("datetime.datetime") as mock_dt:
-            # 15:00 Rome time -> peak hours (12 to 22) -> 900s
+            # 15:00 Rome time -> afternoon/evening (12 to 23) -> 3600s (1h)
             mock_dt.now.return_value = MagicMock(hour=15)
-            self.assertEqual(catalog_service.get_current_sync_interval(), 900)
-            self.assertEqual(mandrakodi_service.get_sync_interval(), 900)
+            self.assertEqual(catalog_service.get_current_sync_interval(), 3600)
+            self.assertEqual(mandrakodi_service.get_sync_interval(), 3600)
 
-            # 22:59 Rome time -> still peak hours -> 900s
-            mock_dt.now.return_value = MagicMock(hour=22)
-            self.assertEqual(catalog_service.get_current_sync_interval(), 900)
-            self.assertEqual(mandrakodi_service.get_sync_interval(), 900)
-
-            # 23:00 Rome time -> off-peak hours -> 3600s
+            # 23:00 Rome time -> still evening hours -> 3600s (1h)
             mock_dt.now.return_value = MagicMock(hour=23)
             self.assertEqual(catalog_service.get_current_sync_interval(), 3600)
             self.assertEqual(mandrakodi_service.get_sync_interval(), 3600)
 
-            # 08:00 Rome time -> off-peak hours -> 3600s
+            # 00:00 Rome time -> overnight/morning (00 to 11) -> 14400s (4h)
+            mock_dt.now.return_value = MagicMock(hour=0)
+            self.assertEqual(catalog_service.get_current_sync_interval(), 14400)
+            self.assertEqual(mandrakodi_service.get_sync_interval(), 14400)
+
+            # 08:00 Rome time -> morning hours -> 14400s (4h)
             mock_dt.now.return_value = MagicMock(hour=8)
-            self.assertEqual(catalog_service.get_current_sync_interval(), 3600)
-            self.assertEqual(mandrakodi_service.get_sync_interval(), 3600)
+            self.assertEqual(catalog_service.get_current_sync_interval(), 14400)
+            self.assertEqual(mandrakodi_service.get_sync_interval(), 14400)
 
     async def test_resolve_live_match_streams_and_reconcile(self):
         from app.services.catalog_service import catalog_service

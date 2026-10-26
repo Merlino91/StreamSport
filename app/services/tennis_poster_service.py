@@ -827,7 +827,12 @@ class TennisPosterService:
         tennis_matches = [
             m for m in matches
             if (m.get("category") == "tennis" or m.get("_catalog") == "tennis")
-            and (not m.get("poster") or not str(m.get("poster")).endswith("_v3.jpg"))
+            and (
+                not m.get("poster")
+                or "nostream" in str(m.get("poster"))
+                or (str(m.get("poster")).startswith("/posters/tennis_") and not str(m.get("poster")).endswith("_v3.jpg"))
+            )
+            and not any(k in str(m.get("poster", "")).lower() for k in ("guidatv.sky.it", "sky.it", "apid.sky.it", "tivulaguida", "thesportsdb"))
             and m.get("title")
         ]
 
@@ -859,6 +864,8 @@ class TennisPosterService:
                     if rel_poster:
                         m["poster"] = rel_poster
                         await db_service.save_matches_async([m])
+                        from app.services.banner_service import banner_service
+                        banner_service.invalidate_match(m_id)
                 except Exception as e:
                     logger.debug("Failed generating tennis poster for '%s': %s", title, e)
 

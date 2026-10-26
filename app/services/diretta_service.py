@@ -23,6 +23,7 @@ FS_SUPPORTED_SPORTS: Dict[int, Tuple[str, str]] = {
     4: ("Hockey", "hockey"),
     5: ("Football Americano", "american-football"),
     6: ("Baseball", "baseball"),
+    7: ("Rugby", "rugby"),
     12: ("Volley", "volley"),
 }
 
@@ -242,7 +243,7 @@ class DirettaService:
             if not force and self._cached_events and (now - self._cache_time < self._cache_ttl):
                 return self._cached_events
 
-            target_days = (-1, 0, 1)
+            target_days = (-1, 0, 1, 2)
             tasks = []
             success_count = 0
             fail_count = 0
@@ -340,6 +341,112 @@ class DirettaService:
                     )
 
             return self._cached_events
+
+    async def get_official_sliding_schedule(
+        self,
+        cutoff_hours_behind: int = 6,
+        hours_ahead: int = 48,
+        force: bool = False,
+    ) -> List[Dict[str, Any]]:
+        """
+        Extracts the official multi-sport schedule from Diretta/Flashscore within the sliding window
+        (yesterday last 6 hours up to +48h), strictly admitting only Tier 1 and Tier 2 competitions.
+        Produces complete official match dictionaries ready for catalog indexing.
+        """
+        all_events = await self.get_events(force=force)
+        now_ms = time.time() * 1000
+        min_ms = now_ms - (cutoff_hours_behind * 3600 * 1000)
+        max_ms = now_ms + (hours_ahead * 3600 * 1000)
+
+        from app.services.canonical_competition_service import is_tier_match, detect_canonical_competition
+        from app.services.genre_classifier import genre_classifier
+
+        official_matches: List[Dict[str, Any]] = []
+        seen_fids: Set[str] = set()
+
+        for m in all_events:
+            fid = m.get("flashscore_id") or m.get("id")
+            if not fid or fid in seen_fids:
+                continue
+
+            date_ms = m.get("date", 0)
+            if date_ms and (date_ms < min_ms or date_ms > max_ms):
+                continue
+
+            admitted, slug = is_tier_match(m)
+            if not admitted:
+                continue
+
+            seen_fids.add(fid)
+
+            d_home = m.get("full_home") or m.get("home", "")
+            d_away = m.get("full_away") or m.get("away", "")
+            silo = m.get("_silo", "altri_sport")
+            comp = m.get("competition") or m.get("league", "")
+            country = m.get("country", "")
+
+            # Livesport.com (English) names are authoritative for TheSportsDB and deduplication matching
+            primary_home = m.get("alt_home") or d_home
+            primary_away = m.get("alt_away") or d_away
+            primary_title = m.get("alt_title") or f"{primary_home} vs {primary_away}"
+            it_title = f"{d_home} vs {d_away}"
+
+            # Infer canonical slug fallback if needed
+            if not slug:
+                slug = detect_canonical_competition(f"{country}: {comp} {primary_home} vs {primary_away}", silo_hint=silo)
+
+            official_match = {
+                "id": f"diretta-{fid}",
+                "flashscore_id": fid,
+                "_official_id": fid,
+                "title": primary_title,
+                "display_title_it": it_title,
+                "_italian_title": it_title,
+                "category": silo,
+                "_silo": silo,
+                "sport": m.get("sport", ""),
+                "home": primary_home,
+                "away": primary_away,
+                "_diretta_home": primary_home,
+                "_diretta_away": primary_away,
+                "_diretta_title": primary_title,
+                "date": date_ms,
+                "_date_ms": date_ms,
+                "teams": {
+                    "home": {"name": primary_home},
+                    "away": {"name": primary_away},
+                },
+                "alt_teams": [
+                    {"home": {"name": d_home}, "away": {"name": d_away}},
+                    {"home": {"name": primary_home}, "away": {"name": primary_away}},
+                ],
+                "raw_titles": list(dict.fromkeys([t for t in (it_title, primary_title, m.get("alt_title", "")) if t])),
+                "competition": comp,
+                "_competition": comp,
+                "country": country,
+                "_country": country,
+                "league": m.get("league", comp),
+                "canonical_competition": slug,
+                "_canonical_competition": slug,
+                "tv_channels": m.get("tv_channels", []),
+                "sources": [],
+            }
+
+            # Preserve gender/age
+            c_text = f"{comp} {d_home} {d_away}".lower()
+            if re.search(r"\b(women(?:[’']s)?|femminile|femenino|ladies|frauen|w-|wta|wnba|uwcl)\b", c_text):
+                official_match["_gender"] = "+"
+            if re.search(r"\b(u-?1[5-9]|u-?2[01]|under\s*1[5-9]|under\s*2[01]|youth|primavera|junior)\b", c_text):
+                official_match["_age"] = "+"
+
+            # Classify catalog and genre using official genre_classifier
+            item_catalog, item_genre = genre_classifier.classify(official_match)
+            official_match["_catalog"] = item_catalog
+            official_match["genres"] = [item_genre]
+
+            official_matches.append(official_match)
+
+        return official_matches
 
     def _clean_team_words(self, name: str) -> Set[str]:
         return extract_team_words(name)

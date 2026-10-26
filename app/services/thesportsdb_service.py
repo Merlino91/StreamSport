@@ -374,6 +374,12 @@ class TheSportsDBService:
         r"\bbesiktas istanbul\b": "besiktas",
         r"\bbod[oøe]/glimt\b": "bodo glimt",
         r"\bmalm[oöe] ff\b": "malmo",
+        r"\bsiviglia\b": "sevilla",
+        r"\blione\b": "lyon",
+        r"\bmarsiglia\b": "marseille",
+        r"\bbayern monaco\b": "bayern munchen",
+        r"\bstade brestois(?: 29)?\b": "brest",
+        r"\bdeportivo alaves\b": "alaves",
     }
 
     GENERIC_CLUB_WORDS = {
@@ -675,6 +681,16 @@ class TheSportsDBService:
                     da_inverted = self._team_matches(dir_away, cal_home)
                     teams_matched = (dh_direct and da_direct) or (dh_inverted and da_inverted)
 
+                if not teams_matched and m.get("alt_teams"):
+                    for alt_t in m["alt_teams"]:
+                        if isinstance(alt_t, dict) and alt_t.get("home") and alt_t.get("away"):
+                            ah = self._clean_team_name(extract_team_name(alt_t["home"]))
+                            aa = self._clean_team_name(extract_team_name(alt_t["away"]))
+                            if (self._team_matches(ah, cal_home) and self._team_matches(aa, cal_away)) or \
+                               (self._team_matches(ah, cal_away) and self._team_matches(aa, cal_home)):
+                                teams_matched = True
+                                break
+
                 if not teams_matched:
                     continue
 
@@ -701,7 +717,7 @@ class TheSportsDBService:
             if best_match:
                 # 1. Poster assignment
                 cal_thumb = best_match.get("thumb")
-                if cal_thumb and (not m.get("poster") or "nostream" in m.get("poster", "") or "apid.sky.it" in str(m.get("poster")) or not str(m.get("poster")).startswith("http")):
+                if cal_thumb and (not m.get("poster") or "nostream" in m.get("poster", "") or not str(m.get("poster")).startswith("http")):
                     m["poster"] = cal_thumb
                     db_service.update_match_poster(m["id"], cal_thumb)
                     q_key = f"{best_match['home']} vs {best_match['away']}"
@@ -1012,7 +1028,7 @@ class TheSportsDBService:
         max_future_ms = now_ms + (3 * 24 * 3600 * 1000)
         orphans = [
             m for m in matches
-            if (not m.get("poster") or "nostream" in m.get("poster", "") or "apid.sky.it" in str(m.get("poster")) or not str(m.get("poster")).startswith("http"))
+            if (not m.get("poster") or "nostream" in m.get("poster", "") or not str(m.get("poster")).startswith("http"))
             and (not m.get("date") or m.get("date") <= max_future_ms)
         ]
         if not orphans:

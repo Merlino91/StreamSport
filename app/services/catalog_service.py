@@ -93,14 +93,14 @@ class CatalogService:
     def get_current_sync_interval(self) -> int:
         """
         Dynamic sync interval based on Rome time:
-        - 12:00 to 22:59 (12 <= hour <= 22): 900 seconds (15 minutes) for peak sports coverage.
-        - 23:00 to 11:59: 3600 seconds (1 hour).
+        - 12:00 to 23:59: 3600 seconds (1 hour) for afternoon/evening sports coverage.
+        - 00:00 to 11:59: 14400 seconds (4 hours) for overnight/morning (00:00, 04:00, 08:00, 12:00).
         """
         tz = get_safe_timezone("Europe/Rome")
         now_rome = datetime.datetime.now(tz)
-        if 12 <= now_rome.hour <= 22:
-            return 900
-        return 3600
+        if 12 <= now_rome.hour <= 23:
+            return 3600
+        return 14400
 
     def reset_sync_timer(self) -> None:
         """Resets the background catalog sync timer to postpone the next scheduled sync by a full interval."""
@@ -285,12 +285,12 @@ class CatalogService:
     ) -> Dict[str, Any]:
         """Converts a raw match object into a Stremio meta preview object."""
         match_id = match.get("id", "")
-        title = match.get("title", "Live Sports")
+        display_title = match.get("display_title_it") or match.get("_italian_title") or match.get("title", "Live Sports")
         date_ms = match.get("date", 0)
         is_popular = match.get("popular", False)
         poster_url = self.normalize_image_url(match.get("poster"), base_url=base_url)
 
-        clean_title, comp_name = self.split_title_and_competition(title, genre)
+        clean_title, comp_name = self.split_title_and_competition(display_title, genre)
         if not comp_name:
             comp_name = match.get("competition") or match.get("_competition") or ""
 
@@ -404,7 +404,7 @@ class CatalogService:
         item = {
             "id": stremio_id,
             "type": CATALOG_TYPE,
-            "name": clean_title if clean_title else title,
+            "name": clean_title if clean_title else display_title,
             "genres": [genre],
             "posterShape": "landscape",
             "description": description,
@@ -774,7 +774,11 @@ class CatalogService:
 
                 if not existing.get("teams") and m2.get("teams"):
                     existing["teams"] = m2["teams"]
-                if not existing.get("poster") and m2.get("poster"):
+                p_ex = str(existing.get("poster") or "")
+                p_m2 = str(m2.get("poster") or "")
+                if (not p_ex or "nostream" in p_ex) and (p_m2 and "nostream" not in p_m2):
+                    existing["poster"] = m2["poster"]
+                elif p_m2.startswith("http") and not p_ex.startswith("http"):
                     existing["poster"] = m2["poster"]
                 if not existing.get("date") and m2.get("date"):
                     existing["date"] = m2["date"]
@@ -831,6 +835,70 @@ class CatalogService:
             all_merged.extend(merged_silo)
 
         return all_merged
+
+    def link_official_schedule_to_provider_clusters(
+        self,
+        official_schedule: List[Dict[str, Any]],
+        provider_clusters: List[Dict[str, Any]],
+        time_window_minutes: float = 90.0,
+    ) -> List[Dict[str, Any]]:
+        """
+        Links official Diretta/Flashscore schedule entries to deduplicated provider streaming clusters.
+        Matching is partitioned strictly by sport silo, within an accepted 90-minute time window,
+        using bilateral team fuzzy matching and trait protection (youth/women).
+        """
+        from collections import defaultdict
+        from app.services.team_matching import calculate_match_score
+
+        clusters_by_silo = defaultdict(list)
+        for c in provider_clusters:
+            silo = self.get_canonical_silo(c)
+            clusters_by_silo[silo].append(c)
+
+        claimed_cluster_ids = set()
+        linked_schedule: List[Dict[str, Any]] = []
+
+        for off in official_schedule:
+            off_copy = dict(off)
+            silo = off_copy.get("_silo") or self.get_canonical_silo(off_copy)
+            candidates = clusters_by_silo.get(silo, [])
+            off_date = off_copy.get("date") or 0
+
+            # Time proximity: strictly within time_window_minutes (default 90m) in the same silo
+            time_filtered = [
+                c for c in candidates
+                if c.get("id") not in claimed_cluster_ids
+                and abs((c.get("date") or 0) - off_date) <= time_window_minutes * 60 * 1000
+            ]
+
+            best_cand = None
+            best_score = 0.0
+            for cand in time_filtered:
+                score_res = calculate_match_score(cand, off_copy, phase="phase1_diretta")
+                if score_res["matched"] and score_res["score"] > best_score:
+                    best_score = score_res["score"]
+                    best_cand = cand
+                    if best_score >= 0.95:
+                        break
+
+            if best_cand and best_score >= 0.75:
+                # Inherit sources from deduplicated provider cluster
+                cand_sources = list(best_cand.get("sources", []))
+                off_copy["sources"] = cand_sources
+                off_copy["_matched_cluster_id"] = best_cand.get("id")
+                # Preserve any alternate titles from the provider
+                if best_cand.get("raw_titles"):
+                    existing_raw = set(off_copy.get("raw_titles", []))
+                    for rt in best_cand["raw_titles"]:
+                        if rt not in existing_raw:
+                            off_copy.setdefault("raw_titles", []).append(rt)
+                claimed_cluster_ids.add(best_cand.get("id"))
+            else:
+                off_copy.setdefault("sources", [])
+
+            linked_schedule.append(off_copy)
+
+        return linked_schedule
 
     COMMON_TEAM_ACRONYMS: Dict[str, str] = {
         "lafc": "los angeles fc",
@@ -1251,7 +1319,7 @@ class CatalogService:
                     ocblacktop_service.get_official_sessions(),
                     thesportsdb_service.fetch_multi_day_calendar(days_ahead=2, days_behind=1),
                     italian_epg_service.get_matches(),
-                    diretta_service.get_events(),
+                    diretta_service.get_official_sliding_schedule(cutoff_hours_behind=6, hours_ahead=48, force=True),
                     fctv33_service.get_matches(force=True),
                     mandrakodi_service.get_matches(force=True),
                     spon_service.get_matches(force=True),
@@ -1262,6 +1330,7 @@ class CatalogService:
                 ocb_sessions = results[2] if isinstance(results[2], list) else []
                 epg_raw = results[4] if isinstance(results[4], list) else []
                 diretta_events = results[5] if isinstance(results[5], list) else []
+                official_schedule = diretta_events
                 fctv33_raw = results[6] if isinstance(results[6], list) else []
                 mandrakodi_raw = results[7] if isinstance(results[7], list) else []
                 spon_raw = results[8] if isinstance(results[8], list) else []
@@ -1290,50 +1359,84 @@ class CatalogService:
                         and not bool(isinstance(m.get("teams"), dict) and m["teams"].get("home") and m["teams"].get("away"))
                         and any(k in (m.get("title") or "").lower() for k in ("live", "wta", "atp", "masters", "slam"))
                     )
+                    or (
+                        (m.get("_silo") == "golf" or m.get("category") in ("golf", "altri_sport"))
+                        and not bool(isinstance(m.get("teams"), dict) and m["teams"].get("home") and m["teams"].get("away"))
+                    )
                     or is_simulcast_event(m.get("title", ""))
                 ]
                 if epg_certified_sessions:
                     combined_fresh = self.merge_and_deduplicate_by_silos(combined_fresh, epg_certified_sessions)
 
-                # 2. Pull all active matches from DB to retain existing enriched posters
+                # Pull all active matches from DB to retain existing enriched posters
                 all_db_matches = [m for m in await db_service.get_active_matches_async() if self.is_real_match(m)]
-                # Transfer existing DB posters to fresh matches if missing
-                db_posters = {
-                    m["id"]: m["poster"]
-                    for m in all_db_matches
-                    if m.get("id") and m.get("poster") and "apid.sky.it" not in str(m.get("poster"))
-                }
-                for m in combined_fresh:
-                    m_id = m.get("id")
-                    if m_id and m_id in db_posters and not m.get("poster"):
-                        m["poster"] = db_posters[m_id]
+                db_posters = {}
+                db_posters_by_teams = {}
+                db_posters_by_tokens = {}
+                for m in all_db_matches:
+                    p = m.get("poster")
+                    if not p or "nostream" in str(p):
+                        continue
+                    if m.get("id"):
+                        db_posters[m["id"]] = p
+                    tk = self._get_teams_key(m)
+                    if tk:
+                        db_posters_by_teams[tk] = p
+                    tok = self._clean_tokens(m.get("title", ""))
+                    if tok:
+                        db_posters_by_tokens[tok] = p
 
-                # Exclude fresh IDs and stale mandrakodi channel entries from all_db_matches
-                fresh_ids = {m.get("id") for m in combined_fresh if m.get("id")}
-                all_db_matches = [
-                    m for m in all_db_matches
-                    if m.get("id") not in fresh_ids and not str(m.get("id", "")).startswith("mandrakodi:")
-                ]
-                all_matches = self.merge_and_deduplicate_by_silos(combined_fresh, all_db_matches) if all_db_matches else combined_fresh
-
-                # 3. FASE 1: CONVALIDATORI UFFICIALI & ARRICCHIMENTO INFORMATIVE (Diretta.it & OCB)
-                # Primary downstream validator: establishes official kickoff time (UTC minute),
-                # official competition, and clean normalized Italian team names without destroying raw titles.
-                diretta_matched = 0
-                if diretta_service.is_healthy:
-                    diretta_matched = diretta_service.reconcile_matches(all_matches)
+                # 2. TOP-DOWN INVERTED LINKING:
+                # Official Diretta/Flashscore schedule is primary.
+                # It links to deduplicated provider clusters in combined_fresh.
+                if official_schedule:
+                    linked_schedule = self.link_official_schedule_to_provider_clusters(official_schedule, combined_fresh)
+                    if epg_certified_sessions:
+                        linked_schedule.extend(epg_certified_sessions)
+                    all_matches = linked_schedule
+                    logger.info("Top-Down Pipeline: linked %d official matches to provider stream clusters.", len(all_matches))
                 else:
-                    logger.warning(
-                        "Diretta.it non raggiungibile o non operativo: scatta il fallback di emergenza su ESPN Scoreboard."
-                    )
-                    espn_events = await espn_service.get_official_events()
-                    if espn_events:
-                        espn_service.reconcile_matches(all_matches, espn_events, self._clean_tokens, self._get_teams_key)
+                    logger.warning("Diretta sliding schedule unavailable; falling back to provider bottom-up pipeline.")
+                    fresh_ids = {m.get("id") for m in combined_fresh if m.get("id")}
+                    all_db_matches = [
+                        m for m in all_db_matches
+                        if m.get("id") not in fresh_ids and not str(m.get("id", "")).startswith("mandrakodi:")
+                    ]
+                    all_matches = self.merge_and_deduplicate_by_silos(combined_fresh, all_db_matches) if all_db_matches else combined_fresh
+                    if diretta_service.is_healthy:
+                        diretta_service.reconcile_matches(all_matches)
+                    else:
+                        espn_events = await espn_service.get_official_events()
+                        if espn_events:
+                            espn_service.reconcile_matches(all_matches, espn_events, self._clean_tokens, self._get_teams_key)
 
                 # Reconcile motorsport events against official Orange Cat Blacktop session registry
-                # (Generates _tsdb_query, circuit and exact FP1/Qualifiche/Gara session data)
                 if ocb_sessions:
                     ocblacktop_service.reconcile_matches(all_matches, ocb_sessions)
+
+                # Transfer existing DB posters to fresh matches if missing
+                for m in all_matches:
+                    if m.get("poster") and "nostream" not in str(m.get("poster")):
+                        continue
+                    m_id = m.get("id")
+                    if m_id and m_id in db_posters:
+                        m["poster"] = db_posters[m_id]
+                        continue
+                    tk = self._get_teams_key(m)
+                    if tk and tk in db_posters_by_teams:
+                        m["poster"] = db_posters_by_teams[tk]
+                        continue
+                    tok = self._clean_tokens(m.get("title", ""))
+                    if tok and tok in db_posters_by_tokens:
+                        m["poster"] = db_posters_by_tokens[tok]
+                        continue
+                    if m.get("alt_teams"):
+                        for at in m["alt_teams"]:
+                            if isinstance(at, dict):
+                                at_k = self._get_teams_key({"teams": at})
+                                if at_k and at_k in db_posters_by_teams:
+                                    m["poster"] = db_posters_by_teams[at_k]
+                                    break
 
                 # 4. FASE 2: ARRICCHIMENTO FLUSSI TV (TvVoo, Mandrakodi & EPG Sky/Tivùsat)
                 # Enrich any match (from DaddyLive, Streamed, etc.) with TvVoo FHD streams if matching recognized broadcasters
