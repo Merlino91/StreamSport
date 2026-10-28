@@ -39,7 +39,7 @@ from app.services.doh_client import doh_client
 from app.services.mandrakodi_service import mandrakodi_service
 from app.services.sportvideo_service import sportvideo_service
 from app.services.stream_service import stream_service
-from app.services.tvvoo_service import tvvoo_service
+from app.services.tvvoo_service import sanitize_ip, tvvoo_service
 from app.services.youtube_service import youtube_service
 
 # Setup logging
@@ -146,7 +146,8 @@ def extract_clean_client_ip(request: Request) -> Optional[str]:
     """
     Extracts and formally validates client IP address.
     Prioritizes Cloudflare's CF-Connecting-IP, then X-Forwarded-For, then direct client host.
-    Ensures candidate is a valid IPv4 or IPv6 address to prevent header spoofing / upstream injection.
+    Ensures candidate is a valid public IPv4 or IPv6 address to prevent header spoofing,
+    upstream injection, or forwarding private LAN/Docker IPs to upstream streaming providers.
     """
     raw_ip = (
         request.headers.get("cf-connecting-ip")
@@ -156,12 +157,7 @@ def extract_clean_client_ip(request: Request) -> Optional[str]:
     if not raw_ip:
         return None
 
-    candidate = raw_ip.split(",")[0].strip()
-    try:
-        return str(ipaddress.ip_address(candidate))
-    except ValueError:
-        logger.debug("Discarded invalid client IP format: %s", candidate[:50])
-        return None
+    return sanitize_ip(raw_ip)
 
 
 def build_manifest(configured: bool = True) -> dict:

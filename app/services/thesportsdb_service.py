@@ -10,8 +10,10 @@ from typing import Any, Dict, List, Optional, Tuple
 import httpx
 
 from app.config import (
+    ENABLE_THESPORTSDB,
     THESPORTSDB_USER,
     THESPORTSDB_PASS,
+    THESPORTSDB_API_KEY,
     THESPORTSDB_CALENDAR_INTERVAL,
 )
 from app.services.db_service import db_service
@@ -24,7 +26,7 @@ from app.services.team_matching import clean_team_name, match_single_team, extra
 
 logger = logging.getLogger("streamsport.thesportsdb")
 
-THESPORTSDB_API_BASE = "https://www.thesportsdb.com/api/v1/json/123"
+THESPORTSDB_API_BASE = f"https://www.thesportsdb.com/api/v1/json/{THESPORTSDB_API_KEY}"
 
 THESPORTSDB_SPORT_TO_SILO = {
     "soccer": "football",
@@ -143,8 +145,8 @@ class TheSportsDBService:
         Authenticates against TheSportsDB using user credentials from config.
         Captures CSRF token and maintains session cookies.
         """
-        if not THESPORTSDB_USER or not THESPORTSDB_PASS:
-            logger.warning("TheSportsDB credentials (THESPORTSDB_USER / THESPORTSDB_PASS) not configured.")
+        if not ENABLE_THESPORTSDB or not THESPORTSDB_USER or not THESPORTSDB_PASS:
+            logger.debug("TheSportsDB credentials (THESPORTSDB_USER / THESPORTSDB_PASS) not configured or disabled.")
             return False
 
         try:
@@ -260,6 +262,8 @@ class TheSportsDBService:
         Throttled to run at most once every THESPORTSDB_CALENDAR_INTERVAL (12 hours).
         """
         async with self._calendar_lock:
+            if not ENABLE_THESPORTSDB:
+                return []
             now = time.time()
             if self._calendar_cache and (now - self._last_calendar_fetch < THESPORTSDB_CALENDAR_INTERVAL):
                 return self._calendar_cache

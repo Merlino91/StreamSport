@@ -86,10 +86,20 @@ chunk_102.ts
     def test_sanitize_ip_validations(self):
         from app.services.tvvoo_service import sanitize_ip
 
-        # Valid IPv4 & IPv6
-        self.assertEqual(sanitize_ip("198.51.100.1"), "198.51.100.1")
-        self.assertEqual(sanitize_ip("2001:db8::1"), "2001:db8::1")
-        self.assertEqual(sanitize_ip("198.51.100.1, 10.0.0.1"), "198.51.100.1")
+        # Valid public IPv4 & IPv6
+        self.assertEqual(sanitize_ip("93.184.216.34"), "93.184.216.34")
+        self.assertEqual(sanitize_ip("2606:4700:4700::1111"), "2606:4700:4700::1111")
+        self.assertEqual(sanitize_ip("93.184.216.34, 10.0.0.1"), "93.184.216.34")
+        self.assertEqual(sanitize_ip("::ffff:93.184.216.34"), "93.184.216.34")
+
+        # Discard private LAN, Docker, loopback, link-local, and reserved IPs
+        self.assertIsNone(sanitize_ip("10.0.1.15"))
+        self.assertIsNone(sanitize_ip("192.168.1.1"))
+        self.assertIsNone(sanitize_ip("172.16.0.1"))
+        self.assertIsNone(sanitize_ip("127.0.0.1"))
+        self.assertIsNone(sanitize_ip("::1"))
+        self.assertIsNone(sanitize_ip("169.254.1.1"))
+        self.assertIsNone(sanitize_ip("::ffff:10.0.1.15"))
 
         # Invalid, malicious, or non-IP values
         self.assertIsNone(sanitize_ip("'<script>alert(1)</script>'"))
@@ -106,27 +116,33 @@ chunk_102.ts
         # 1. Cloudflare CF-Connecting-IP takes priority
         req = MagicMock(spec=Request)
         req.headers = Headers({
-            "cf-connecting-ip": "203.0.113.50",
+            "cf-connecting-ip": "93.184.216.50",
             "x-forwarded-for": "attacker.spoofed.ip, 1.2.3.4",
         })
         req.client = MagicMock(host="127.0.0.1")
-        self.assertEqual(extract_clean_client_ip(req), "203.0.113.50")
+        self.assertEqual(extract_clean_client_ip(req), "93.184.216.50")
 
         # 2. X-Forwarded-For fallback when CF-Connecting-IP is absent
         req2 = MagicMock(spec=Request)
         req2.headers = Headers({
-            "x-forwarded-for": "198.51.100.99, 10.0.0.1",
+            "x-forwarded-for": "93.184.216.99, 10.0.0.1",
         })
         req2.client = MagicMock(host="127.0.0.1")
-        self.assertEqual(extract_clean_client_ip(req2), "198.51.100.99")
+        self.assertEqual(extract_clean_client_ip(req2), "93.184.216.99")
 
-        # 3. Spoofed non-IP value in X-Forwarded-For is discarded
+        # 3. Direct LAN / loopback client IP is safely filtered to None
         req3 = MagicMock(spec=Request)
-        req3.headers = Headers({
+        req3.headers = Headers({})
+        req3.client = MagicMock(host="10.0.1.15")
+        self.assertIsNone(extract_clean_client_ip(req3))
+
+        # 4. Spoofed non-IP value in X-Forwarded-For is discarded
+        req4 = MagicMock(spec=Request)
+        req4.headers = Headers({
             "x-forwarded-for": "malicious_payload_string",
         })
-        req3.client = None
-        self.assertIsNone(extract_clean_client_ip(req3))
+        req4.client = None
+        self.assertIsNone(extract_clean_client_ip(req4))
 
     @patch.object(tvvoo_service, "resolve_clean_stream_url")
     @patch.object(LiveManifestManager, "_fetch_upstream")

@@ -16,6 +16,7 @@ DEBUG = os.getenv("STREAMSPORT_DEBUG", "false").lower() in ("true", "1", "yes")
 PUBLIC_URL = os.getenv("PUBLIC_URL", os.getenv("BASE_URL", "")).strip().rstrip("/")
 
 # Upstream API settings
+ENABLE_STREAMED = os.getenv("ENABLE_STREAMED", "false").lower() in ("true", "1", "yes")
 STREAMED_API_HOST = os.getenv("STREAMED_API_HOST", "streamed.pk")
 STREAMED_FALLBACK_HOSTS = ["streamed.su", "streamed.pk"]
 STREAMED_DOH_RESOLVER = "https://cloudflare-dns.com/dns-query"
@@ -23,6 +24,7 @@ STREAMED_CACHE_TTL = int(os.getenv("STREAMED_CACHE_TTL", "3600"))  # seconds (1 
 CATALOG_SYNC_INTERVAL = int(os.getenv("CATALOG_SYNC_INTERVAL", "3600"))  # seconds (1 hour)
 
 # Motorsport Official Registry API (Orange Cat Blacktop)
+ENABLE_OCBLACKTOP = os.getenv("ENABLE_OCBLACKTOP", "false").lower() in ("true", "1", "yes")
 OCBLACKTOP_API_KEY = os.getenv("OCBLACKTOP_API_KEY", "")
 OCBLACKTOP_API_BASE = os.getenv("OCBLACKTOP_API_BASE", "https://api.ocblacktop.com/v1")
 
@@ -30,8 +32,10 @@ OCBLACKTOP_API_BASE = os.getenv("OCBLACKTOP_API_BASE", "https://api.ocblacktop.c
 ENABLE_REPLAYS = os.getenv("ENABLE_REPLAYS", "false").lower() in ("true", "1", "yes")
 
 # TheSportsDB Official Calendar & Credentials
+ENABLE_THESPORTSDB = os.getenv("ENABLE_THESPORTSDB", "true").lower() in ("true", "1", "yes")
 THESPORTSDB_USER = os.getenv("THESPORTSDB_USER", "")
 THESPORTSDB_PASS = os.getenv("THESPORTSDB_PASS", "")
+THESPORTSDB_API_KEY = os.getenv("THESPORTSDB_API_KEY", "123")
 THESPORTSDB_CALENDAR_INTERVAL = int(os.getenv("THESPORTSDB_CALENDAR_INTERVAL", "43200"))  # 12 hours
 
 # TvVoo (Vavoo) Provider and Italian EPG TV Guide Settings (Sky & Tivùsat)

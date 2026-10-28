@@ -7,7 +7,7 @@ import time
 from typing import Any, Dict, List, Optional, Tuple
 import httpx
 
-from app.config import OCBLACKTOP_API_BASE, OCBLACKTOP_API_KEY
+from app.config import ENABLE_OCBLACKTOP, OCBLACKTOP_API_BASE, OCBLACKTOP_API_KEY
 
 logger = logging.getLogger("streamsport.ocblacktop")
 
@@ -46,6 +46,9 @@ class OCBlacktopService:
         Fetches the complete season session schedules across all supported series.
         Cached in memory for 24h to strictly respect the 7,500 monthly request limit.
         """
+        if not ENABLE_OCBLACKTOP or not self._api_key:
+            return []
+
         async with self._lock:
             now = time.time()
             if not force and self._cached_sessions and (now - self._cache_time < self._cache_ttl):

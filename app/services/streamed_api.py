@@ -1,7 +1,7 @@
 import logging
 import time
 from typing import Any, Dict, List, Optional, Tuple
-from app.config import STREAMED_API_HOST, STREAMED_CACHE_TTL, STREAMED_FALLBACK_HOSTS
+from app.config import ENABLE_STREAMED, STREAMED_API_HOST, STREAMED_CACHE_TTL, STREAMED_FALLBACK_HOSTS
 from app.services.doh_client import doh_client
 from app.services.canonical_competition_service import (
     detect_canonical_competition,
@@ -55,6 +55,9 @@ class StreamedAPI:
         Assigns the correct _silo to each match at the source.
         Falls back to alternate hosts or /api/matches/all if needed.
         """
+        if not ENABLE_STREAMED:
+            return []
+
         now = time.time()
         if not force_refresh and self._matches_cache and (now - self._cache_timestamp < STREAMED_CACHE_TTL):
             return self._matches_cache
@@ -183,6 +186,9 @@ class StreamedAPI:
         Fetches the stream list for a given match source.
         Endpoint: /api/stream/{source}/{source_id}
         """
+        if not ENABLE_STREAMED:
+            return []
+
         cache_key = f"{source}:{source_id}"
         now = time.time()
         if cache_key in self._stream_cache:

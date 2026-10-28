@@ -16,12 +16,32 @@ logger = logging.getLogger("streamsport.tvvoo_service")
 
 
 def sanitize_ip(ip_str: Optional[str]) -> Optional[str]:
-    """Validates and returns normalized IPv4 or IPv6 string, or None if invalid/spoofed."""
+    """
+    Validates and returns normalized public/routable IPv4 or IPv6 string,
+    or None if invalid, spoofed, private (LAN/Docker), loopback, or non-global.
+    """
     if not ip_str or not isinstance(ip_str, str):
         return None
     candidate = ip_str.split(",")[0].strip()
     try:
-        return str(ipaddress.ip_address(candidate))
+        ip = ipaddress.ip_address(candidate)
+        # Unwrap IPv4-mapped IPv6 (e.g. ::ffff:93.184.216.34 -> 93.184.216.34)
+        if getattr(ip, "ipv4_mapped", None):
+            ip = ip.ipv4_mapped
+
+        # Discard private LAN, loopback, link-local, multicast, reserved or non-global IPs
+        if (
+            not ip.is_global
+            or ip.is_private
+            or ip.is_loopback
+            or ip.is_link_local
+            or ip.is_multicast
+            or ip.is_reserved
+            or ip.is_unspecified
+        ):
+            return None
+
+        return str(ip)
     except ValueError:
         return None
 
@@ -138,8 +158,8 @@ class LiveManifestManager:
             raw_m3u8 = await self._fetch_upstream(session.stream_url)
         except Exception as exc:
             logger.warning("[LiveManifest] Upstream fetch issue (%s) for %s", exc, play_url[:80])
-            # If we have an existing recent manifest (< 10 seconds), serve immediately to prevent player buffer stall!
-            if session.last_manifest and (now - session.last_manifest_time) < 10.0:
+            # If we have an existing recent manifest (< 25 seconds), serve immediately to prevent player buffer stall!
+            if session.last_manifest and (now - session.last_manifest_time) < 25.0:
                 if any(err in str(exc).lower() for err in ("401", "403", "auth")):
                     asyncio.create_task(self._refresh_session(session, play_url, client_ip))
                 return session.last_manifest
