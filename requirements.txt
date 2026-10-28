@@ -9,3 +9,4 @@ requests>=2.31.0
 yt-dlp>=2026.08.01
 curl_cffi>=0.7.0
 pillow>=10.0.0
+tzdata>=2024.1

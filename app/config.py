@@ -5,8 +5,6 @@ from dotenv import load_dotenv
 # Base Paths
 BASE_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = BASE_DIR.parent
-CONFIG_DIR = PROJECT_DIR / "config"
-TV_CHANNELS_FILE = CONFIG_DIR / "tv_channels.json"
 
 # Load local environment variables from .env
 load_dotenv(PROJECT_DIR / ".env")

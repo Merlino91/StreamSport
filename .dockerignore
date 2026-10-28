@@ -1,0 +1,45 @@
+# Version Control
+.git/
+.gitignore
+
+# Environment & Credentials (prevent API key leakage into image layers)
+.env
+.env.*
+!.env.example
+
+# Development, Scratch & Test Artifacts
+scratch/
+tests/
+*.md
+!README.md
+
+# Virtual Environments & IDE Files
+.venv/
+venv/
+env/
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Bytecode & Test Caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# Runtime Databases
+*.db*
+*.sqlite*
+events.db
+matches.db
+
+# Dynamic Poster Caches (preserve embedded static backgrounds & assets)
+data/posters/*.jpg
+data/posters/athletes/
+data/posters/banners/
+!data/posters/assets/
+!data/posters/backgrounds/
+
+# Local backup files
+*_backup.py

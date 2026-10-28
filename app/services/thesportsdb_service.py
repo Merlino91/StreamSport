@@ -1201,44 +1201,6 @@ class TheSportsDBService:
             t = f"{t}/medium"
         return t
 
-    def parse_browse_events(self, html: str) -> List[Dict[str, Any]]:
-        if "<b>Events</b>" not in html:
-            return []
-
-        events_section = html.split("<b>Events</b>")[1].split("</div>")[0]
-        pattern = re.compile(
-            r"<a\s+href=['\"]/event/(\d+)-([^'\"]+)['\"][^>]*>"
-            r"(.*?)"
-            r"</a>\s*(?:\(([0-9]{4}-[0-9]{2}-[0-9]{2})\))?",
-            re.DOTALL | re.IGNORECASE,
-        )
-
-        results = []
-        for match in pattern.finditer(events_section):
-            ev_id = match.group(1)
-            inner_html = match.group(3)
-            date_str = match.group(4) or ""
-
-            thumb_match = re.search(r"src=['\"](https?://[^'\" >]+/thumb/[^'\" >]+)['\"]", inner_html)
-            thumb = thumb_match.group(1) if thumb_match else ""
-            if "no_thumb" in thumb:
-                thumb = ""
-
-            sport_match = re.search(r"/sports/([^/'\" >]+)\.svg", inner_html, re.I)
-            sport = sport_match.group(1).lower() if sport_match else ""
-
-            clean_name = re.sub(r"<[^>]+>", " ", inner_html).strip()
-            clean_name = re.sub(r"\s+", " ", clean_name)
-
-            results.append({
-                "idEvent": ev_id,
-                "strEvent": clean_name,
-                "strSport": sport,
-                "dateEvent": date_str,
-                "strThumb": thumb,
-            })
-        return results
-
     async def search_event_thumb(
         self,
         query: str,

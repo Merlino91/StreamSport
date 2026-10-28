@@ -10,7 +10,6 @@ from fastapi.testclient import TestClient
 from app.main import app, decode_config, get_base_url, extract_extra_params
 from app.config import CATALOG_DEFINITIONS, CATALOG_ID, CATALOG_TYPE, SPORT_GENRES
 from app.services.genre_classifier import genre_classifier
-from app.services.italian_resolver import italian_resolver
 from app.services.catalog_service import catalog_service
 
 client = TestClient(app)
@@ -128,12 +127,6 @@ class StreamSportTestCase(unittest.TestCase):
         for match_dict, expected in test_cases:
             res = genre_classifier.classify(match_dict)
             self.assertEqual(res, expected, f"Expected {expected} for {match_dict['title']}, got {res}")
-
-    def test_italian_resolver_channels(self):
-        streams = italian_resolver.get_italian_streams_for_genre("Serie A", ep_url="https://ep.example.com", ep_pass="secret")
-        self.assertTrue(len(streams) > 0)
-        self.assertIn("Sky Sport Calcio", streams[0]["name"])
-        self.assertIn("extractor/video.m3u8", streams[0]["url"])
 
     def test_catalog_root_route(self):
         response = client.get(f"/catalog/{CATALOG_TYPE}/calcio_italiano.json")

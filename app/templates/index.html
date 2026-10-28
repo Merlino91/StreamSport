@@ -6,6 +6,7 @@
   <title>StreamSport · Stremio Addon</title>
   <link rel="stylesheet" href="/static/css/style.css">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🏆</text></svg>">
+  <script src="/static/js/app.js" defer></script>
 </head>
 <body>
   <header class="bar">
@@ -73,7 +74,7 @@
           <p>Clicca sul pulsante sottostante o copia l'URL nel campo di ricerca addon di Stremio:</p>
           <div class="btn-group">
             <a href="{{ stremio_url }}" class="btn stremio">🚀 Installa su Stremio</a>
-            <button class="btn secondary" onclick="navigator.clipboard.writeText('{{ install_url }}'); alert('URL Copiato!');">📋 Copia Link</button>
+            <button type="button" class="btn secondary" id="copyBtn" data-copy=".copy-field">📋 Copia Link</button>
           </div>
           <input type="text" class="copy-field" readonly value="{{ install_url }}">
         </div>

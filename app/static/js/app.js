@@ -33,7 +33,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const targetSelector = copyBtn.getAttribute('data-copy');
       const targetEl = document.querySelector(targetSelector);
       if (targetEl) {
-        const text = targetEl.innerText || targetEl.textContent;
+        const text = targetEl.value !== undefined ? targetEl.value : (targetEl.innerText || targetEl.textContent);
         navigator.clipboard.writeText(text).then(() => {
           const orig = copyBtn.textContent;
           copyBtn.textContent = 'Copiato ✓';
