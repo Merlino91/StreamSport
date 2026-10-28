@@ -19,7 +19,7 @@ except ImportError:
     ImageDraw = None
     ImageFont = None
 
-from app.config import PROJECT_DIR
+from app.config import BANNERS_DIR, DATA_DIR, PROJECT_DIR
 from app.services.doh_client import doh_client
 
 logger = logging.getLogger("streamsport.banner")
@@ -38,8 +38,8 @@ class BannerService:
     """
 
     def __init__(self):
-        self.data_dir = PROJECT_DIR / "data"
-        self.banners_dir = self.data_dir / "posters" / "banners"
+        self.data_dir = DATA_DIR
+        self.banners_dir = BANNERS_DIR
         try:
             self.banners_dir.mkdir(parents=True, exist_ok=True)
             test_file = self.banners_dir / ".write_test"

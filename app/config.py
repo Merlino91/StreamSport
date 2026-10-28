@@ -6,6 +6,12 @@ from dotenv import load_dotenv
 BASE_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = BASE_DIR.parent
 
+# Data Directory Configuration (Unified across DB, banners, and posters)
+DEFAULT_DATA_DIR = PROJECT_DIR / "data"
+DATA_DIR = Path(os.getenv("STREAMSPORT_DATA_DIR", os.getenv("DATA_DIR", str(DEFAULT_DATA_DIR))))
+POSTERS_DIR = DATA_DIR / "posters"
+BANNERS_DIR = POSTERS_DIR / "banners"
+
 # Load local environment variables from .env
 load_dotenv(PROJECT_DIR / ".env")
 

@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 import hashlib
 import logging
 import re
+import threading
 import time
 from typing import Any, Dict, List, Optional, Tuple
 import urllib.parse
@@ -52,7 +53,17 @@ class SportVideoService:
         self._cache_ttl = 1800  # 30 minutes
         self._client: Optional[httpx.AsyncClient] = None
         self._client_loop: Optional[asyncio.AbstractEventLoop] = None
-        self._client_lock: asyncio.Lock = asyncio.Lock()
+        self._client_lock: Optional[asyncio.Lock] = None
+        self._lock_loop: Optional[asyncio.AbstractEventLoop] = None
+        self._init_lock: threading.Lock = threading.Lock()
+
+    def _get_loop_lock(self) -> asyncio.Lock:
+        with self._init_lock:
+            cur_loop = asyncio.get_running_loop()
+            if self._client_lock is None or self._lock_loop is not cur_loop:
+                self._client_lock = asyncio.Lock()
+                self._lock_loop = cur_loop
+            return self._client_lock
 
     async def _get_client(self) -> httpx.AsyncClient:
         """Returns or lazily initializes the shared HTTP client with connection pooling."""
@@ -61,18 +72,27 @@ class SportVideoService:
         except RuntimeError:
             cur_loop = None
 
-        if self._client is None or self._client.is_closed or self._client_loop != cur_loop:
-            if self._client_loop != cur_loop:
-                self._client_lock = asyncio.Lock()
-            async with self._client_lock:
-                if self._client is None or self._client.is_closed or self._client_loop != cur_loop:
-                    self._client = httpx.AsyncClient(
-                        headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"},
-                        timeout=8.0,
-                        follow_redirects=True,
-                        limits=httpx.Limits(max_keepalive_connections=5, max_connections=15, keepalive_expiry=60.0),
-                    )
-                    self._client_loop = cur_loop
+        if (
+            self._client is not None
+            and not self._client.is_closed
+            and self._client_loop is cur_loop
+        ):
+            return self._client
+
+        lock = self._get_loop_lock()
+        async with lock:
+            if (
+                self._client is None
+                or self._client.is_closed
+                or self._client_loop is not cur_loop
+            ):
+                self._client = httpx.AsyncClient(
+                    headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"},
+                    timeout=8.0,
+                    follow_redirects=True,
+                    limits=httpx.Limits(max_keepalive_connections=5, max_connections=15, keepalive_expiry=60.0),
+                )
+                self._client_loop = cur_loop
         return self._client
 
     async def close(self) -> None:

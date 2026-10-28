@@ -27,6 +27,7 @@ from app.config import (
     HOST,
     ID_PREFIXES,
     PORT,
+    POSTERS_DIR,
     PUBLIC_URL,
     SPORT_GENRES,
     STREAMED_API_HOST,
@@ -80,7 +81,6 @@ app.add_middleware(
 if STATIC_DIR.exists():
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
-POSTERS_DIR = BASE_DIR.parent / "data" / "posters"
 POSTERS_DIR.mkdir(parents=True, exist_ok=True)
 app.mount("/posters", StaticFiles(directory=str(POSTERS_DIR)), name="posters")
 

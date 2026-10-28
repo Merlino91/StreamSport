@@ -21,13 +21,11 @@ except ImportError:
     ImageFont = None
     ImageFilter = None
 
-from app.config import PROJECT_DIR
+from app.config import DATA_DIR, POSTERS_DIR, PROJECT_DIR
 from app.services.db_service import db_service
 
 logger = logging.getLogger("streamsport.tennis_poster")
 
-DATA_DIR = PROJECT_DIR / "data"
-POSTERS_DIR = DATA_DIR / "posters"
 ATHLETES_DIR = POSTERS_DIR / "athletes"
 ASSETS_DIR = POSTERS_DIR / "assets"
 BACKGROUNDS_DIR = POSTERS_DIR / "backgrounds"
