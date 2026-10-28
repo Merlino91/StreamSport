@@ -247,27 +247,30 @@ class DirettaService:
             tasks = []
             success_count = 0
             fail_count = 0
+            sem = asyncio.Semaphore(8)
 
             async with httpx.AsyncClient(timeout=9.0) as client:
                 async def fetch_it(s_id: int, s_name: str, s_silo: str, day: int):
                     url = f"https://400.flashscore.ninja/400/x/feed/f_{s_id}_{day}_3_it_1"
-                    try:
-                        res = await client.get(url, headers=self.DIRETTA_HEADERS)
-                        if res.status_code == 200 and res.text:
-                            return ("it", self.parse_flashscore_feed(res.text, s_name, s_silo, extract_tv_channels=True))
-                    except Exception as e:
-                        logger.debug("Diretta IT fetch failed for sport %s day %d: %s", s_name, day, e)
-                    return ("it", [])
+                    async with sem:
+                        try:
+                            res = await client.get(url, headers=self.DIRETTA_HEADERS)
+                            if res.status_code == 200 and res.text:
+                                return ("it", self.parse_flashscore_feed(res.text, s_name, s_silo, extract_tv_channels=True))
+                        except Exception as e:
+                            logger.debug("Diretta IT fetch failed for sport %s day %d: %s", s_name, day, e)
+                        return ("it", [])
 
                 async def fetch_en(s_id: int, s_name: str, s_silo: str, day: int):
                     url = f"https://2.flashscore.ninja/2/x/feed/f_{s_id}_{day}_3_en-uk_1"
-                    try:
-                        res = await client.get(url, headers=self.FLASHSCORE_EN_HEADERS)
-                        if res.status_code == 200 and res.text:
-                            return ("en", self.parse_flashscore_feed(res.text, s_name, s_silo, extract_tv_channels=False))
-                    except Exception as e:
-                        logger.debug("Flashscore EN fetch failed for sport %s day %d: %s", s_name, day, e)
-                    return ("en", [])
+                    async with sem:
+                        try:
+                            res = await client.get(url, headers=self.FLASHSCORE_EN_HEADERS)
+                            if res.status_code == 200 and res.text:
+                                return ("en", self.parse_flashscore_feed(res.text, s_name, s_silo, extract_tv_channels=False))
+                        except Exception as e:
+                            logger.debug("Flashscore EN fetch failed for sport %s day %d: %s", s_name, day, e)
+                        return ("en", [])
 
                 for s_id, (s_name, s_silo) in FS_IT_SPORTS.items():
                     for day in target_days:

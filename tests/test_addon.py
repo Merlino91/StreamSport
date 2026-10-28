@@ -845,13 +845,13 @@ class StreamSportTestCase(unittest.TestCase):
             mock_get.return_value = mock_resp
 
             domain = asyncio.run(daddylive_api.get_active_domain())
-            self.assertEqual(domain, "dlive.sx")
+            self.assertEqual(domain, "thedaddy.pk")
             self.assertGreater(daddylive_api._last_domain_check, 0.0)
 
             # Second call hits cache without HTTP
             mock_get.reset_mock()
             domain2 = asyncio.run(daddylive_api.get_active_domain())
-            self.assertEqual(domain2, "dlive.sx")
+            self.assertEqual(domain2, "thedaddy.pk")
             mock_get.assert_not_called()
 
     def test_service_semaphores_and_db_directory(self):

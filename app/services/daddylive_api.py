@@ -43,48 +43,68 @@ class DaddyLiveAPI:
     Converts events to the standard StreamSport format and extracts exact stream channels.
     """
 
+    MIRROR_DOMAINS: List[str] = [
+        "thedaddy.pk",
+        "daddylive.pk",
+        "dlhd.so",
+    ]
+    DEFAULT_DOMAIN: str = "thedaddy.pk"
+
     def __init__(self):
         self._cache: List[Dict[str, Any]] = []
         self._cache_time: float = 0
         self._cache_ttl: int = 3600  # 1 hour default
         self._last_content_hash: str = ""
-        self._active_domain: str = "dlive.sx"
+        self._active_domain: str = self.DEFAULT_DOMAIN
         self._last_domain_check: float = 0.0
 
     async def get_active_domain(self) -> str:
         """
         Dynamically detects the latest online DaddyLive/DLHD mirror domain
-        using the daddylive.pk status checker and redirect follower.
-        Caches for 6 hours; defaults to 'dlive.sx'.
+        using the status checker API and direct probe fallback.
+        Caches for 6 hours; defaults to 'thedaddy.pk'.
         """
         now = time.time()
         if now - self._last_domain_check < 21600 and self._active_domain:
             return self._active_domain
 
+        # 1. Primary check: DaddyLive status checker API
         try:
             headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36'}
             status_url = "https://daddylive.pk/check_status.php?url=https://dlhd.pk"
-            async with httpx.AsyncClient(timeout=5.0, headers=headers, follow_redirects=True) as client:
+            async with httpx.AsyncClient(timeout=4.0, headers=headers, follow_redirects=True) as client:
                 res = await client.get(status_url)
                 if res.status_code == 200:
                     data = res.json()
                     if data.get('status') == 'online':
-                        final_url = data.get('final_url') or "https://dlive.sx"
+                        final_url = data.get('final_url') or ""
                         from urllib.parse import urlparse
                         netloc = urlparse(final_url).netloc.lower()
-                        if netloc:
+                        if netloc and "dlive.sx" not in netloc and "dlhd.sx" not in netloc:
                             self._active_domain = netloc
                             self._last_domain_check = now
                             logger.info("DaddyLive active domain confirmed: %s", self._active_domain)
                             return self._active_domain
-            self._active_domain = "dlive.sx"
-            self._last_domain_check = now
-            return "dlive.sx"
         except Exception as e:
             logger.debug("DaddyLive domain check fallback: %s", e)
-            self._last_domain_check = now
-            self._active_domain = "dlive.sx"
 
+        # 2. Secondary check: Probe candidate mirror domains directly
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        for mirror in self.MIRROR_DOMAINS:
+            try:
+                async with httpx.AsyncClient(timeout=3.0, headers=headers, follow_redirects=True) as client:
+                    res = await client.get(f"https://{mirror}/")
+                    if res.status_code < 400:
+                        self._active_domain = mirror
+                        self._last_domain_check = now
+                        logger.info("DaddyLive active domain confirmed via probe: %s", mirror)
+                        return mirror
+            except Exception:
+                continue
+
+        # 3. Final fallback: default primary mirror
+        self._active_domain = self.DEFAULT_DOMAIN
+        self._last_domain_check = now
         return self._active_domain
 
     def _clean_day(self, day: str) -> str:

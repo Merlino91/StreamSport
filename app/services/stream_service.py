@@ -730,7 +730,7 @@ class StreamService:
         dlhd_streams: List[Dict[str, Any]] = []
         if ep_url:
             dlhd_sources = [s for s in sources if s.get("source") == "dlhd"]
-            dl_domain = await daddylive_api.get_active_domain() if dlhd_sources else "dlive.sx"
+            dl_domain = await daddylive_api.get_active_domain() if dlhd_sources else daddylive_api.DEFAULT_DOMAIN
             for idx, s in enumerate(dlhd_sources, 1):
                 ch_id = s.get("id")
                 ch_name = s.get("name") or f"Canale {idx}"

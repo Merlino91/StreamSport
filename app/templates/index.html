@@ -68,17 +68,15 @@
           <button type="submit" class="btn primary">Genera Link Installazione</button>
         </form>
 
-        {% if install_url %}
-        <div class="install-block">
+        <div class="install-block" id="installBlock" style="{% if not install_url %}display: none;{% endif %}">
           <h3>Installazione su Stremio</h3>
           <p>Clicca sul pulsante sottostante o copia l'URL nel campo di ricerca addon di Stremio:</p>
           <div class="btn-group">
-            <a href="{{ stremio_url }}" class="btn stremio">🚀 Installa su Stremio</a>
+            <a href="{{ stremio_url or '#' }}" id="stremioBtn" class="btn stremio">🚀 Installa su Stremio</a>
             <button type="button" class="btn secondary" id="copyBtn" data-copy=".copy-field">📋 Copia Link</button>
           </div>
-          <input type="text" class="copy-field" readonly value="{{ install_url }}">
+          <input type="text" id="installUrlInput" class="copy-field" readonly value="{{ install_url or '' }}">
         </div>
-        {% endif %}
       </section>
 
       <section class="card info-card">

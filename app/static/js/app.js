@@ -46,4 +46,47 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
   }
+
+  // Form submission: client-side Base64 generation without exposing passwords in GET query params
+  const cfgForm = document.getElementById('cfg');
+  if (cfgForm) {
+    cfgForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const epUrlInput = document.getElementById('epUrl');
+      const epPassInput = document.getElementById('epPass');
+      const tzSelect = document.getElementById('tz');
+
+      const epUrl = (epUrlInput ? epUrlInput.value : '').trim();
+      const epPass = (epPassInput ? epPassInput.value : '').trim();
+      const tz = (tzSelect ? tzSelect.value : 'Europe/Rome').trim() || 'Europe/Rome';
+
+      if (!epUrl) {
+        if (epUrlInput) epUrlInput.focus();
+        return;
+      }
+
+      const rawConfig = `${epUrl}|${epPass}|${tz}`;
+      const encodedConfig = btoa(unescape(encodeURIComponent(rawConfig)));
+      const baseUrl = window.location.origin;
+      const installUrl = `${baseUrl}/${encodedConfig}/manifest.json`;
+      const stremioUrl = installUrl.replace(/^https?:\/\//, 'stremio://');
+
+      const installBlock = document.getElementById('installBlock');
+      const stremioBtn = document.getElementById('stremioBtn');
+      const installUrlInput = document.getElementById('installUrlInput');
+      const statusBadge = document.querySelector('.status');
+
+      if (installBlock && stremioBtn && installUrlInput) {
+        stremioBtn.href = stremioUrl;
+        installUrlInput.value = installUrl;
+        installBlock.style.display = 'block';
+        installBlock.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+
+      if (statusBadge) {
+        statusBadge.className = 'status ok';
+        statusBadge.innerHTML = '<span class="dot"></span> Playback proxy collegato con successo';
+      }
+    });
+  }
 });
