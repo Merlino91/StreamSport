@@ -240,3 +240,59 @@ chunk_102.ts
 
         await manager.close()
         self.assertTrue(client.is_closed)
+
+    def test_is_safe_vavoo_play_url(self):
+        from app.services.tvvoo_service import is_safe_vavoo_play_url
+
+        # Legitimate Vavoo play endpoints across mirrors
+        self.assertTrue(is_safe_vavoo_play_url("https://vavoo.to/play/123/index.m3u8"))
+        self.assertTrue(is_safe_vavoo_play_url("https://huhu.to/play/456"))
+        self.assertTrue(is_safe_vavoo_play_url("https://kool.to/vavoo-iptv/play/789"))
+        self.assertTrue(is_safe_vavoo_play_url("http://oha.to/play/abc"))
+        self.assertTrue(is_safe_vavoo_play_url("https://vavoo.tv/play/xyz"))
+
+        # SSRF / malicious / local injections
+        self.assertFalse(is_safe_vavoo_play_url("http://127.0.0.1:8000/metrics"))
+        self.assertFalse(is_safe_vavoo_play_url("http://localhost/play/123"))
+        self.assertFalse(is_safe_vavoo_play_url("http://169.254.169.254/latest/meta-data"))
+        self.assertFalse(is_safe_vavoo_play_url("https://evil.com/play/123"))
+        self.assertFalse(is_safe_vavoo_play_url("https://vavoo.to.attacker.com/play/123"))
+        self.assertFalse(is_safe_vavoo_play_url("file:///etc/passwd"))
+        self.assertFalse(is_safe_vavoo_play_url("https://vavoo.to/admin"))
+        self.assertFalse(is_safe_vavoo_play_url(""))
+        self.assertFalse(is_safe_vavoo_play_url(None))
+
+    def test_is_safe_stream_target(self):
+        from app.services.tvvoo_service import is_safe_stream_target
+
+        # Valid public CDN endpoints
+        self.assertTrue(is_safe_stream_target("https://edge.vavoo.to/live/index.m3u8"))
+        self.assertTrue(is_safe_stream_target("https://93.184.216.34/hls/seg1.ts"))
+
+        # Blocked internal / loopback / private IP streams
+        self.assertFalse(is_safe_stream_target("http://127.0.0.1:8000/chunk.ts"))
+        self.assertFalse(is_safe_stream_target("http://10.0.0.1/stream.m3u8"))
+        self.assertFalse(is_safe_stream_target("http://192.168.1.1/stream.m3u8"))
+        self.assertFalse(is_safe_stream_target("http://169.254.169.254/secret"))
+        self.assertFalse(is_safe_stream_target("http://localhost/live"))
+        self.assertFalse(is_safe_stream_target("http://metadata.google.internal/test"))
+
+    async def test_fastapi_live_manifest_ssrf_rejected(self):
+        """Verifies /live/manifest.m3u8 immediately blocks SSRF attacks with HTTP 400."""
+        from app.main import app
+
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            # 1. Loopback attack
+            resp = await client.get("/live/manifest.m3u8?url=http://127.0.0.1:8000/metrics")
+            self.assertEqual(resp.status_code, 400)
+            self.assertIn("anti-SSRF", resp.json()["detail"])
+
+            # 2. Localhost attack
+            resp = await client.get("/live/manifest.m3u8?url=http://localhost/play/1")
+            self.assertEqual(resp.status_code, 400)
+
+            # 3. Arbitrary external domain attack
+            resp = await client.get("/live/manifest.m3u8?url=https://attacker.org/play/1")
+            self.assertEqual(resp.status_code, 400)
+

@@ -177,11 +177,8 @@ class DoHClient:
         return None
 
     @staticmethod
-    def is_safe_image_target(url: str) -> Tuple[bool, str]:
-        """
-        Validates whether a target URL is safe to proxy (Anti-SSRF guard).
-        Disallows private, loopback, link-local, multicast, and cloud metadata targets.
-        """
+    def _check_safe_target_pre_dns(url: str) -> Tuple[bool, str]:
+        """Performs fast URL scheme, hostname, and IP-literal validation before DNS lookup."""
         if not url or not isinstance(url, str):
             return False, "URL non valida o vuota"
 
@@ -210,7 +207,48 @@ class DoHClient:
             if is_ip_private_or_reserved(str(parsed_ip)):
                 return False, f"Accesso all'indirizzo IP privato o riservato vietato ({parsed_ip})"
 
-        # Verify system DNS resolution if available
+        return True, "OK"
+
+    @classmethod
+    async def is_safe_image_target_async(cls, url: str) -> Tuple[bool, str]:
+        """
+        Asynchronously validates whether a target URL is safe to proxy (Anti-SSRF guard),
+        offloading blocking system DNS resolution (socket.getaddrinfo) to a worker thread via asyncio.to_thread.
+        """
+        is_safe, reason = cls._check_safe_target_pre_dns(url)
+        if not is_safe:
+            return False, reason
+
+        parsed = urllib.parse.urlsplit(url.strip())
+        hostname = (parsed.hostname or "").strip().lower()
+
+        # Verify system DNS resolution asynchronously without blocking the event loop
+        try:
+            addr_info = await asyncio.to_thread(socket.getaddrinfo, hostname, None, proto=socket.IPPROTO_TCP)
+            for entry in addr_info:
+                resolved_addr = entry[4][0]
+                if is_ip_private_or_reserved(resolved_addr):
+                    return False, f"L'hostname {hostname} risolve su un indirizzo interno vietato ({resolved_addr})"
+        except Exception:
+            # If system DNS resolution fails (e.g. ISP censorship), DoH will handle resolution
+            pass
+
+        return True, "OK"
+
+    @classmethod
+    def is_safe_image_target(cls, url: str) -> Tuple[bool, str]:
+        """
+        Synchronously validates whether a target URL is safe to proxy (Anti-SSRF guard).
+        Maintained for synchronous callers and unit tests.
+        """
+        is_safe, reason = cls._check_safe_target_pre_dns(url)
+        if not is_safe:
+            return False, reason
+
+        parsed = urllib.parse.urlsplit(url.strip())
+        hostname = (parsed.hostname or "").strip().lower()
+
+        # Verify system DNS resolution
         try:
             addr_info = socket.getaddrinfo(hostname, None, proto=socket.IPPROTO_TCP)
             for entry in addr_info:
@@ -306,7 +344,7 @@ class DoHClient:
 
     async def proxy_image(self, url: str) -> Tuple[Optional[bytes], Optional[str]]:
         """Proxies an image URL and returns (content_bytes, content_type) with anti-SSRF validation."""
-        is_safe, reason = self.is_safe_image_target(url)
+        is_safe, reason = await self.is_safe_image_target_async(url)
         if not is_safe:
             logger.warning("Blocked unsafe image proxy request to %s: %s", url, reason)
             return None, None

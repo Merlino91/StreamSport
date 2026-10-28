@@ -46,6 +46,83 @@ def sanitize_ip(ip_str: Optional[str]) -> Optional[str]:
         return None
 
 
+def is_safe_vavoo_play_url(url: str) -> bool:
+    """
+    Validates that a play URL is a genuine Vavoo / MediaHubMX stream endpoint
+    from authorized domain mirrors, preventing arbitrary URL injection and SSRF.
+    """
+    if not url or not isinstance(url, str):
+        return False
+    try:
+        parsed = urllib.parse.urlsplit(url.strip())
+    except Exception:
+        return False
+
+    scheme = (parsed.scheme or "").lower()
+    if scheme not in ("http", "https"):
+        return False
+
+    hostname = (parsed.hostname or "").lower().strip()
+    if not hostname:
+        return False
+
+    # Check against authorized Vavoo mirrors
+    allowed_domains = {"vavoo.to", "huhu.to", "kool.to", "oha.to", "vavoo.tv"}
+    is_allowed = any(
+        hostname == domain or hostname.endswith(f".{domain}")
+        for domain in allowed_domains
+    )
+    if not is_allowed:
+        return False
+
+    path = parsed.path or ""
+    if not any(path.startswith(prefix) for prefix in ("/play", "/vavoo-iptv/play")):
+        return False
+
+    return True
+
+
+def is_safe_stream_target(url: str) -> bool:
+    """Ensures upstream CDN stream URL is not targeting private, loopback, or internal networks (SSRF protection)."""
+    if not url or not isinstance(url, str):
+        return False
+    try:
+        parsed = urllib.parse.urlsplit(url.strip())
+    except Exception:
+        return False
+
+    scheme = (parsed.scheme or "").lower()
+    if scheme not in ("http", "https"):
+        return False
+
+    hostname = (parsed.hostname or "").lower().strip()
+    if not hostname:
+        return False
+
+    if hostname in ("localhost", "0.0.0.0", "metadata.google.internal") or hostname.endswith(
+        (".localhost", ".local", ".internal", ".lan")
+    ):
+        return False
+
+    try:
+        ip = ipaddress.ip_address(hostname)
+        if (
+            not ip.is_global
+            or ip.is_private
+            or ip.is_loopback
+            or ip.is_link_local
+            or ip.is_multicast
+            or ip.is_reserved
+            or ip.is_unspecified
+        ):
+            return False
+    except ValueError:
+        # Standard public hostname
+        pass
+
+    return True
+
+
 @dataclass
 class LiveStreamSession:
     play_url: str
@@ -115,6 +192,10 @@ class LiveManifestManager:
                 self.sessions.pop(k, None)
 
     async def get_live_manifest(self, play_url: str, client_ip: Optional[str] = None) -> Optional[str]:
+        if not is_safe_vavoo_play_url(play_url):
+            logger.warning("[LiveManifest] Rejected unsafe Vavoo play URL (SSRF protection): %s", play_url[:60] if play_url else "None")
+            return None
+
         key = self._get_key(play_url, client_ip)
         now = time.time()
         task_to_await = None
@@ -177,6 +258,8 @@ class LiveManifestManager:
         return rewritten
 
     async def _fetch_upstream(self, stream_url: str) -> str:
+        if not is_safe_stream_target(stream_url):
+            raise RuntimeError(f"Unsafe upstream stream target rejected (SSRF protection): {stream_url[:50]}")
         res = await self._client.get(stream_url)
         if res.status_code in (401, 403):
             raise RuntimeError(f"Upstream auth error: {res.status_code}")
@@ -1601,7 +1684,7 @@ class TvVooService:
         """
         Resolves a Vavoo play URL (https://vavoo.to/play/.../index.m3u8) to a direct playable stream URL.
         """
-        if not play_url or "vavoo" not in play_url:
+        if not is_safe_vavoo_play_url(play_url):
             return None
 
         valid_ip = sanitize_ip(client_ip)
@@ -1641,7 +1724,7 @@ class TvVooService:
                         elif isinstance(data, dict) and data.get("url"):
                             direct_url = str(data["url"])
 
-                        if direct_url:
+                        if direct_url and is_safe_stream_target(direct_url):
                             return {
                                 "url": direct_url,
                                 "valid_until": time.time() + 1200,

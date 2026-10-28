@@ -39,7 +39,7 @@ from app.services.doh_client import doh_client
 from app.services.mandrakodi_service import mandrakodi_service
 from app.services.sportvideo_service import sportvideo_service
 from app.services.stream_service import stream_service
-from app.services.tvvoo_service import sanitize_ip, tvvoo_service
+from app.services.tvvoo_service import is_safe_vavoo_play_url, sanitize_ip, tvvoo_service
 from app.services.youtube_service import youtube_service
 
 # Setup logging
@@ -427,6 +427,9 @@ async def live_manifest_proxy(request: Request, url: str, config: Optional[str] 
     if not url:
         raise HTTPException(status_code=400, detail="Parametro url mancante")
 
+    if not is_safe_vavoo_play_url(url):
+        raise HTTPException(status_code=400, detail="URL del flusso non valida o non consentita (anti-SSRF)")
+
     client_ip = extract_clean_client_ip(request)
 
     manifest_content = None
@@ -532,7 +535,7 @@ async def image_proxy(url: str):
     if not url:
         raise HTTPException(status_code=400, detail="Missing url parameter")
 
-    is_safe, reason = doh_client.is_safe_image_target(url)
+    is_safe, reason = await doh_client.is_safe_image_target_async(url)
     if not is_safe:
         raise HTTPException(status_code=403, detail=f"Access denied: {reason}")
 

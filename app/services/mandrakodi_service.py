@@ -19,7 +19,6 @@ from app.config import (
     ENABLE_MANDRAKODI_SOCCERON,
     MANDRAKODI_PASSWORD,
     MANDRAKODI_DEVICE_ID,
-    MANDRAKODI_CACHE_TTL,
 )
 from app.services.canonical_competition_service import (
     detect_canonical_competition,

@@ -136,6 +136,25 @@ class TestSSRFProtection(unittest.TestCase):
         self.assertIsNotNone(resolved)
         self.assertTrue(len(resolved.split(".")) == 4)
 
+    def test_is_safe_image_target_async_parity(self):
+        """Verifies that the non-blocking async DNS implementation behaves identically to the sync version."""
+        import asyncio
+
+        async def check():
+            safe1, _ = await doh_client.is_safe_image_target_async("http://127.0.0.1:8000/metrics")
+            self.assertFalse(safe1)
+
+            safe2, _ = await doh_client.is_safe_image_target_async("http://localhost/image.png")
+            self.assertFalse(safe2)
+
+            safe3, _ = await doh_client.is_safe_image_target_async("file:///etc/passwd")
+            self.assertFalse(safe3)
+
+            safe4, _ = await doh_client.is_safe_image_target_async("https://images.unsplash.com/photo-123.jpg")
+            self.assertTrue(safe4)
+
+        asyncio.run(check())
+
 
 if __name__ == "__main__":
     unittest.main()
