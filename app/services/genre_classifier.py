@@ -15,7 +15,7 @@ class GenreClassifier:
 
     # Women & Youth patterns
     _WOMEN_REGEX = re.compile(
-        r"\b(women(?:[’']s)?|femminile|ladies|frauen|féminine|femenino|w-|wta|uwcl)\b",
+        r"\b(women(?:[’']s)?|femminile|ladies|frauen|féminine|femenino|donne|dames|damen|w-|wta|uwcl)\b|(?<=\w)\s+[dwf]\b|\([dwf]\)",
         re.IGNORECASE,
     )
     _YOUTH_REGEX = re.compile(
@@ -237,6 +237,8 @@ class GenreClassifier:
             if is_women:
                 if canon in ("football_serie_a", "football_serie_b", "football_serie_c", "football_serie_a_women"):
                     return "calcio_italiano", "Calcio Femminile"
+                if canon == "football_uwcl":
+                    return "calcio_estero", "Champions League Femminile"
             if is_youth:
                 if canon in ("football_serie_a", "football_serie_b", "football_serie_c", "football_primavera"):
                     return "calcio_italiano", "Primavera e Giovanili"
@@ -272,7 +274,7 @@ class GenreClassifier:
                 "football_2_bundesliga": ("calcio_estero", "Altri Campionati Europei"),
                 "football_ligue_1": ("calcio_estero", "Bundesliga e Ligue 1"),
                 "football_uefa_youth_league": ("calcio_estero", "Europei Under 21 e Nazionali Giovanili"),
-                "football_uwcl": ("calcio_estero", "Champions League"),
+                "football_uwcl": ("calcio_estero", "Champions League Femminile"),
                 "football_uefa_cl": ("calcio_estero", "Champions League"),
                 "football_uefa_el": ("calcio_estero", "Europa e Conference League"),
                 "football_uefa_ecl": ("calcio_estero", "Europa e Conference League"),
@@ -939,7 +941,11 @@ class GenreClassifier:
             ))
             if (is_uefa_cup or is_cross_national_clash) and not is_extra_eu_confed:
                 if is_cross_national_clash or re.search(r"\b(champions\s*league|uefa\s*champions|ucl|uwcl)\b", eval_text):
+                    if is_women or re.search(r"\b(uwcl|women|femminile|donne)\b", eval_text):
+                        return "calcio_estero", "Champions League Femminile"
                     return "calcio_estero", "Champions League"
+                if is_women:
+                    return "calcio_estero", "Champions League Femminile"
                 return "calcio_estero", "Europa e Conference League"
 
             # --------------------------------------------------------------

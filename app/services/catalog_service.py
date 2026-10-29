@@ -1258,6 +1258,7 @@ class CatalogService:
 
             allowed_genres = {
                 "Champions League",
+                "Champions League Femminile",
                 "Europa e Conference League",
                 "Premier League",
                 "La Liga",

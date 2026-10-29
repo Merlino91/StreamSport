@@ -155,10 +155,12 @@ def clean_team_name(name: str) -> str:
     )
     # Strip youth and women indicators (coherence is strictly guaranteed by youth/women gatekeeper guards)
     t = re.sub(
-        r"\b(u19|u20|u21|u23|u-19|u-20|u-21|u-23|youth|primavera|junior|women|femminile|femenino|ladies|frauen)\b",
+        r"\b(u19|u20|u21|u23|u-19|u-20|u-21|u-23|youth|primavera|junior|women|femminile|femenino|ladies|frauen|donne|dames|damen|femm)\b",
         " ",
         t,
     )
+    # Strip trailing women single-letter suffixes (e.g. 'Juventus D', 'Chelsea W', 'PSG F', 'Schio D', 'Conegliano D')
+    t = re.sub(r"(?<=\w)\s+[dwf]\b", " ", t)
     t = re.sub(r"[^a-z0-9]+", " ", t)
     return re.sub(r"\s+", " ", t).strip()
 
@@ -340,8 +342,14 @@ def calculate_match_score(
         m_youth = bool(re.search(r"\b(u-?1[5-9]|u-?2[01]|under\s*1[5-9]|under\s*2[01]|youth|primavera|junior)\b", m_text))
         c_youth = bool(re.search(r"\b(u-?1[5-9]|u-?2[01]|under\s*1[5-9]|under\s*2[01]|youth|primavera|junior)\b", c_text))
 
-        m_women = bool(re.search(r"\b(women(?:[’']s)?|femminile|femenino|ladies|frauen|w-|wta|wnba|uwcl)\b", m_text))
-        c_women = bool(re.search(r"\b(women(?:[’']s)?|femminile|femenino|ladies|frauen|w-|wta|wnba|uwcl)\b", c_text))
+        m_women = (
+            match.get("_gender") == "+"
+            or bool(re.search(r"\b(women(?:[’']s)?|femminile|femenino|ladies|frauen|donne|dames|damen|w-|wta|wnba|uwcl)\b|(?<=\w)\s+[dwf]\b|\([dwf]\)", m_text))
+        )
+        c_women = (
+            candidate.get("_gender") == "+"
+            or bool(re.search(r"\b(women(?:[’']s)?|femminile|femenino|ladies|frauen|donne|dames|damen|w-|wta|wnba|uwcl)\b|(?<=\w)\s+[dwf]\b|\([dwf]\)", c_text))
+        )
 
         # Penalty if stream claimed Women (+) but candidate lacks it (=)
         # When stream is neutral (=) and candidate is Women (+), penalty is 0.0 (inherits trait)

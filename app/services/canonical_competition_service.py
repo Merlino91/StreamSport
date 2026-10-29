@@ -229,7 +229,13 @@ CANONICAL_LEAGUES = {
     "football_uwcl": {
         "display": "UEFA Women's Champions League",
         "silo": "football",
-        "patterns": [r"uwcl", r"women['’]?s\s*champions\s*league", r"uefa\s*women\s*champions"],
+        "patterns": [
+            r"uwcl",
+            r"women['’]?s\s*champions\s*league",
+            r"uefa\s*women\s*champions",
+            r"(?:champions\s*league|uefa\s*champions).*(?:donne|women|femminile|\s+[dwf]\b|\([dwf]\))",
+            r"(?:\b[dwf]\b|\([dwf]\)).*(?:champions\s*league)",
+        ],
     },
     "football_uefa_cl": {
         "display": "UEFA Champions League",
@@ -1096,6 +1102,8 @@ def is_tier_match(m: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
 
         # 2. Inghilterra / UK
         if country in ("inghilterra", "england", "regno unito", "uk"):
+            if any(w in league for w in ("donne", "women", "femminile", "ladies")):
+                return False, None
             if "premier league" in league and "2" not in league:
                 return True, "football_premier_league"
             if "championship" in league:
@@ -1106,6 +1114,8 @@ def is_tier_match(m: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
 
         # 3. Spagna
         if country in ("spagna", "spain"):
+            if any(w in league for w in ("donne", "women", "femminile", "femenin")):
+                return False, None
             if "laliga" in league or "la liga" in league or "primera division" in league:
                 if "2" in league or "hypermotion" in league:
                     return True, "football_segunda"
@@ -1116,6 +1126,8 @@ def is_tier_match(m: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
 
         # 4. Germania
         if country in ("germania", "germany"):
+            if any(w in league for w in ("donne", "women", "femminile", "frauen")):
+                return False, None
             if "bundesliga" in league:
                 if "2." in league or "2 " in league:
                     return True, "football_2_bundesliga"
@@ -1126,6 +1138,8 @@ def is_tier_match(m: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
 
         # 5. Francia
         if country in ("francia", "france"):
+            if any(w in league for w in ("donne", "women", "femminile", "dames", "feminin")):
+                return False, None
             if "ligue 1" in league:
                 return True, "football_ligue_1"
             if "ligue 2" in league:
@@ -1136,11 +1150,13 @@ def is_tier_match(m: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
 
         # 6. Coppe Europee & Internazionali
         if country in ("europa", "europe", "mondo", "world", "sud america", "south america", "asia"):
-            if "champions league" in league:
-                if any(w in league for w in ("donne", "women", "femminile")):
+            if "champions league" in league or "uwcl" in league:
+                if any(w in league for w in ("donne", "women", "femminile", "uwcl")) or (m.get("_gender") == "+"):
                     return True, "football_uwcl"
                 return True, "football_uefa_cl"
             if "europa league" in league:
+                if any(w in league for w in ("donne", "women", "femminile")):
+                    return False, None
                 return True, "football_uefa_el"
             if "conference league" in league:
                 return True, "football_uefa_ecl"

@@ -234,7 +234,7 @@ class TheSportsDBService:
             full_cal_text = f"{league_raw} : {event_raw}"
             cal_canon = detect_canonical_competition(full_cal_text, silo_hint=silo)
             is_cal_youth = bool(re.search(r"\b(u-?1[5-9]|u-?2[01]|under\s*1[5-9]|under\s*2[01]|youth|juvenil|primavera|junior)\b", full_cal_text, re.IGNORECASE))
-            is_cal_women = bool(re.search(r"\b(women(?:['']s)?|femminile|femenino|ladies|frauen|w-|wta|wnba|uwcl)\b", full_cal_text, re.IGNORECASE))
+            is_cal_women = bool(re.search(r"\b(women(?:['']s)?|femminile|femenino|ladies|frauen|donne|dames|damen|w-|wta|wnba|uwcl)\b|(?<=\w)\s+[dwf]\b|\([dwf]\)", full_cal_text, re.IGNORECASE))
 
             events.append({
                 "title": event_raw,
@@ -573,6 +573,8 @@ class TheSportsDBService:
         comp2: str,
         canon1: Optional[str] = None,
         canon2: Optional[str] = None,
+        is_women1: Optional[bool] = None,
+        is_women2: Optional[bool] = None,
     ) -> Tuple[bool, str]:
         """
         Evaluates whether two competition representations are mutually compatible.
@@ -599,10 +601,14 @@ class TheSportsDBService:
             return False, "veto_youth_mismatch"
 
         # 2. Women mismatch veto
-        w1 = bool(re.search(r"\b(women(?:['']s)?|femminile|femenino|ladies|frauen|w-|wta|wnba|uwcl)\b", c1))
-        w2 = bool(re.search(r"\b(women(?:['']s)?|femminile|femenino|ladies|frauen|w-|wta|wnba|uwcl)\b", c2))
-        if w1 != w2:
-            return False, "veto_women_mismatch"
+        if is_women1 is not None and is_women2 is not None:
+            if is_women1 != is_women2:
+                return False, "veto_women_mismatch"
+        else:
+            w1 = bool(re.search(r"\b(women(?:['']s)?|femminile|femenino|ladies|frauen|donne|dames|damen|w-|wta|wnba|uwcl)\b|(?<=\w)\s+[dwf]\b|\([dwf]\)", c1))
+            w2 = bool(re.search(r"\b(women(?:['']s)?|femminile|femenino|ladies|frauen|donne|dames|damen|w-|wta|wnba|uwcl)\b|(?<=\w)\s+[dwf]\b|\([dwf]\)", c2))
+            if w1 != w2:
+                return False, "veto_women_mismatch"
 
         # 3. Country conflict veto (only if both explicitly declare different countries)
         co1 = cls.extract_country_token(c1)
@@ -649,13 +655,18 @@ class TheSportsDBService:
 
             m_date = m.get("date", 0)
             m_comp = m.get("competition") or m.get("_competition") or ""
+            m_text = f"{m_comp} {m.get('title', '')}".lower()
+            m_is_youth = bool(re.search(r"\b(u-?1[5-9]|u-?2[01]|under\s*1[5-9]|under\s*2[01]|youth|juvenil|primavera|junior)\b", m_text)) or m.get("_age") == "+"
+            m_is_women = (
+                m.get("_gender") == "+"
+                or bool(re.search(r"\b(women(?:['']s)?|femminile|femenino|ladies|frauen|donne|dames|damen|w-|wta|wnba|uwcl)\b|(?<=\w)\s+[dwf]\b|\([dwf]\)", m_text))
+            )
+
             m_canon = m.get("canonical_competition")
             if not m_canon:
                 m_canon = detect_canonical_competition(f"{m_comp} : {m.get('title', '')}", silo_hint=tsdb_silo)
-
-            m_text = f"{m_comp} {m.get('title', '')}".lower()
-            m_is_youth = bool(re.search(r"\b(u-?1[5-9]|u-?2[01]|under\s*1[5-9]|under\s*2[01]|youth|juvenil|primavera|junior)\b", m_text))
-            m_is_women = bool(re.search(r"\b(women(?:['']s)?|femminile|femenino|ladies|frauen|w-|wta|wnba|uwcl)\b", m_text))
+            if m_is_women and m_canon == "football_uefa_cl":
+                m_canon = "football_uwcl"
 
             best_match = None
             for cal in candidates:
@@ -710,7 +721,7 @@ class TheSportsDBService:
                 cal_comp = cal.get("competition") or ""
                 cal_canon = cal.get("canonical_competition")
                 compat, reason = self.are_competitions_compatible(
-                    m_comp, cal_comp, canon1=m_canon, canon2=cal_canon
+                    m_comp, cal_comp, canon1=m_canon, canon2=cal_canon, is_women1=m_is_women, is_women2=cal_is_women
                 )
                 if not compat:
                     continue
@@ -945,6 +956,7 @@ class TheSportsDBService:
         away_raw: str,
         match_date_ms: int = 0,
         expected_silo: Optional[str] = None,
+        is_women: Optional[bool] = None,
     ) -> Optional[str]:
         """
         LEVEL 2 SEARCH: Queries TheSportsDB web search (browse?s=...)
@@ -966,7 +978,10 @@ class TheSportsDBService:
 
         full_query_low = f"{home_raw} {away_raw}".lower()
         is_target_youth = bool(re.search(r"\b(u-?1[5-9]|u-?2[01]|under\s*1[5-9]|under\s*2[01]|youth|juvenil|primavera)\b", full_query_low))
-        is_target_women = bool(re.search(r"\b(women(?:['']s)?|femminile|ladies|frauen|femenino|w-|wta|uwcl)\b", full_query_low))
+        is_target_women = bool(
+            (is_women is True)
+            or re.search(r"\b(women(?:['']s)?|femminile|ladies|frauen|femenino|donne|dames|damen|w-|wta|uwcl)\b|(?<=\w)\s+[dwf]\b|\([dwf]\)", full_query_low)
+        )
 
         try:
             client = await self._get_client()
@@ -988,7 +1003,7 @@ class TheSportsDBService:
 
                 # Guard: Youth & Women coherence - prevent junior/women events from inheriting senior/men posters (and vice versa)
                 is_result_youth = bool(re.search(r"\b(u-?1[5-9]|u-?2[01]|under\s*1[5-9]|under\s*2[01]|youth|juvenil|primavera)\b", slug_norm))
-                is_result_women = bool(re.search(r"\b(women(?:['']s)?|femminile|ladies|frauen|femenino|w-|wta|uwcl)\b", slug_norm))
+                is_result_women = bool(re.search(r"\b(women(?:['']s)?|femminile|ladies|frauen|femenino|femeni|donne|dames|damen|w-|wta|uwcl)\b", slug_norm))
                 if is_target_youth != is_result_youth:
                     continue
                 if is_target_women != is_result_women:
@@ -1061,7 +1076,13 @@ class TheSportsDBService:
 
             m_date = m.get("date", 0)
             m_silo = self.get_match_tsdb_silo(m)
-            thumb = await self.search_event_thumb_html(m_home, m_away, match_date_ms=m_date, expected_silo=m_silo)
+            m_is_women = (
+                m.get("_gender") == "+"
+                or bool(re.search(r"\b(women(?:['']s)?|femminile|femenino|ladies|frauen|donne|dames|damen|w-|wta|uwcl)\b|(?<=\w)\s+[dwf]\b|\([dwf]\)", f"{m.get('competition', '')} {m.get('title', '')}".lower()))
+            )
+            thumb = await self.search_event_thumb_html(
+                m_home, m_away, match_date_ms=m_date, expected_silo=m_silo, is_women=m_is_women
+            )
             if thumb:
                 m["poster"] = thumb
                 m["background"] = thumb

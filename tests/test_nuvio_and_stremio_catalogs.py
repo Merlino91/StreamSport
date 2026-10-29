@@ -12,9 +12,14 @@ client = TestClient(app)
 
 class TestNuvioAndStremioCatalogs(unittest.TestCase):
     def test_nuvio_catalogs_definitions_integrity(self):
-        """Verifies that all 55 Nuvio catalogs have unique IDs, proper parents, and no genre filters."""
-        self.assertEqual(len(NUVIO_CATALOG_DEFINITIONS), 55)
-        self.assertEqual(len(NUVIO_CATALOG_LOOKUP), 55)
+        """Verifies that all 56 Nuvio catalogs have unique IDs, proper parents, and no genre filters."""
+        self.assertEqual(len(NUVIO_CATALOG_DEFINITIONS), 56)
+        self.assertEqual(len(NUVIO_CATALOG_LOOKUP), 56)
+
+        self.assertIn("nuvio_calcio_estero_champions_league_femminile", NUVIO_CATALOG_LOOKUP)
+        parent, genre = NUVIO_CATALOG_LOOKUP["nuvio_calcio_estero_champions_league_femminile"]
+        self.assertEqual(parent, "calcio_estero")
+        self.assertEqual(genre, "Champions League Femminile")
 
         all_ids = [c["id"] for c in NUVIO_CATALOG_DEFINITIONS]
         self.assertEqual(len(all_ids), len(set(all_ids)), "Nuvio catalog IDs must be 100% unique!")
@@ -56,11 +61,11 @@ class TestNuvioAndStremioCatalogs(unittest.TestCase):
             self.assertTrue(len(genre_extra["options"]) > 0)
 
     def test_nuvio_manifest_structure(self):
-        """Verifies Nuvio manifest contains 55 flat catalogs with unique IDs and NO 'genre' extra parameter."""
+        """Verifies Nuvio manifest contains 56 flat catalogs with unique IDs and NO 'genre' extra parameter."""
         manifest = build_manifest(configured=True, client="nuvio")
         self.assertEqual(manifest["id"], "com.streamsport.addon.nuvio")
         self.assertEqual(manifest["name"], "StreamSport (Nuvio)")
-        self.assertEqual(len(manifest["catalogs"]), 55)
+        self.assertEqual(len(manifest["catalogs"]), 56)
 
         for cat in manifest["catalogs"]:
             self.assertTrue(cat["id"].startswith("nuvio_"))
@@ -77,21 +82,21 @@ class TestNuvioAndStremioCatalogs(unittest.TestCase):
         # 2. Unconfigured Nuvio
         res_nuvio = client.get("/nuvio/manifest.json")
         self.assertEqual(res_nuvio.status_code, 200)
-        self.assertEqual(len(res_nuvio.json()["catalogs"]), 55)
+        self.assertEqual(len(res_nuvio.json()["catalogs"]), 56)
 
         # 3. Configured Nuvio via base64
         raw_nuvio = "https://ep.example.com|pass|Europe/Rome|nuvio"
         b64_nuvio = base64.b64encode(raw_nuvio.encode("utf-8")).decode("utf-8")
         res_cfg_nuvio = client.get(f"/{b64_nuvio}/manifest.json")
         self.assertEqual(res_cfg_nuvio.status_code, 200)
-        self.assertEqual(len(res_cfg_nuvio.json()["catalogs"]), 55)
+        self.assertEqual(len(res_cfg_nuvio.json()["catalogs"]), 56)
 
         # 4. Configured Nuvio via dedicated path
         raw_stremio = "https://ep.example.com|pass|Europe/Rome"
         b64_stremio = base64.b64encode(raw_stremio.encode("utf-8")).decode("utf-8")
         res_cfg_nuvio_path = client.get(f"/{b64_stremio}/nuvio/manifest.json")
         self.assertEqual(res_cfg_nuvio_path.status_code, 200)
-        self.assertEqual(len(res_cfg_nuvio_path.json()["catalogs"]), 55)
+        self.assertEqual(len(res_cfg_nuvio_path.json()["catalogs"]), 56)
 
     def test_configure_page_generates_distinct_urls(self):
         """Verifies /configure generates visibly distinct URLs for Stremio vs Nuvio."""

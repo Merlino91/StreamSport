@@ -103,6 +103,7 @@ CATALOG_DEFINITIONS = [
         "name": "🌍 Calcio Internazionale e Coppe",
         "genres": [
             "Champions League",
+            "Champions League Femminile",
             "Europa e Conference League",
             "Premier League",
             "La Liga",
