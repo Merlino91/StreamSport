@@ -93,6 +93,29 @@ class TestNuvioAndStremioCatalogs(unittest.TestCase):
         self.assertEqual(res_cfg_nuvio_path.status_code, 200)
         self.assertEqual(len(res_cfg_nuvio_path.json()["catalogs"]), 55)
 
+    def test_configure_page_generates_distinct_urls(self):
+        """Verifies /configure generates visibly distinct URLs for Stremio vs Nuvio."""
+        # 1. Stremio
+        res_stremio = client.get("/configure?save=1&epUrl=https://ep.example.com&clientTarget=stremio")
+        self.assertEqual(res_stremio.status_code, 200)
+        html_stremio = res_stremio.text
+        self.assertIn("/manifest.json", html_stremio)
+        self.assertNotIn("/nuvio/manifest.json", html_stremio)
+
+        # 2. Nuvio
+        res_nuvio = client.get("/configure?save=1&epUrl=https://ep.example.com&clientTarget=nuvio")
+        self.assertEqual(res_nuvio.status_code, 200)
+        html_nuvio = res_nuvio.text
+        self.assertIn("/nuvio/manifest.json", html_nuvio)
+
+    def test_nuvio_subpath_routing_for_catalogs(self):
+        """Verifies that /{config}/nuvio/catalog/... routes resolve cleanly."""
+        raw_nuvio = "https://ep.example.com|pass|Europe/Rome|nuvio"
+        b64_nuvio = base64.b64encode(raw_nuvio.encode("utf-8")).decode("utf-8")
+        res = client.get(f"/{b64_nuvio}/nuvio/catalog/other/nuvio_calcio_italiano_serie_a.json")
+        self.assertEqual(res.status_code, 200)
+        self.assertIn("metas", res.json())
+
     def test_nuvio_catalog_lookup_and_filtering(self):
         """Verifies that requesting a flat Nuvio catalog resolves correctly through catalog_service."""
         sample_nuvio_id = "nuvio_calcio_italiano_serie_a"

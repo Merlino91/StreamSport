@@ -279,25 +279,30 @@ async def configure_page(
     epUrl: Optional[str] = None,
     epPass: Optional[str] = None,
     tz: Optional[str] = None,
-    client: Optional[str] = "stremio",
+    client: Optional[str] = None,
+    clientTarget: Optional[str] = None,
     save: Optional[str] = None,
 ):
     """Renders the configuration Web UI."""
     install_url = None
     stremio_url = None
 
+    target_client = (clientTarget or client or "stremio").strip().lower()
+
     if save and epUrl:
         ep_pass_clean = epPass or ""
         tz_clean = tz or "Europe/Rome"
-        client_clean = (client or "stremio").strip().lower()
-        if client_clean == "nuvio":
+        if target_client == "nuvio":
             raw_config = f"{epUrl.strip()}|{ep_pass_clean.strip()}|{tz_clean.strip()}|nuvio"
         else:
             raw_config = f"{epUrl.strip()}|{ep_pass_clean.strip()}|{tz_clean.strip()}"
         encoded_config = base64.b64encode(raw_config.encode("utf-8")).decode("utf-8")
 
         base_url = get_base_url(request)
-        install_url = f"{base_url}/{encoded_config}/manifest.json"
+        if target_client == "nuvio":
+            install_url = f"{base_url}/{encoded_config}/nuvio/manifest.json"
+        else:
+            install_url = f"{base_url}/{encoded_config}/manifest.json"
         stremio_url = install_url.replace("http://", "stremio://").replace("https://", "stremio://")
 
     context = {
@@ -306,7 +311,7 @@ async def configure_page(
         "epUrl": epUrl or "",
         "epPass": epPass or "",
         "tz": tz or "Europe/Rome",
-        "client": (client or "stremio").strip().lower(),
+        "client": target_client,
         "install_url": install_url,
         "stremio_url": stremio_url,
         "configured": bool(install_url),
@@ -349,6 +354,8 @@ async def configured_nuvio_manifest(config: str):
 
 @app.get("/catalog/{type}/{id}.json")
 @app.get("/catalog/{type}/{id}/{extra}.json")
+@app.get("/nuvio/catalog/{type}/{id}.json")
+@app.get("/nuvio/catalog/{type}/{id}/{extra}.json")
 async def unconfigured_catalog(
     request: Request,
     type: str,
@@ -359,7 +366,7 @@ async def unconfigured_catalog(
     genre, search, skip = extract_extra_params(request, extra)
     actual_catalog = id
     actual_genre = genre
-    is_nuvio = False
+    is_nuvio = ("/nuvio" in request.url.path)
     if id in NUVIO_CATALOG_LOOKUP:
         actual_catalog, actual_genre = NUVIO_CATALOG_LOOKUP[id]
         is_nuvio = True
@@ -381,6 +388,8 @@ async def unconfigured_catalog(
 
 @app.get("/{config}/catalog/{type}/{id}.json")
 @app.get("/{config}/catalog/{type}/{id}/{extra}.json")
+@app.get("/{config}/nuvio/catalog/{type}/{id}.json")
+@app.get("/{config}/nuvio/catalog/{type}/{id}/{extra}.json")
 async def configured_catalog(
     request: Request,
     config: str,
@@ -394,7 +403,7 @@ async def configured_catalog(
 
     actual_catalog = id
     actual_genre = genre
-    is_nuvio = (client == "nuvio")
+    is_nuvio = (client == "nuvio") or ("/nuvio" in request.url.path)
     if id in NUVIO_CATALOG_LOOKUP:
         actual_catalog, actual_genre = NUVIO_CATALOG_LOOKUP[id]
         is_nuvio = True
@@ -415,6 +424,7 @@ async def configured_catalog(
 
 
 @app.get("/meta/{type}/{id}.json")
+@app.get("/nuvio/meta/{type}/{id}.json")
 async def unconfigured_meta(request: Request, type: str, id: str):
     base_url = get_base_url(request)
     meta = await catalog_service.get_meta_detail(id, user_tz="Europe/Rome", base_url=base_url)
@@ -427,6 +437,7 @@ async def unconfigured_meta(request: Request, type: str, id: str):
 
 
 @app.get("/{config}/meta/{type}/{id}.json")
+@app.get("/{config}/nuvio/meta/{type}/{id}.json")
 async def configured_meta(request: Request, config: str, type: str, id: str):
     base_url = get_base_url(request)
     _, _, tz, _ = decode_config(config)
@@ -440,6 +451,7 @@ async def configured_meta(request: Request, config: str, type: str, id: str):
 
 
 @app.get("/stream/{type}/{id}.json")
+@app.get("/nuvio/stream/{type}/{id}.json")
 async def unconfigured_stream(request: Request, type: str, id: str):
     base_url = get_base_url(request)
     try:
@@ -451,6 +463,7 @@ async def unconfigured_stream(request: Request, type: str, id: str):
 
 
 @app.get("/{config}/stream/{type}/{id}.json")
+@app.get("/{config}/nuvio/stream/{type}/{id}.json")
 async def configured_stream(request: Request, config: str, type: str, id: str):
     base_url = get_base_url(request)
     ep_url, ep_pass, tz, _ = decode_config(config)
