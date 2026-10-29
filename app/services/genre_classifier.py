@@ -357,6 +357,7 @@ class GenreClassifier:
                 "volleyball_serie_a2": ("volley", "Superlega e Serie A1"),
                 "volleyball_serie_a1_femm": ("volley", "Volley Femminile"),
                 "volleyball_cev_cl": ("volley", "Champions League Volley"),
+                "rugby_serie_a_elite": ("altri_sport", "Rugby e AFL"),
                 "rugby_six_nations": ("altri_sport", "Rugby e AFL"),
                 "rugby_top_14": ("altri_sport", "Rugby e AFL"),
                 "afl_footy": ("altri_sport", "Rugby e AFL"),

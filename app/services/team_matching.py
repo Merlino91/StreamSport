@@ -17,39 +17,26 @@ def extract_team_name(val: Any) -> str:
     return ""
 
 # Master aliases dictionary unifying Diretta, TheSportsDB, EPG, and Catalog mappings
+# Master aliases dictionary unifying Diretta, TheSportsDB, EPG, and Catalog mappings
+# Contains ONLY strictly necessary mappings where names have zero significant word overlap
 MASTER_CLUB_ALIASES: Dict[str, str] = {
-    # Italian Top Clubs
-    r"\binternazionale(?:\s*milano)?\b": "inter",
+    # 1. Italian Top Clubs (essential short forms)
+    r"\bfc internazionale(?:\s*milano)?\b": "inter",
     r"\binter\s*(?:milan|milano)\b": "inter",
-    r"\bfc internazionale\b": "inter",
     r"\bjuve\b": "juventus",
-    r"\bmilan\b": "ac milan",
     
-    # European Clubs & International Names
+    # 2. Cross-Language Club Translations & Non-Overlapping Names
     r"\bstella rossa\b": "crvena zvezda",
     r"\bred star(?:\s*belgrade)?\b": "crvena zvezda",
-    r"\bstade rennais\b": "rennes",
-    r"\brennais\b": "rennes",
-    r"\bofi crete\b": "ofi",
+    r"\bsporting lisbona?\b": "sporting",
+    r"\bsporting cp\b": "sporting",
     r"\bathletic bilbao\b": "athletic club",
-    r"\bshakhtar\b": "shakhtar donetsk",
-    r"\bdynamo kiev\b": "dynamo kyiv",
-    r"\bdinamo kiev\b": "dynamo kyiv",
-    r"\bpartizan belgrado\b": "partizan",
-    r"\bolympiakos\b": "olympiacos",
-    r"\bolympiakos piraeus\b": "olympiacos",
-    r"\bpanathinaikos atene\b": "panathinaikos",
-    r"\bfeyenoord rotterdam\b": "feyenoord",
-    r"\bpsv eindhoven\b": "psv",
-    r"\baz alkmaar\b": "az",
-    r"\bgalatasaray istanbul\b": "galatasaray",
-    r"\bfenerbahce istanbul\b": "fenerbahce",
-    r"\bbesiktas istanbul\b": "besiktas",
-    r"\bbod[oøe]/glimt\b": "bodo glimt",
-    r"\bmalm[oöe] ff\b": "malmo",
-    
-    # Premier League / English Clubs
+    r"\bstade rennais\b": "rennes",
+    r"\bofi crete\b": "ofi",
+
+    # 3. Premier League / English Clubs (short colloquial names)
     r"\bmanchester city\b": "man city",
+    r"\bman city\b": "man city",
     r"\bmcfc\b": "man city",
     r"\bmanchester united\b": "man utd",
     r"\bman united\b": "man utd",
@@ -57,26 +44,16 @@ MASTER_CLUB_ALIASES: Dict[str, str] = {
     r"\bwolverhampton\b": "wolves",
     r"\btottenham\b": "spurs",
     
-    # Spanish / German / French Clubs
-    r"\batletico madrid\b": "atletico madrid",
+    # 4. Spanish / German / French Clubs (acronyms)
     r"\batleti\b": "atletico madrid",
     r"\bbarca\b": "barcelona",
     r"\bparis saint germain\b": "psg",
     r"\bparis sg\b": "psg",
-    r"\bborussia dortmund\b": "dortmund",
     r"\bbvb\b": "dortmund",
-    r"\bbayern munchen\b": "bayern",
-    r"\bbayern monaco\b": "bayern",
-    r"\brb leipzig\b": "leipzig",
-    r"\brb salzburg\b": "salzburg",
-    r"\bred bull salzburg\b": "salzburg",
-    r"\bsporting lisbona?\b": "sporting",
-    r"\bsporting cp\b": "sporting",
 
-    # US Major League Soccer & American Sports
+    # 5. US Major League Soccer & American Sports (acronyms)
     r"\bla fc\b": "lafc",
     r"\blos angeles fc\b": "lafc",
-    r"\bla galaxy\b": "la galaxy",
     r"\blag\b": "la galaxy",
     r"\bnew york city fc\b": "nycfc",
     r"\bnew york city\b": "nycfc",
@@ -86,20 +63,12 @@ MASTER_CLUB_ALIASES: Dict[str, str] = {
     r"\brbny\b": "red bulls",
     r"\bblazers\b": "trailblazers",
 
-    # Italian Volleyball SuperLega Sponsor Stripping
-    r"\bsir susa vim perugia\b": "perugia",
-    r"\bitas trentino\b": "trentino",
-    r"\bcucine lube civitanova\b": "civitanova",
-    r"\ballianz milano\b": "milano",
-    r"\bmint vero volley monza\b": "monza",
-    r"\bvesa monza\b": "monza",
-    r"\bgas sales bluenergy piacenza\b": "piacenza",
-    r"\bgas sales piacenza\b": "piacenza",
-    r"\brana verona\b": "verona",
-    r"\bsonepar padova\b": "padova",
-    r"\bgioiella prisma taranto\b": "taranto",
-    r"\byuasa battery grottazzolina\b": "grottazzolina",
-    r"\bcisterna volley\b": "cisterna",
+    # 6. Basketball Club vs City / Historic Cross-Naming
+    r"\btenerife\b": "canarias",
+    r"\bla laguna tenerife\b": "canarias",
+    r"\bderthona\b": "tortona",
+    r"\bjoventut badalona\b": "joventut",
+    r"\bbadalona\b": "joventut",
 }
 
 # 3-Letter and 4-Letter Acronym Tokens allowed even if short

@@ -732,15 +732,20 @@ CANONICAL_LEAGUES = {
     # --------------------------------------------------------------------------
     # ALTRI SPORT (altri_sport)
     # --------------------------------------------------------------------------
+    "rugby_serie_a_elite": {
+        "display": "Serie A Elite Rugby",
+        "silo": "altri_sport",
+        "patterns": [r"serie\s*a\s*elite", r"\btop\s*10\b", r"eccellenza\s*rugby"],
+    },
     "rugby_six_nations": {
         "display": "Sei Nazioni",
         "silo": "altri_sport",
-        "patterns": [r"six\s*nations", r"sei\s*nazioni"],
+        "patterns": [r"six\s*nations", r"sei\s*nazioni", r"rugby\s*championship"],
     },
     "rugby_top_14": {
-        "display": "Top 14 & Rugby Club",
+        "display": "Top 14 & Coppe Rugby",
         "silo": "altri_sport",
-        "patterns": [r"top\s*14", r"premiership\s*rugby", r"\burc\b", r"united\s*rugby\s*championship"],
+        "patterns": [r"top\s*14", r"premiership\s*rugby", r"\burc\b", r"united\s*rugby\s*championship", r"champions\s*cup", r"challenge\s*cup", r"super\s*rugby"],
     },
     "afl_footy": {
         "display": "AFL (Australian Rules)",
@@ -1295,8 +1300,13 @@ def is_tier_match(m: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
 
     # ========================== RUGBY ==========================
     if silo == "rugby" or "rugby" in sport:
-        if any(w in league for w in ("sei nazioni", "six nations", "urc", "united rugby championship", "top 14", "champions cup", "rugby championship")):
-            return True, "rugby_major"
+        if country in ("italia", "italy"):
+            if any(w in league for w in ("serie a elite", "elite", "coppa italia", "eccellenza", "top 10", "top10", "serie a")):
+                return True, "rugby_serie_a_elite"
+        if any(w in league for w in ("urc", "united rugby championship", "top 14", "champions cup", "challenge cup", "premiership", "super rugby")):
+            return True, "rugby_top_14"
+        if any(w in league for w in ("sei nazioni", "six nations", "rugby championship")):
+            return True, "rugby_six_nations"
         return False, None
 
     # ========================== COMBAT / UFC ==========================

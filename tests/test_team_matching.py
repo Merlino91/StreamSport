@@ -16,11 +16,14 @@ class TestTeamMatching(unittest.TestCase):
         self.assertEqual(clean_team_name("Paris Saint-Germain"), "psg")
         self.assertEqual(clean_team_name("FC Internazionale Milano"), "inter")
         self.assertEqual(clean_team_name("Manchester United"), "man utd")
-        self.assertEqual(clean_team_name("Sir Susa Vim Perugia"), "perugia")
+        self.assertEqual(clean_team_name("Tenerife"), "canarias")
 
     def test_single_team_similarity(self):
         # Exact alias match
         self.assertGreaterEqual(match_single_team("Stella Rossa", "Crvena Zvezda"), 0.95)
+        self.assertGreaterEqual(match_single_team("Tenerife", "Canarias"), 0.95)
+        self.assertGreaterEqual(match_single_team("Venezia", "Reyer Venezia Mestre"), 0.80)
+        self.assertGreaterEqual(match_single_team("Sir Susa Vim Perugia", "Perugia"), 0.80)
         self.assertGreaterEqual(match_single_team("Stade Rennais", "Rennes"), 0.95)
         self.assertGreaterEqual(match_single_team("OFI Crete", "OFI"), 0.95)
         self.assertGreaterEqual(match_single_team("LAFC", "Los Angeles FC"), 0.95)
