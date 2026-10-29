@@ -1,5 +1,7 @@
 import os
 from pathlib import Path
+import re
+from typing import Any, Dict, List, Tuple
 from dotenv import load_dotenv
 
 # Base Paths
@@ -209,6 +211,30 @@ CATALOG_DEFINITIONS = [
 
 CATALOG_MAP = {c["id"]: c for c in CATALOG_DEFINITIONS}
 SPORT_GENRES = [g for c in CATALOG_DEFINITIONS for g in c["genres"]]
+
+# Generate flat standalone catalogs for Nuvio to prevent Collections collision/crash
+def _build_nuvio_catalogs(defs: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], Dict[str, Tuple[str, str]]]:
+    nuvio_defs: List[Dict[str, Any]] = []
+    nuvio_lookup: Dict[str, Tuple[str, str]] = {}
+    for cat in defs:
+        cat_id = cat["id"]
+        cat_name = cat["name"]
+        emoji = cat_name.split()[0] if cat_name else ""
+        for g in cat["genres"]:
+            slug = re.sub(r"[^a-zA-Z0-9]+", "_", g.lower()).strip("_")
+            cid = f"nuvio_{cat_id}_{slug}"
+            cname = f"{emoji} {g}" if emoji else g
+            nuvio_defs.append({
+                "id": cid,
+                "name": cname,
+                "genres": [],
+                "_parent_catalog": cat_id,
+                "_genre": g,
+            })
+            nuvio_lookup[cid] = (cat_id, g)
+    return nuvio_defs, nuvio_lookup
+
+NUVIO_CATALOG_DEFINITIONS, NUVIO_CATALOG_LOOKUP = _build_nuvio_catalogs(CATALOG_DEFINITIONS)
 
 # ID Prefixes recognized by StreamSport
 ID_PREFIXES = ["streamsport:"]

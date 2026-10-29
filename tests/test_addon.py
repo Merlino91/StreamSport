@@ -19,16 +19,27 @@ class StreamSportTestCase(unittest.TestCase):
     def test_decode_config_pipe(self):
         raw = "https://ep.example.com|mypass|Europe/Rome"
         encoded = base64.b64encode(raw.encode("utf-8")).decode("utf-8")
-        ep_url, ep_pass, tz = decode_config(encoded)
+        ep_url, ep_pass, tz, client_target = decode_config(encoded)
         self.assertEqual(ep_url, "https://ep.example.com")
         self.assertEqual(ep_pass, "mypass")
         self.assertEqual(tz, "Europe/Rome")
+        self.assertEqual(client_target, "stremio")
+
+    def test_decode_config_nuvio_pipe(self):
+        raw = "https://ep.example.com|mypass|Europe/Rome|nuvio"
+        encoded = base64.b64encode(raw.encode("utf-8")).decode("utf-8")
+        ep_url, ep_pass, tz, client_target = decode_config(encoded)
+        self.assertEqual(ep_url, "https://ep.example.com")
+        self.assertEqual(ep_pass, "mypass")
+        self.assertEqual(tz, "Europe/Rome")
+        self.assertEqual(client_target, "nuvio")
 
     def test_decode_config_empty(self):
-        ep_url, ep_pass, tz = decode_config(None)
+        ep_url, ep_pass, tz, client_target = decode_config(None)
         self.assertIsNone(ep_url)
         self.assertIsNone(ep_pass)
         self.assertEqual(tz, "Europe/Rome")
+        self.assertEqual(client_target, "stremio")
 
     def test_unconfigured_manifest(self):
         response = client.get("/manifest.json")

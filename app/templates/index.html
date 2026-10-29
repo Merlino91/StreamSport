@@ -65,12 +65,21 @@
             </select>
           </div>
 
+          <div class="form-group">
+            <label for="clientTarget">Piattaforma Client Target</label>
+            <select id="clientTarget" name="clientTarget">
+              <option value="stremio" {% if client != 'nuvio' %}selected{% endif %}>Stremio (Standard — 11 Cataloghi con Generi, scroll completo)</option>
+              <option value="nuvio" {% if client == 'nuvio' %}selected{% endif %}>Nuvio (Legacy — 55 Cataloghi Piani per Collections)</option>
+            </select>
+            <span class="field-hint">Seleziona <strong>Stremio</strong> per l'impaginazione standard a scorrimento completo, oppure <strong>Nuvio</strong> per esporre cataloghi indipendenti ed evitare crash nelle Collections.</span>
+          </div>
+
           <button type="submit" class="btn primary">Genera Link Installazione</button>
         </form>
 
         <div class="install-block" id="installBlock" style="{% if not install_url %}display: none;{% endif %}">
-          <h3>Installazione su Stremio</h3>
-          <p>Clicca sul pulsante sottostante o copia l'URL nel campo di ricerca addon di Stremio:</p>
+          <h3 id="installTitle">Installazione Addon</h3>
+          <p id="installDesc">Clicca sul pulsante sottostante o copia l'URL nel campo di ricerca addon del tuo client:</p>
           <div class="btn-group">
             <a href="{{ stremio_url or '#' }}" id="stremioBtn" class="btn stremio">🚀 Installa su Stremio</a>
             <button type="button" class="btn secondary" id="copyBtn" data-copy=".copy-field">📋 Copia Link</button>

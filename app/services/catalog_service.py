@@ -17,6 +17,7 @@ from app.config import (
     CATALOG_SYNC_INTERVAL,
     CATALOG_TYPE,
     ENABLE_REPLAYS,
+    NUVIO_CATALOG_LOOKUP,
     SPORT_GENRES,
     STREAMED_API_HOST,
 )
@@ -1672,6 +1673,7 @@ class CatalogService:
         limit: int = 50,
         user_tz: Optional[str] = None,
         base_url: Optional[str] = None,
+        is_nuvio: bool = False,
     ) -> List[Dict[str, Any]]:
         """
         Returns catalog items filtered by catalog, genre, and optional search query.
@@ -1682,14 +1684,20 @@ class CatalogService:
 
         matches_to_use = self._cached_matches
 
+        # Check if catalog_id is a Nuvio flat standalone catalog
+        target_genre = (genre_filter or "").strip()
+        actual_catalog = catalog_id
+        if catalog_id and catalog_id in NUVIO_CATALOG_LOOKUP:
+            actual_catalog, target_genre = NUVIO_CATALOG_LOOKUP[catalog_id]
+            is_nuvio = True
+
         # Classify and filter by catalog and genre
         now_ms = time.time() * 1000
         filtered: List[Dict[str, Any]] = []
-        target_genre = (genre_filter or "").strip()
         is_all_genre = not target_genre or target_genre in (
             "Tutti gli Eventi", "all", "All", "All Sports", "Tutti i Generi", "Tutti", "Tutti i generi"
         )
-        filter_catalog = catalog_id if catalog_id and catalog_id not in ("streamsport_events", "all", "All") else None
+        filter_catalog = actual_catalog if actual_catalog and actual_catalog not in ("streamsport_events", "all", "All") else None
 
         def norm_g(s: str) -> str:
             return s.lower().replace("&", "e").replace("  ", " ").strip()
@@ -1774,8 +1782,8 @@ class CatalogService:
             unique_filtered.append(meta_item)
         filtered = unique_filtered
 
-        # 7. Pagination & Schema Cleanup (Row limit: max 4 items on first page for Nuvio/Android TV)
-        effective_limit = 4 if (skip == 0 and not search_query) else limit
+        # 7. Pagination & Schema Cleanup (Row limit: max 4 items on first page for Nuvio only)
+        effective_limit = 4 if (is_nuvio and skip == 0 and not search_query) else limit
         page = filtered[skip : skip + effective_limit]
         for item in page:
             item.pop("_date_ms", None)

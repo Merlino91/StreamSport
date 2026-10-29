@@ -55,29 +55,48 @@ document.addEventListener('DOMContentLoaded', () => {
       const epUrlInput = document.getElementById('epUrl');
       const epPassInput = document.getElementById('epPass');
       const tzSelect = document.getElementById('tz');
+      const clientSelect = document.getElementById('clientTarget');
 
       const epUrl = (epUrlInput ? epUrlInput.value : '').trim();
       const epPass = (epPassInput ? epPassInput.value : '').trim();
       const tz = (tzSelect ? tzSelect.value : 'Europe/Rome').trim() || 'Europe/Rome';
+      const client = (clientSelect ? clientSelect.value : 'stremio').trim().toLowerCase() || 'stremio';
 
       if (!epUrl) {
         if (epUrlInput) epUrlInput.focus();
         return;
       }
 
-      const rawConfig = `${epUrl}|${epPass}|${tz}`;
+      const rawConfig = client === 'nuvio'
+        ? `${epUrl}|${epPass}|${tz}|nuvio`
+        : `${epUrl}|${epPass}|${tz}`;
+
       const encodedConfig = btoa(unescape(encodeURIComponent(rawConfig)));
       const baseUrl = window.location.origin;
       const installUrl = `${baseUrl}/${encodedConfig}/manifest.json`;
       const stremioUrl = installUrl.replace(/^https?:\/\//, 'stremio://');
 
       const installBlock = document.getElementById('installBlock');
+      const installTitle = document.getElementById('installTitle');
+      const installDesc = document.getElementById('installDesc');
       const stremioBtn = document.getElementById('stremioBtn');
       const installUrlInput = document.getElementById('installUrlInput');
       const statusBadge = document.querySelector('.status');
 
       if (installBlock && stremioBtn && installUrlInput) {
-        stremioBtn.href = stremioUrl;
+        if (client === 'nuvio') {
+          if (installTitle) installTitle.textContent = 'Installazione su Nuvio (Legacy Collections)';
+          if (installDesc) installDesc.textContent = 'Copia questo URL manifesto e incollalo nella gestione Addon di Nuvio per abilitare i 55 cataloghi indipendenti:';
+          stremioBtn.textContent = '🚀 Apri Link Manifesto';
+          stremioBtn.href = installUrl;
+          stremioBtn.target = '_blank';
+        } else {
+          if (installTitle) installTitle.textContent = 'Installazione su Stremio';
+          if (installDesc) installDesc.textContent = "Clicca sul pulsante sottostante o copia l'URL nel campo di ricerca addon di Stremio:";
+          stremioBtn.textContent = '🚀 Installa su Stremio';
+          stremioBtn.href = stremioUrl;
+          stremioBtn.removeAttribute('target');
+        }
         installUrlInput.value = installUrl;
         installBlock.style.display = 'block';
         installBlock.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -85,7 +104,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
       if (statusBadge) {
         statusBadge.className = 'status ok';
-        statusBadge.innerHTML = '<span class="dot"></span> Playback proxy collegato con successo';
+        statusBadge.innerHTML = `<span class="dot"></span> Profilo ${client === 'nuvio' ? 'Nuvio' : 'Stremio'} configurato con successo`;
       }
     });
   }

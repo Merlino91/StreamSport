@@ -26,6 +26,8 @@ from app.config import (
     CATALOG_TYPE,
     HOST,
     ID_PREFIXES,
+    NUVIO_CATALOG_DEFINITIONS,
+    NUVIO_CATALOG_LOOKUP,
     PORT,
     POSTERS_DIR,
     PUBLIC_URL,
@@ -88,14 +90,14 @@ app.mount("/posters", StaticFiles(directory=str(POSTERS_DIR)), name="posters")
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 
-def decode_config(config_str: Optional[str]) -> Tuple[Optional[str], Optional[str], Optional[str]]:
+def decode_config(config_str: Optional[str]) -> Tuple[Optional[str], Optional[str], Optional[str], str]:
     """
     Decodes the Base64 config path parameter.
-    Format: 'epUrl|epPass|tz' (or JSON fallback).
-    Returns (ep_url, ep_pass, tz).
+    Format: 'epUrl|epPass|tz|client' (or JSON fallback).
+    Returns (ep_url, ep_pass, tz, client).
     """
     if not config_str:
-        return None, None, "Europe/Rome"
+        return None, None, "Europe/Rome", "stremio"
 
     try:
         b64 = config_str.replace("-", "+").replace("_", "/")
@@ -104,16 +106,22 @@ def decode_config(config_str: Optional[str]) -> Tuple[Optional[str], Optional[st
 
         if "|" in raw:
             parts = raw.split("|")
-            ep_url = parts[0].strip() if len(parts) > 0 else None
+            ep_url = parts[0].strip() if len(parts) > 0 and parts[0].strip() else None
             ep_pass = parts[1].strip() if len(parts) > 1 and parts[1].strip() else None
             tz = parts[2].strip() if len(parts) > 2 and parts[2].strip() else "Europe/Rome"
-            return ep_url, ep_pass, tz
+            client = parts[3].strip().lower() if len(parts) > 3 and parts[3].strip() else "stremio"
+            return ep_url, ep_pass, tz, client
 
         data = json.loads(raw)
-        return data.get("epUrl"), data.get("epPass"), data.get("tz", "Europe/Rome")
+        return (
+            data.get("epUrl"),
+            data.get("epPass"),
+            data.get("tz", "Europe/Rome"),
+            (data.get("client") or "stremio").strip().lower(),
+        )
     except Exception as e:
         logger.debug("Failed decoding config '%s': %s", config_str, e)
-        return None, None, "Europe/Rome"
+        return None, None, "Europe/Rome", "stremio"
 
 
 _HOST_REGEX = re.compile(r"^[a-zA-Z0-9.\-_]+(?::\d{1,5})?$")
@@ -161,35 +169,45 @@ def extract_clean_client_ip(request: Request) -> Optional[str]:
     return sanitize_ip(raw_ip)
 
 
-def build_manifest(configured: bool = True) -> dict:
-    """Builds the official Stremio Addon manifest with dedicated thematic sports catalogs."""
+def build_manifest(configured: bool = True, client: str = "stremio") -> dict:
+    """Builds the official Stremio/Nuvio Addon manifest with dedicated thematic sports catalogs."""
+    is_nuvio = (client or "").strip().lower() == "nuvio"
+    defs = NUVIO_CATALOG_DEFINITIONS if is_nuvio else CATALOG_DEFINITIONS
+
     catalogs = []
-    for cat in CATALOG_DEFINITIONS:
+    for cat in defs:
+        extra_list = [
+            {
+                "name": "search",
+                "isRequired": False,
+            },
+            {
+                "name": "skip",
+                "isRequired": False,
+            },
+        ]
+        # Only add genre filter for Stremio, as Nuvio uses flat standalone catalogs
+        if not is_nuvio and cat.get("genres"):
+            extra_list.insert(0, {
+                "name": "genre",
+                "options": cat["genres"],
+                "isRequired": False,
+            })
+
         catalogs.append({
             "id": cat["id"],
             "type": CATALOG_TYPE,
             "name": cat["name"],
-            "extra": [
-                {
-                    "name": "genre",
-                    "options": cat["genres"],
-                    "isRequired": False,
-                },
-                {
-                    "name": "search",
-                    "isRequired": False,
-                },
-                {
-                    "name": "skip",
-                    "isRequired": False,
-                },
-            ],
+            "extra": extra_list,
         })
 
+    addon_name = f"{ADDON_NAME} (Nuvio)" if is_nuvio else ADDON_NAME
+    addon_id = f"{ADDON_ID}.nuvio" if is_nuvio else ADDON_ID
+
     return {
-        "id": ADDON_ID,
+        "id": addon_id,
         "version": ADDON_VERSION,
-        "name": ADDON_NAME,
+        "name": addon_name,
         "description": ADDON_DESCRIPTION,
         "types": [CATALOG_TYPE],
         "resources": ["catalog", "meta", "stream"],
@@ -261,6 +279,7 @@ async def configure_page(
     epUrl: Optional[str] = None,
     epPass: Optional[str] = None,
     tz: Optional[str] = None,
+    client: Optional[str] = "stremio",
     save: Optional[str] = None,
 ):
     """Renders the configuration Web UI."""
@@ -270,7 +289,11 @@ async def configure_page(
     if save and epUrl:
         ep_pass_clean = epPass or ""
         tz_clean = tz or "Europe/Rome"
-        raw_config = f"{epUrl.strip()}|{ep_pass_clean.strip()}|{tz_clean.strip()}"
+        client_clean = (client or "stremio").strip().lower()
+        if client_clean == "nuvio":
+            raw_config = f"{epUrl.strip()}|{ep_pass_clean.strip()}|{tz_clean.strip()}|nuvio"
+        else:
+            raw_config = f"{epUrl.strip()}|{ep_pass_clean.strip()}|{tz_clean.strip()}"
         encoded_config = base64.b64encode(raw_config.encode("utf-8")).decode("utf-8")
 
         base_url = get_base_url(request)
@@ -283,6 +306,7 @@ async def configure_page(
         "epUrl": epUrl or "",
         "epPass": epPass or "",
         "tz": tz or "Europe/Rome",
+        "client": (client or "stremio").strip().lower(),
         "install_url": install_url,
         "stremio_url": stremio_url,
         "configured": bool(install_url),
@@ -301,14 +325,26 @@ async def configure_page(
 
 @app.get("/manifest.json")
 async def unconfigured_manifest():
-    return JSONResponse(content=build_manifest(configured=False))
+    return JSONResponse(content=build_manifest(configured=False, client="stremio"))
+
+
+@app.get("/nuvio/manifest.json")
+async def unconfigured_nuvio_manifest():
+    return JSONResponse(content=build_manifest(configured=False, client="nuvio"))
 
 
 @app.get("/{config}/manifest.json")
 async def configured_manifest(config: str):
-    ep_url, _, _ = decode_config(config)
+    ep_url, _, _, client = decode_config(config)
     is_configured = bool(ep_url)
-    return JSONResponse(content=build_manifest(configured=is_configured))
+    return JSONResponse(content=build_manifest(configured=is_configured, client=client))
+
+
+@app.get("/{config}/nuvio/manifest.json")
+async def configured_nuvio_manifest(config: str):
+    ep_url, _, _, _ = decode_config(config)
+    is_configured = bool(ep_url)
+    return JSONResponse(content=build_manifest(configured=is_configured, client="nuvio"))
 
 
 @app.get("/catalog/{type}/{id}.json")
@@ -321,13 +357,21 @@ async def unconfigured_catalog(
 ):
     base_url = get_base_url(request)
     genre, search, skip = extract_extra_params(request, extra)
+    actual_catalog = id
+    actual_genre = genre
+    is_nuvio = False
+    if id in NUVIO_CATALOG_LOOKUP:
+        actual_catalog, actual_genre = NUVIO_CATALOG_LOOKUP[id]
+        is_nuvio = True
+
     metas = await catalog_service.get_catalog(
-        catalog_id=id,
-        genre_filter=genre,
+        catalog_id=actual_catalog,
+        genre_filter=actual_genre,
         search_query=search,
         skip=skip,
         user_tz="Europe/Rome",
         base_url=base_url,
+        is_nuvio=is_nuvio,
     )
     return JSONResponse(
         content={"metas": metas},
@@ -345,15 +389,24 @@ async def configured_catalog(
     extra: Optional[str] = None,
 ):
     base_url = get_base_url(request)
-    ep_url, ep_pass, tz = decode_config(config)
+    ep_url, ep_pass, tz, client = decode_config(config)
     genre, search, skip = extract_extra_params(request, extra)
+
+    actual_catalog = id
+    actual_genre = genre
+    is_nuvio = (client == "nuvio")
+    if id in NUVIO_CATALOG_LOOKUP:
+        actual_catalog, actual_genre = NUVIO_CATALOG_LOOKUP[id]
+        is_nuvio = True
+
     metas = await catalog_service.get_catalog(
-        catalog_id=id,
-        genre_filter=genre,
+        catalog_id=actual_catalog,
+        genre_filter=actual_genre,
         search_query=search,
         skip=skip,
         user_tz=tz,
         base_url=base_url,
+        is_nuvio=is_nuvio,
     )
     return JSONResponse(
         content={"metas": metas},
@@ -376,7 +429,7 @@ async def unconfigured_meta(request: Request, type: str, id: str):
 @app.get("/{config}/meta/{type}/{id}.json")
 async def configured_meta(request: Request, config: str, type: str, id: str):
     base_url = get_base_url(request)
-    _, _, tz = decode_config(config)
+    _, _, tz, _ = decode_config(config)
     meta = await catalog_service.get_meta_detail(id, user_tz=tz, base_url=base_url)
     if not meta:
         raise HTTPException(status_code=404, detail="Meta not found")
@@ -400,7 +453,7 @@ async def unconfigured_stream(request: Request, type: str, id: str):
 @app.get("/{config}/stream/{type}/{id}.json")
 async def configured_stream(request: Request, config: str, type: str, id: str):
     base_url = get_base_url(request)
-    ep_url, ep_pass, tz = decode_config(config)
+    ep_url, ep_pass, tz, _ = decode_config(config)
     try:
         streams = await stream_service.get_streams_for_event(
             id,
@@ -443,7 +496,7 @@ async def live_manifest_proxy(request: Request, url: str, config: Optional[str] 
         # Automatic Fallback to EasyProxy if configured
         ep_url, ep_pass = None, None
         if config:
-            ep_url, ep_pass, _ = decode_config(config)
+            ep_url, ep_pass, _, _ = decode_config(config)
 
         if ep_url:
             easyproxy_url = stream_service.build_easyproxy_url(ep_url, ep_pass, "Vavoo", url)
