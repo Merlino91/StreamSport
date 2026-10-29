@@ -5,7 +5,7 @@ import time
 import urllib.parse
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-from app.config import ENABLE_REPLAYS
+from app.config import ENABLE_REPLAYS, ENABLE_STREAMED
 from app.services.catalog_service import CatalogService
 from app.services.daddylive_api import daddylive_api
 from app.services.dailymotion_service import dailymotion_service
@@ -380,6 +380,59 @@ class StreamService:
                     "behaviorHints": {"notWebReady": True},
                 }]
 
+    @classmethod
+    def find_matching_provider_event(
+        cls,
+        target_match: Dict[str, Any],
+        candidate_matches: List[Dict[str, Any]],
+        time_window_minutes: float = 90.0,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Fuzzy-matches a target match against a candidate provider match list using
+        canonical silos, time proximity, and team fuzzy scoring.
+        """
+        if not target_match or not candidate_matches:
+            return None
+
+        from app.services.catalog_service import catalog_service
+        from app.services.team_matching import calculate_match_score
+
+        target_silo = catalog_service.get_canonical_silo(target_match)
+        target_date = target_match.get("date") or 0
+
+        # 1. Filter candidates by compatible sport silo and time window (<= 90 min)
+        candidates = []
+        for cand in candidate_matches:
+            if not isinstance(cand, dict):
+                continue
+            cand_silo = catalog_service.get_canonical_silo(cand)
+            if not catalog_service.is_silo_compatible(target_silo, cand_silo):
+                continue
+            cand_date = cand.get("date") or 0
+            if target_date and cand_date:
+                if abs(cand_date - target_date) > time_window_minutes * 60 * 1000:
+                    continue
+            candidates.append(cand)
+
+        if not candidates:
+            return None
+
+        # 2. Score candidates with unified team_matching
+        best_cand = None
+        best_score = 0.0
+        for cand in candidates:
+            score_res = calculate_match_score(cand, target_match, phase="phase1_diretta")
+            if score_res.get("matched") and score_res.get("score", 0.0) > best_score:
+                best_score = score_res["score"]
+                best_cand = cand
+                if best_score >= 0.95:
+                    break
+
+        if best_cand and best_score >= 0.75:
+            return best_cand
+
+        return None
+
     async def get_streams_for_event(
         self,
         item_id: str,
@@ -509,7 +562,8 @@ class StreamService:
 
         # Match is LIVE or within 20 minutes before start!
         final_streams: List[Dict[str, Any]] = []
-        sources = match.get("sources", [])
+        sources = list(match.get("sources", []))
+        match_updated = False
 
         # JIT Dynamic Mandrakodi Resolution:
         # If match does not have Mandrakodi OTT sources attached, trigger a real-time lookup
@@ -522,14 +576,83 @@ class StreamService:
                 from app.services.mandrakodi_service import mandrakodi_service
                 jit_sources = await mandrakodi_service.resolve_live_match_streams(match)
                 if jit_sources:
-                    existing_ids = {str(s.get("id")) for s in sources if isinstance(s, dict)}
-                    for s in jit_sources:
-                        if isinstance(s, dict) and str(s.get("id")) not in existing_ids:
-                            sources.append(s)
-                            existing_ids.add(str(s.get("id")))
+                    # Cleanly replace Mandrakodi sources for this match (no stale/dead links)
+                    sources = [
+                        s for s in sources
+                        if not (isinstance(s, dict) and (s.get("provider") == "mandrakodi" or s.get("source") in ("amstaff", "acestream", "socceron", "direct")))
+                    ]
+                    sources.extend(jit_sources)
                     match["sources"] = sources
+                    match_updated = True
             except Exception as e:
                 logger.error("Error in JIT Mandrakodi stream resolution: %s", e)
+
+        # On-Demand DaddyLive Fallback:
+        # If match has NO DaddyLive sources, search in-memory DaddyLive schedule by teams/silo
+        has_dlhd = any(isinstance(s, dict) and s.get("source") == "dlhd" for s in sources)
+        if not has_dlhd:
+            try:
+                dl_matches = await daddylive_api.get_matches()
+                matched_dl = self.find_matching_provider_event(match, dl_matches)
+                if matched_dl and matched_dl.get("sources"):
+                    dl_sources = [s for s in matched_dl["sources"] if isinstance(s, dict) and s.get("source") == "dlhd"]
+                    if dl_sources:
+                        sources = [s for s in sources if not (isinstance(s, dict) and s.get("source") == "dlhd")]
+                        sources.extend(dl_sources)
+                        match["sources"] = sources
+                        match_updated = True
+                        logger.info("DaddyLive on-demand fallback attached %d streams to %s (%s)", len(dl_sources), match.get("title"), slug_id)
+            except Exception as e:
+                logger.debug("DaddyLive on-demand fallback lookup failed for %s: %s", slug_id, e)
+
+        # On-Demand Streamed Fallback:
+        # If match has NO Streamed sources, search in-memory Streamed schedule by teams/silo
+        has_streamed = any(
+            isinstance(s, dict)
+            and s.get("source") not in ("dlhd", "tvvoo", "fctv33", "amstaff", "acestream", "socceron", "direct", "sportsonline", "spon")
+            and s.get("provider") != "mandrakodi"
+            for s in sources
+        )
+        if not has_streamed and ENABLE_STREAMED:
+            try:
+                st_matches = await streamed_api.get_all_matches()
+                matched_st = self.find_matching_provider_event(match, st_matches)
+                if matched_st and matched_st.get("sources"):
+                    st_sources = [
+                        s for s in matched_st["sources"]
+                        if isinstance(s, dict)
+                        and s.get("source") not in ("dlhd", "tvvoo", "fctv33", "amstaff", "acestream", "socceron", "direct", "sportsonline", "spon")
+                        and s.get("provider") != "mandrakodi"
+                    ]
+                    if st_sources:
+                        sources = [
+                            s for s in sources
+                            if not (
+                                isinstance(s, dict)
+                                and s.get("source") not in ("dlhd", "tvvoo", "fctv33", "amstaff", "acestream", "socceron", "direct", "sportsonline", "spon")
+                                and s.get("provider") != "mandrakodi"
+                            )
+                        ]
+                        sources.extend(st_sources)
+                        match["sources"] = sources
+                        match_updated = True
+                        logger.info("Streamed on-demand fallback attached %d streams to %s (%s)", len(st_sources), match.get("title"), slug_id)
+            except Exception as e:
+                logger.debug("Streamed on-demand fallback lookup failed for %s: %s", slug_id, e)
+
+        if match_updated:
+            from app.services.catalog_service import catalog_service
+            catalog_service.update_cached_match(match)
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(db_service.save_matches_async([match]))
+            except RuntimeError:
+                try:
+                    db_service.save_matches([match])
+                except Exception:
+                    pass
+            except Exception:
+                pass
 
         # 0. Process Mandrakodi (Amstaff ClearKey 1080p 50fps, Direct CDN, AceStream Media)
         mandrakodi_streams: List[Dict[str, Any]] = []
@@ -766,7 +889,21 @@ class StreamService:
                     fresh_fctv = await fctv33_service.get_streams_for_match(fctv_mid, sport_type=fctv_sport)
                     if fresh_fctv:
                         fctv_sources = fresh_fctv
+                        sources = [s for s in sources if not (isinstance(s, dict) and s.get("source") == "fctv33")]
                         sources.extend(fresh_fctv)
+                        match["sources"] = sources
+                        from app.services.catalog_service import catalog_service
+                        catalog_service.update_cached_match(match)
+                        try:
+                            loop = asyncio.get_running_loop()
+                            loop.create_task(db_service.save_matches_async([match]))
+                        except RuntimeError:
+                            try:
+                                db_service.save_matches([match])
+                            except Exception:
+                                pass
+                        except Exception:
+                            pass
                 except Exception as e:
                     logger.debug("Failed real-time FCTV33 stream fetch for %s: %s", fctv_mid, e)
 

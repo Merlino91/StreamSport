@@ -1860,4 +1860,20 @@ class CatalogService:
         return None
 
 
+    def update_cached_match(self, match: Dict[str, Any]) -> None:
+        """Updates or inserts a match in the in-memory cache and ID index."""
+        if not match or not match.get("id"):
+            return
+        m_id = str(match["id"])
+        clean_id = m_id.replace("streamsport:", "")
+        self._matches_by_id[m_id] = match
+        self._matches_by_id[clean_id] = match
+        for i, m in enumerate(self._cached_matches):
+            mid = str(m.get("id", ""))
+            if mid == m_id or mid == clean_id:
+                self._cached_matches[i] = match
+                return
+        self._cached_matches.append(match)
+
+
 catalog_service = CatalogService()

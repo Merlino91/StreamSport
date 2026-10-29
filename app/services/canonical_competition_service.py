@@ -316,15 +316,25 @@ CANONICAL_LEAGUES = {
         "silo": "football",
         "patterns": [r"belgian\s*pro\s*league", r"jupiler\s*pro\s*league", r"belgium\s*-\s*first\s*division"],
     },
+    "football_afc_cl": {
+        "display": "AFC Champions League",
+        "silo": "football",
+        "patterns": [
+            r"afc\s*champions",
+            r"afc\s*champions\s*league",
+            r"afc\s*champions\s*league\s*(?:two|2|elite)?\b",
+            r"afc\s*cl\b",
+        ],
+    },
     "football_efl_league_one": {
         "display": "EFL League One",
         "silo": "football",
-        "patterns": [r"league\s*one", r"england\s*-\s*league\s*one"],
+        "patterns": [r"(?<!champions\s)(?<!afc\s)\bleague\s*one\b", r"england\s*-\s*league\s*one\b", r"\befl\s*league\s*one\b"],
     },
     "football_efl_league_two": {
         "display": "EFL League Two",
         "silo": "football",
-        "patterns": [r"league\s*two", r"england\s*-\s*league\s*two"],
+        "patterns": [r"(?<!champions\s)(?<!afc\s)\bleague\s*two\b", r"england\s*-\s*league\s*two\b", r"\befl\s*league\s*two\b"],
     },
     "football_copa_libertadores": {
         "display": "Copa Libertadores",
@@ -355,11 +365,6 @@ CANONICAL_LEAGUES = {
         "display": "Saudi Pro League",
         "silo": "football",
         "patterns": [r"saudi\s*pro\s*league", r"\broshn\b"],
-    },
-    "football_afc_cl": {
-        "display": "AFC Champions League",
-        "silo": "football",
-        "patterns": [r"afc\s*champions", r"afc\s*champions\s*league"],
     },
     "football_world_cup_qual": {
         "display": "Qualificazioni Mondiali",
@@ -1150,6 +1155,9 @@ def is_tier_match(m: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
 
         # 6. Coppe Europee & Internazionali
         if country in ("europa", "europe", "mondo", "world", "sud america", "south america", "asia"):
+            if "afc" in league or country == "asia":
+                if any(w in league for w in ("champions league", "afc", "cl", "coppa")):
+                    return True, "football_afc_cl"
             if "champions league" in league or "uwcl" in league:
                 if any(w in league for w in ("donne", "women", "femminile", "uwcl")) or (m.get("_gender") == "+"):
                     return True, "football_uwcl"
