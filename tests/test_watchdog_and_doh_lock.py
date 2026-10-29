@@ -66,3 +66,33 @@ class TestWatchdogAndDoHLock(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(cat._is_running)
         await asyncio.sleep(0.02)
         self.assertTrue(cat._background_task.cancelled() or cat._background_task.done())
+
+    async def test_doh_client_lru_image_cache(self):
+        """Verifies LRU eviction policy, max capacity, and close cleanup in DoH image cache."""
+        client = DoHClient()
+        self.assertEqual(client._image_cache_max, 400)
+
+        # Set a small capacity for testing LRU behavior
+        client._image_cache_max = 3
+        now = 1000.0
+
+        # Insert 3 images
+        client._save_to_image_cache("url1", b"img1", "image/jpeg", now)
+        client._save_to_image_cache("url2", b"img2", "image/jpeg", now)
+        client._save_to_image_cache("url3", b"img3", "image/jpeg", now)
+        self.assertEqual(list(client._image_cache.keys()), ["url1", "url2", "url3"])
+
+        # Access url1 (simulating hit in get_raw), marking it recently used
+        client._image_cache.move_to_end("url1")
+        self.assertEqual(list(client._image_cache.keys()), ["url2", "url3", "url1"])
+
+        # Insert url4 -> url2 must be evicted as the least recently used
+        client._save_to_image_cache("url4", b"img4", "image/jpeg", now)
+        self.assertEqual(len(client._image_cache), 3)
+        self.assertNotIn("url2", client._image_cache)
+        self.assertIn("url1", client._image_cache)
+        self.assertIn("url3", client._image_cache)
+        self.assertIn("url4", client._image_cache)
+
+        await client.close()
+        self.assertEqual(len(client._image_cache), 0)

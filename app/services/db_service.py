@@ -4,6 +4,7 @@ import json
 import logging
 from pathlib import Path
 import sqlite3
+import threading
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -22,10 +23,23 @@ class DBService:
     def __init__(self, db_path: Optional[Path] = None):
         self._db_path = db_path or DB_PATH
         self._fallback_path: Optional[Path] = None
+        self._local = threading.local()
+        self._conn_lock = threading.Lock()
+        self._all_conns: List[sqlite3.Connection] = []
         self._ensure_db()
 
     def _get_connection(self) -> sqlite3.Connection:
         target_path = self._fallback_path or self._db_path
+        cached_conn = getattr(self._local, "conn", None)
+        cached_path = getattr(self._local, "conn_path", None)
+        if cached_conn is not None and cached_path == target_path:
+            try:
+                cached_conn.total_changes
+                return cached_conn
+            except (sqlite3.ProgrammingError, sqlite3.OperationalError):
+                self._local.conn = None
+                self._local.conn_path = None
+
         try:
             try:
                 target_path.parent.mkdir(parents=True, exist_ok=True)
@@ -43,6 +57,10 @@ class DBService:
                 conn.execute("PRAGMA synchronous = NORMAL")
             except Exception:
                 pass
+            self._local.conn = conn
+            self._local.conn_path = target_path
+            with self._conn_lock:
+                self._all_conns.append(conn)
             return conn
         except (sqlite3.OperationalError, OSError, PermissionError) as e:
             if not self._fallback_path:
@@ -59,6 +77,18 @@ class DBService:
                 self._ensure_db(path_to_ensure=self._fallback_path)
                 return self._get_connection()
             raise
+
+    def close(self):
+        """Closes all cached connections across threads."""
+        with self._conn_lock:
+            for conn in self._all_conns:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+            self._all_conns.clear()
+        self._local.conn = None
+        self._local.conn_path = None
 
     def _ensure_db(self, path_to_ensure: Optional[Path] = None):
         """Initializes data directory and database schema."""

@@ -60,6 +60,7 @@ async def lifespan(app: FastAPI):
     await doh_client.close()
     await mandrakodi_service.close()
     await sportvideo_service.close()
+    db_service.close()
 
 # Directories
 BASE_DIR = Path(__file__).resolve().parent

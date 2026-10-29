@@ -12,6 +12,7 @@ class TestDBServiceAsync(unittest.IsolatedAsyncioTestCase):
         self.service = DBService(db_path=self.db_path)
 
     def tearDown(self):
+        self.service.close()
         try:
             self.temp_dir.cleanup()
         except Exception:
@@ -107,6 +108,25 @@ class TestDBServiceAsync(unittest.IsolatedAsyncioTestCase):
 
         m = await self.service.get_match_by_id_async("old_match")
         self.assertIsNone(m)
+
+    def test_connection_pooling_and_close(self):
+        # 1. Connection is reused on the same thread
+        conn1 = self.service._get_connection()
+        conn2 = self.service._get_connection()
+        self.assertIs(conn1, conn2)
+
+        # 2. Total all_conns contains this connection
+        self.assertIn(conn1, self.service._all_conns)
+
+        # 3. Close properly closes and resets thread-local state
+        self.service.close()
+        self.assertIsNone(getattr(self.service._local, "conn", None))
+        self.assertEqual(len(self.service._all_conns), 0)
+
+        # 4. Next call re-creates a clean connection
+        conn3 = self.service._get_connection()
+        self.assertIsNotNone(conn3)
+        self.assertIsNot(conn1, conn3)
 
 
 if __name__ == "__main__":

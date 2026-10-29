@@ -1,4 +1,5 @@
 import asyncio
+from collections import OrderedDict
 import ipaddress
 import logging
 import socket
@@ -82,10 +83,10 @@ class DoHClient:
         self._ssl_context.check_hostname = False
         self._ssl_context.verify_mode = ssl.CERT_NONE
 
-        # In-memory image cache: url -> (content_bytes, content_type, expire_timestamp)
-        self._image_cache: Dict[str, Tuple[bytes, str, float]] = {}
+        # In-memory image cache with authentic LRU eviction: url -> (content_bytes, content_type, expire_timestamp)
+        self._image_cache: OrderedDict[str, Tuple[bytes, str, float]] = OrderedDict()
         self._image_cache_ttl = 86400  # 24 hours
-        self._image_cache_max = 600
+        self._image_cache_max = 400
 
         # Shared singleton transport and client with expanded connection pooling
         self._limits = httpx.Limits(max_keepalive_connections=50, max_connections=100, keepalive_expiry=60.0)
@@ -93,8 +94,18 @@ class DoHClient:
         self._client = httpx.AsyncClient(transport=self._transport, timeout=httpx.Timeout(8.0, connect=4.0))
         self._resolve_lock: asyncio.Lock = asyncio.Lock()
 
+    def _save_to_image_cache(self, url: str, content: bytes, content_type: str, now: float) -> None:
+        """Stores image in RAM with true LRU eviction (Least Recently Used) and bounded capacity."""
+        if url in self._image_cache:
+            self._image_cache.move_to_end(url)
+        elif len(self._image_cache) >= self._image_cache_max:
+            # Pop least recently used item (head of OrderedDict)
+            self._image_cache.popitem(last=False)
+        self._image_cache[url] = (content, content_type, now + self._image_cache_ttl)
+
     async def close(self):
-        """Closes the underlying HTTP clients."""
+        """Closes the underlying HTTP clients and clears image cache."""
+        self._image_cache.clear()
         if hasattr(self, "_doh_client") and self._doh_client and not self._doh_client.is_closed:
             await self._doh_client.aclose()
         if hasattr(self, "_client") and self._client and not self._client.is_closed:
@@ -278,6 +289,7 @@ class DoHClient:
         if url in self._image_cache:
             cached_data, cached_type, expire_at = self._image_cache[url]
             if now < expire_at:
+                self._image_cache.move_to_end(url)
                 return cached_data, cached_type
             else:
                 del self._image_cache[url]
@@ -316,13 +328,7 @@ class DoHClient:
             if response.status_code == 200:
                 content_type = response.headers.get("content-type", "image/webp")
                 content = response.content
-                # Save to cache and manage capacity
-                if len(self._image_cache) >= self._image_cache_max:
-                    # Remove oldest 50 items
-                    keys_to_remove = list(self._image_cache.keys())[:50]
-                    for k in keys_to_remove:
-                        self._image_cache.pop(k, None)
-                self._image_cache[url] = (content, content_type, now + self._image_cache_ttl)
+                self._save_to_image_cache(url, content, content_type, now)
                 return content, content_type
             logger.warning("Raw request to %s returned status %d", url, response.status_code)
         except Exception as e:
@@ -334,7 +340,7 @@ class DoHClient:
                     if response.status_code == 200:
                         content_type = response.headers.get("content-type", "image/webp")
                         content = response.content
-                        self._image_cache[url] = (content, content_type, now + self._image_cache_ttl)
+                        self._save_to_image_cache(url, content, content_type, now)
                         return content, content_type
                 except Exception:
                     pass
