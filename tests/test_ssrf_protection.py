@@ -155,6 +155,13 @@ class TestSSRFProtection(unittest.TestCase):
 
         asyncio.run(check())
 
+    def test_cors_headers_wildcard_no_credentials(self):
+        """Verifies compliant CORS headers: wildcard origin without conflicting credentials."""
+        res = self.client.get("/health", headers={"Origin": "https://web.stremio.com"})
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.headers.get("access-control-allow-origin"), "*")
+        self.assertNotIn("access-control-allow-credentials", res.headers)
+
 
 if __name__ == "__main__":
     unittest.main()
