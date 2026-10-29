@@ -630,6 +630,23 @@ async def get_dynamic_poster(
     if not match:
         match = await db_service.get_match_by_id_async(clean_id)
 
+    # JIT fallback: if tennis match is missing official artwork, generate on-demand before fallback
+    if match and not match.get("poster"):
+        cat = (match.get("category") or match.get("_catalog") or "").lower()
+        silo = (match.get("_silo") or "").lower()
+        if "tennis" in cat or "tennis" in silo:
+            try:
+                from app.services.tennis_poster_service import tennis_poster_service
+                genre = match.get("_genre") or "ATP"
+                title = match.get("title", "")
+                poster_url = await tennis_poster_service.generate_poster(clean_id, title, genre)
+                if poster_url:
+                    match["poster"] = poster_url
+                    catalog_service.update_cached_match(match)
+                    await db_service.update_match_poster_async(clean_id, poster_url)
+            except Exception as e:
+                logger.debug("Failed on-demand tennis poster generation for %s: %s", clean_id, e)
+
     content = await banner_service.get_or_create_poster(
         match=match,
         match_id=clean_id,

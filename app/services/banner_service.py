@@ -199,8 +199,9 @@ class BannerService:
     def invalidate_match(self, match_id: str):
         """Invalidates all cached banners for a given match ID (e.g. when an official poster is assigned)."""
         clean_id = str(match_id).replace("streamsport:", "")
+        sanitized_id = self._sanitize_id(clean_id)
         try:
-            for p in self.banners_dir.glob(f"{clean_id}*.jpg"):
+            for p in self.banners_dir.glob(f"{sanitized_id}*"):
                 try:
                     p.unlink()
                 except Exception:

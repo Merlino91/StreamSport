@@ -8,7 +8,7 @@ import threading
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
-from app.config import DATA_DIR, ENABLE_REPLAYS, PROJECT_DIR
+from app.config import DATA_DIR, DEFAULT_DATA_DIR, ENABLE_REPLAYS, PROJECT_DIR
 
 import os
 import tempfile
