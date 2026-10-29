@@ -169,12 +169,19 @@ class ItalianEPGService:
         re.compile(r"^\s*tg\s*sport\b", re.I),
         re.compile(r"^\s*rassegna\s*stampa\b", re.I),
         re.compile(r"^\s*edizioni\s*tg\b", re.I),
+        re.compile(r"^\s*supertennis\s*tg\b", re.I),
+        re.compile(r"^\s*colpo\s*da\s*campione\b", re.I),
         re.compile(r"^\s*campo\s*aperto\b", re.I),
         re.compile(r"^\s*boat\s*show\b", re.I),
         re.compile(r"^\s*la\s*giovane\s*italia\b", re.I),
         re.compile(r"^\s*ep\.\s*\d+\s*$", re.I),
         re.compile(r"^\s*speciale\b", re.I),
     ]
+
+    REPLAY_PATTERN = re.compile(
+        r"(\b(?:solo\s+repl(?:ica)?|in\s+replica|replica)\b|\[(?:solo repl|replica|repl|r)\]|\((?:solo repl|replica|repl|r)\))",
+        re.I,
+    )
 
     EVENT_KEYWORDS = re.compile(
         r"\b(vs|v|\-|\bep\b|gp|gara|qualifiche|sprint|fp[1-3]|warm\s*up|practice|atp|wta|padel|masters|slam|challenger|giro|tour|maratona|mondiali|europei|giornata|sessione|finale|semifinale|quarti|round|match|open|cup|coppa|league|trophy|championship|serie\s*a\b|serie\s*b\b|serie\s*c\b|calcio|pallavolo|volley|basket|pallacanestro|rugby|judo|scherma|boxe|ufc|motogp|formula\s*1)\b",
@@ -190,6 +197,17 @@ class ItalianEPGService:
         self._cached_matches: List[Dict[str, Any]] = []
         self._last_fetch_time: float = 0.0
         self._fetch_lock = asyncio.Lock()
+
+    @classmethod
+    def _is_replay_event(cls, title: str, synopsis: str = "") -> bool:
+        """Returns True if the event title or synopsis explicitly indicates a replay / rerun."""
+        t = (title or "").strip()
+        s = (synopsis or "").strip()
+        if cls.REPLAY_PATTERN.search(t):
+            return True
+        if s and re.search(r"\b(?:in\s+replica|replica\s+delle?|offre\s+in\s+replica)\b", s, re.I):
+            return True
+        return False
 
     @classmethod
     def _is_noise_event(cls, title: str) -> bool:
@@ -426,10 +444,12 @@ class ItalianEPGService:
             ch_id, meta, events = res
             is_generalist = ch_id in self.SKY_GENERALIST_CHANNELS
             ch_name = meta.get("name", "Sky Sport")
+            channel_matches: List[Dict[str, Any]] = []
 
             for ev in events:
                 raw_title = ev.get("eventTitle") or ""
-                if not raw_title or self._is_noise_event(raw_title):
+                synopsis = ev.get("eventSynopsis") or ""
+                if not raw_title or self._is_noise_event(raw_title) or self._is_replay_event(raw_title, synopsis):
                     continue
 
                 content = ev.get("content", {})
@@ -449,11 +469,17 @@ class ItalianEPGService:
 
                 # Parse date
                 st_str = ev.get("starttime")  # ISO UTC e.g. 2026-10-13T14:30:00Z
+                et_str = ev.get("endtime")
                 if not st_str:
                     continue
                 try:
                     dt = datetime.datetime.fromisoformat(st_str.replace("Z", "+00:00"))
                     date_ms = int(dt.timestamp() * 1000)
+                    end_date_ms = (
+                        int(datetime.datetime.fromisoformat(et_str.replace("Z", "+00:00")).timestamp() * 1000)
+                        if et_str
+                        else (date_ms + 120 * 60 * 1000)
+                    )
                 except Exception:
                     continue
 
@@ -464,7 +490,6 @@ class ItalianEPGService:
                     continue
 
                 # Category & Silo
-                synopsis = ev.get("eventSynopsis") or ""
                 sim_info = get_simulcast_info(title, raw_title)
                 if sim_info:
                     cat, silo = sim_info["silo"], sim_info["silo"]
@@ -508,6 +533,23 @@ class ItalianEPGService:
                     if sky_ch:
                         existing_sky_ids.add(sky_ch)
 
+                # Contiguous session block merging on the same channel (e.g. 4 consecutive blocks of LIVE WTA 500 Tokyo)
+                if channel_matches and not teams_dict:
+                    prev = channel_matches[-1]
+                    if not prev.get("teams"):
+                        prev_title = prev.get("title", "").strip().lower()
+                        curr_title = title.strip().lower()
+                        prev_end = prev.get("end_date") or (prev.get("date", 0) + 120 * 60 * 1000)
+                        if prev_title == curr_title and abs(date_ms - prev_end) <= 25 * 60 * 1000 and date_ms >= prev.get("date", 0):
+                            prev["end_date"] = max(prev.get("end_date", 0), end_date_ms)
+                            exist_src_ids = {str(s.get("id")) for s in prev.get("sources", [])}
+                            for s in sources:
+                                if str(s.get("id")) not in exist_src_ids:
+                                    prev["sources"].append(s)
+                                    exist_src_ids.add(str(s.get("id")))
+                            logger.debug("Merged contiguous EPG session block '%s' on channel %s (%s)", title, ch_id, ch_name)
+                            continue
+
                 slug_title = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")
                 match_id = f"sky_{ch_id}_{slug_title}_{int(date_ms / 1000)}"
 
@@ -543,6 +585,7 @@ class ItalianEPGService:
                     "competition": comp,
                     "_competition": comp,
                     "date": date_ms,
+                    "end_date": end_date_ms,
                     "sources": sources,
                     "popular": False,
                     "poster": sky_poster,
@@ -552,7 +595,9 @@ class ItalianEPGService:
                 if teams_dict:
                     match_obj["teams"] = teams_dict
 
-                matches.append(match_obj)
+                channel_matches.append(match_obj)
+
+            matches.extend(channel_matches)
 
         return matches
 
@@ -590,11 +635,13 @@ class ItalianEPGService:
             ch_id, meta, events = res
             is_generalist = ch_id in self.TIVUSAT_GENERALIST_CHANNELS
             ch_name = meta.get("name", "Tivusat")
+            channel_matches: List[Dict[str, Any]] = []
 
             for ev in events:
                 prog = ev.get("program", {})
                 raw_title = prog.get("title") or ""
-                if not raw_title or self._is_noise_event(raw_title):
+                synopsis = prog.get("description") or ""
+                if not raw_title or self._is_noise_event(raw_title) or self._is_replay_event(raw_title, synopsis):
                     continue
 
                 categories = prog.get("categories") or []
@@ -609,11 +656,21 @@ class ItalianEPGService:
 
                 # Parse date_start (Rome local string: 'DD-MM-YYYY HH:MM')
                 date_str = ev.get("date_start")
+                date_end_str = ev.get("date_end")
                 if not date_str:
                     continue
                 try:
                     dt = datetime.datetime.strptime(date_str, "%d-%m-%Y %H:%M").replace(tzinfo=tz_rome)
                     date_ms = int(dt.timestamp() * 1000)
+                    end_date_ms = None
+                    if date_end_str:
+                        try:
+                            dt_end = datetime.datetime.strptime(date_end_str, "%d-%m-%Y %H:%M").replace(tzinfo=tz_rome)
+                            end_date_ms = int(dt_end.timestamp() * 1000)
+                        except Exception:
+                            pass
+                    if not end_date_ms:
+                        end_date_ms = date_ms + 120 * 60 * 1000
                 except Exception:
                     continue
 
@@ -624,7 +681,6 @@ class ItalianEPGService:
                     continue
 
                 # Category & Silo
-                synopsis = prog.get("description") or ""
                 sim_info = get_simulcast_info(title, raw_title)
                 if sim_info:
                     cat, silo = sim_info["silo"], sim_info["silo"]
@@ -672,6 +728,23 @@ class ItalianEPGService:
                     if sky_ch:
                         existing_sky_ids.add(sky_ch)
 
+                # Contiguous session block merging on the same channel
+                if channel_matches and not teams_dict:
+                    prev = channel_matches[-1]
+                    if not prev.get("teams"):
+                        prev_title = prev.get("title", "").strip().lower()
+                        curr_title = title.strip().lower()
+                        prev_end = prev.get("end_date") or (prev.get("date", 0) + 120 * 60 * 1000)
+                        if prev_title == curr_title and abs(date_ms - prev_end) <= 25 * 60 * 1000 and date_ms >= prev.get("date", 0):
+                            prev["end_date"] = max(prev.get("end_date", 0), end_date_ms)
+                            exist_src_ids = {str(s.get("id")) for s in prev.get("sources", [])}
+                            for s in sources:
+                                if str(s.get("id")) not in exist_src_ids:
+                                    prev["sources"].append(s)
+                                    exist_src_ids.add(str(s.get("id")))
+                            logger.debug("Merged contiguous Tivusat EPG session block '%s' on channel %s (%s)", title, ch_id, ch_name)
+                            continue
+
                 slug_title = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")
                 match_id = f"tivusat_{ch_id}_{slug_title}_{int(date_ms / 1000)}"
 
@@ -690,15 +763,21 @@ class ItalianEPGService:
                     "competition": comp,
                     "_competition": comp,
                     "date": date_ms,
+                    "end_date": end_date_ms,
                     "sources": sources,
                     "popular": False,
                     "poster": tivu_poster,
                     "background": tivu_poster,
+                    "eventSynopsis": synopsis,
                 }
                 if teams_dict:
                     match_obj["teams"] = teams_dict
 
-                matches.append(match_obj)
+                channel_matches.append(match_obj)
+
+            matches.extend(channel_matches)
+
+        return matches
 
         return matches
 
@@ -766,18 +845,30 @@ class ItalianEPGService:
                 m_title = m.get("title", "")
                 m_silo = m.get("_silo", "")
 
+                is_m_tv = not bool(m.get("teams"))
                 duplicate = None
                 for existing in merged_epg:
                     if existing.get("_silo") != m_silo:
                         continue
+                    is_ex_tv = not bool(existing.get("teams"))
+
+                    # 1. Standard concurrent simulcast (within 30m window)
                     if abs(existing.get("date", 0) - m_date) < (30 * 60 * 1000):
-                        # Same time window and matching title/teams
                         if existing.get("title") == m_title:
                             duplicate = existing
                             break
-                        # Check structured teams match
                         if m.get("teams") and existing.get("teams") and m.get("teams") == existing.get("teams"):
                             duplicate = existing
+                            break
+
+                    # 2. Non-1v1 TV program / session rerun (identical title within 24h, e.g. Abu Dhabi Judo 01:20 vs 22:15)
+                    elif is_m_tv and is_ex_tv and existing.get("title") == m_title:
+                        time_diff = abs(existing.get("date", 0) - m_date)
+                        if time_diff <= 24 * 3600 * 1000:
+                            duplicate = existing
+                            if m_date < existing.get("date", 0):
+                                existing["date"] = m_date
+                                existing["id"] = m.get("id")
                             break
 
                 if duplicate:

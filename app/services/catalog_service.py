@@ -962,7 +962,13 @@ class CatalogService:
             return False
 
         time_diff = abs(d1 - d2)
-        if time_diff > 90 * 60 * 1000:
+        has_teams_or_vs = bool(
+            m1.get("teams") or m2.get("teams")
+            or " vs " in (m1.get("title") or "").lower()
+            or " vs " in (m2.get("title") or "").lower()
+        )
+        max_time_window = 90 * 60 * 1000 if has_teams_or_vs else 24 * 3600 * 1000
+        if time_diff > max_time_window:
             return False
 
         # Guard: Cross-silo matches must NEVER merge
@@ -992,11 +998,18 @@ class CatalogService:
             if w1 and w2 and (w1 & w2):
                 return True
 
-        # Signal 2: Identical normalized title (within 45 min)
+        # Signal 2: Identical normalized title
         t1 = (m1.get("title") or "").strip().lower()
         t2 = (m2.get("title") or "").strip().lower()
-        if t1 and t2 and t1 == t2 and time_diff <= 45 * 60 * 1000:
-            return True
+        if t1 and t2 and t1 == t2:
+            # If 1v1 match with teams: require <= 45 min
+            if (m1.get("teams") and m2.get("teams")) or (" vs " in t1 or " - " in t1):
+                if time_diff <= 45 * 60 * 1000:
+                    return True
+            else:
+                # TV program / session without opposing teams: identical title within 24h is a rerun/replica!
+                if time_diff <= 24 * 3600 * 1000:
+                    return True
 
         # Signal 3: Time <= 45 min + team token overlap with acronym expansion
         if time_diff <= 45 * 60 * 1000:

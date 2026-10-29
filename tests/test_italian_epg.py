@@ -1,4 +1,5 @@
 import unittest
+import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.services.italian_epg_service import ItalianEPGService
@@ -8,7 +9,7 @@ MOCK_SKY_EVENTS_RESP = {
     "events": [
         # Match 1: Calcio on Sky Sport Calcio (Dedicated)
         {
-            "eventTitle": "Manchester United - Tottenham (Solo Repl)",
+            "eventTitle": "Manchester United - Tottenham (Diretta)",
             "eventSynopsis": "Premier League 2026/2027",
             "starttime": "2026-10-13T16:00:00Z",
             "endtime": "2026-10-13T18:00:00Z",
@@ -538,6 +539,90 @@ class TestItalianEPGService(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(matched_ev["sources"]), 1)
         self.assertEqual(matched_ev["sources"][0]["provider"], "mandrakodi")
         self.assertEqual(matched_ev["sources"][0]["id"], "mandra_sky_251")
+
+    def test_replay_event_detection(self):
+        # Titles with explicit replay markers
+        self.assertTrue(self.service._is_replay_event("Abu Dhabi: 1a giornata (Replica)"))
+        self.assertTrue(self.service._is_replay_event("WTA 500 Tokyo (Solo Repl)"))
+        self.assertTrue(self.service._is_replay_event("Gara GP Indonesia [R]"))
+        self.assertTrue(self.service._is_replay_event("Race Play", "EQU TV offre in replica le corse"))
+        
+        # Live / premiere events must not be flagged
+        self.assertFalse(self.service._is_replay_event("LIVE WTA 500 Tokyo"))
+        self.assertFalse(self.service._is_replay_event("Abu Dhabi: 1a giornata", "Le azioni dei Grand Slam del Judo."))
+        self.assertFalse(self.service._is_replay_event("Campionato Saudita Al Nassr-Al Kholood (diretta)"))
+
+    @patch("app.services.italian_epg_service.tvvoo_service")
+    async def test_contiguous_tennis_session_merging(self, mock_tvvoo):
+        # Mock playable stream on SuperTennis (ch_id 6000)
+        mock_tvvoo.get_channel_streams.return_value = [{"canonical": "supertennis", "tag": "c", "url": "https://test"}]
+        mock_tvvoo.get_canonical_from_sky_id.return_value = "supertennis"
+
+        service = ItalianEPGService()
+        mock_client = AsyncMock()
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        # 3 contiguous blocks of LIVE WTA 500 Tokyo on SuperTennis
+        mock_resp.json.return_value = {
+            "events": [
+                {
+                    "eventTitle": "LIVE WTA 500 Tokyo",
+                    "starttime": "2026-10-30T02:00:00Z",
+                    "endtime": "2026-10-30T04:00:00Z",
+                    "content": {"genre": {"name": "Sport"}, "subgenre": {"name": "Tennis"}},
+                },
+                {
+                    "eventTitle": "LIVE WTA 500 Tokyo",
+                    "starttime": "2026-10-30T04:00:00Z",
+                    "endtime": "2026-10-30T06:00:00Z",
+                    "content": {"genre": {"name": "Sport"}, "subgenre": {"name": "Tennis"}},
+                },
+                {
+                    "eventTitle": "LIVE WTA 500 Tokyo",
+                    "starttime": "2026-10-30T06:00:00Z",
+                    "endtime": "2026-10-30T08:00:00Z",
+                    "content": {"genre": {"name": "Sport"}, "subgenre": {"name": "Tennis"}},
+                },
+            ]
+        }
+        def mock_tennis_get(url, **kwargs):
+            resp = MagicMock()
+            resp.status_code = 200
+            if "channels=6000" in url:
+                resp.json.return_value = mock_resp.json.return_value
+            else:
+                resp.json.return_value = {"events": []}
+            return resp
+
+        mock_client.get.side_effect = mock_tennis_get
+
+        parsed = await service._fetch_sky_events(mock_client, "2026-10-30T00:00:00Z", "2026-10-30T23:59:59Z")
+        tokyo_events = [e for e in parsed if "Tokyo" in e.get("title", "")]
+        # Must be merged into exactly 1 continuous card
+        self.assertEqual(len(tokyo_events), 1)
+        # End date must cover the full 6 hours (02:00 to 08:00)
+        self.assertEqual(tokyo_events[0]["end_date"], int(datetime.datetime.fromisoformat("2026-10-30T08:00:00+00:00").timestamp() * 1000))
+
+    def test_epg_internal_dedup_rerun_within_24h(self):
+        from app.services.catalog_service import catalog_service
+
+        m1 = {
+            "id": "sky_9093_abu_dhabi_1",
+            "title": "Abu Dhabi: 1a giornata",
+            "date": 1793282100000,  # 22:15
+            "_silo": "altri_sport",
+            "category": "altri_sport",
+        }
+        m2 = {
+            "id": "sky_11909_abu_dhabi_1_rerun",
+            "title": "Abu Dhabi: 1a giornata",
+            "date": 1793308500000,  # 01:20 (3h later)
+            "_silo": "altri_sport",
+            "category": "altri_sport",
+        }
+        # catalog_service are_post_validation_duplicates must detect rerun within 24h
+        self.assertTrue(catalog_service.are_post_validation_duplicates(m1, m2))
+
 
 
 if __name__ == "__main__":
