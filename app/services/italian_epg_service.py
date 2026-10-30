@@ -174,6 +174,9 @@ class ItalianEPGService:
         re.compile(r"^\s*campo\s*aperto\b", re.I),
         re.compile(r"^\s*boat\s*show\b", re.I),
         re.compile(r"^\s*la\s*giovane\s*italia\b", re.I),
+        re.compile(r"^\s*circolando\b", re.I),
+        re.compile(r"^\s*fuoco\b", re.I),
+        re.compile(r"^\s*tennis\s*atp\s*tour\s*this\s*week\b", re.I),
         re.compile(r"^\s*ep\.\s*\d+\s*$", re.I),
         re.compile(r"^\s*speciale\b", re.I),
     ]
@@ -199,51 +202,147 @@ class ItalianEPGService:
         self._fetch_lock = asyncio.Lock()
 
     @classmethod
+    async def _get_active_tennis_cities(cls) -> Set[str]:
+        """
+        Retrieves the set of lowercase city names of active tennis tournaments today/tomorrow
+        from Diretta.it / Flashscore official calendar.
+        """
+        cities: Set[str] = set()
+        try:
+            from app.services.diretta_service import diretta_service
+            events = getattr(diretta_service, "_cached_events", None)
+            if not events:
+                try:
+                    events = await asyncio.wait_for(diretta_service.get_events(), timeout=3.0)
+                except Exception:
+                    events = []
+            for e in (events or []):
+                if (e.get("_silo") or e.get("category")) == "tennis":
+                    comp = e.get("competition") or e.get("canonical_competition") or ""
+                    # e.g. "ATP - SINGOLARE: Vienna (Austria), cemento"
+                    m = re.search(r":\s*([A-Za-z\s]+?)(?:\s*\(|,|$)", comp)
+                    if m:
+                        c = m.group(1).strip().lower()
+                        if c and len(c) >= 3:
+                            cities.add(c)
+                            for sub_word in c.split():
+                                if len(sub_word) >= 4:
+                                    cities.add(sub_word)
+                    _, c2 = cls._extract_tennis_circuit_and_city(comp)
+                    if c2:
+                        cities.add(c2.lower())
+        except Exception as exc:
+            logger.debug("Italian EPG: could not retrieve active tennis cities from Diretta: %s", exc)
+        return cities
+
+    @classmethod
+    def _is_replay_event(
+        cls,
+        raw_title: str,
+        synopsis: str = "",
+        content_url: str = "",
+        is_live: bool = False,
+        active_tennis_cities: Optional[Set[str]] = None,
+    ) -> bool:
+        """
+        Returns True if the event is an archival replay (replica d'archivio) that
+        must be discarded rather than creating a catalog card.
+        """
+        if is_live:
+            return False
+
+        t = (raw_title or "").strip()
+        t_lower = t.lower()
+        s = (synopsis or "").strip()
+        s_lower = s.lower()
+        url_lower = (content_url or "").lower()
+
+        # 1. Explicit replay tags in title or synopsis
+        if cls.REPLAY_PATTERN.search(t):
+            return True
+        if s and re.search(r"\b(?:in\s+replica|replica\s+delle?|offre\s+in\s+replica)\b", s, re.I):
+            return True
+
+        # 2. Previous year detection (e.g. 'ATP 1000 Parigi Bercy 2025' when current year is 2026)
+        now_year = datetime.datetime.now().year
+        m_year = re.search(r"\b(20[12][0-9])\b", t)
+        if m_year and int(m_year.group(1)) < now_year:
+            return True
+        m_year_syn = re.search(r"\b(20[12][0-9])\b", s)
+        if m_year_syn and int(m_year_syn.group(1)) < now_year:
+            return True
+
+        # 3. Tennis tournaments: check against active tournaments on Diretta.it today
+        is_tennis = any(k in t_lower for k in ("wta", "atp", "masters", "slam", "tennis", "padel"))
+        if is_tennis and active_tennis_cities:
+            search_text = f"{t_lower} {s_lower} {url_lower}"
+            _, city = cls._extract_tennis_circuit_and_city(t)
+            if not city:
+                _, city = cls._extract_tennis_circuit_and_city(search_text)
+
+            # If a specific city/venue was extracted and is NOT in active cities today:
+            if city and city not in active_tennis_cities:
+                return True
+
+            # If title or URL mentions an episode of a tournament and NO active city matches:
+            if re.search(r"\b(?:ep\.\s*\d+|stagione\s*\d+)\b", t, re.I):
+                if not any(ac in search_text for ac in active_tennis_cities):
+                    return True
+
+        return False
+
+    @classmethod
     def _is_differita_or_sintesi(
         cls,
         raw_title: str,
         synopsis: str = "",
         teams_dict: Optional[Dict[str, Any]] = None,
+        is_live: bool = False,
+        active_tennis_cities: Optional[Set[str]] = None,
+        content_url: str = "",
     ) -> bool:
         """
-        Determines whether an EPG sports broadcast is a delayed rerun or summary
-        rather than a live first-run broadcast.
+        Determines whether an EPG sports broadcast is a genuine delayed broadcast or summary
+        of an ACTIVE current tournament/competition (rather than a live broadcast or an archival replay).
         """
+        if is_live:
+            return False
+
+        # If it's an archival replay, it is NOT a differita
+        if cls._is_replay_event(
+            raw_title,
+            synopsis=synopsis,
+            content_url=content_url,
+            is_live=is_live,
+            active_tennis_cities=active_tennis_cities,
+        ):
+            return False
+
         t_lower = (raw_title or "").lower()
         s_lower = (synopsis or "").lower()
+        url_lower = (content_url or "").lower()
 
-        # 1. Explicit tags in title or synopsis
-        if cls.REPLAY_PATTERN.search(raw_title) or any(k in t_lower for k in ("differita", "sintesi", "highlights", "solo repl")):
+        # 1. Explicit differita/sintesi tags in title or synopsis
+        if any(k in t_lower for k in ("differita", "sintesi", "highlights")):
             return True
-        if any(k in s_lower for k in ("in replica", "differita", "sintesi", "offre in replica", "replica delle")):
-            return True
-
-        # 2. Previous year in title (e.g. 'ATP 1000 Parigi Bercy 2025' when current year is 2026)
-        now_year = datetime.datetime.now().year
-        m_year = re.search(r"\b(20[12][0-9])\b", raw_title)
-        if m_year and int(m_year.group(1)) < now_year:
+        if any(k in s_lower for k in ("in differita", "differita", "sintesi")):
             return True
 
-        # 3. Multicourt tournament sessions without teams (e.g. 'WTA 500 Tokyo 2026', 'WTA 250 Guangzhou 2026')
-        # In Sky / SuperTennis palinsesto, live sessions always contain 'LIVE' or 'DIRETTA'.
-        # Sessions without 'LIVE' / 'DIRETTA' are delayed tournament summaries.
-        if not teams_dict:
-            has_live = any(k in t_lower for k in ("live", "diretta"))
-            is_session = any(k in t_lower for k in ("wta", "atp", "masters", "slam"))
-            if is_session and not has_live:
+        # 2. Multicourt tournament sessions without 1v1 teams (e.g. 'WTA 500 Tokyo 2026', 'WTA 250 Guangzhou 2026')
+        is_session = any(k in t_lower for k in ("wta", "atp", "masters", "slam", "tennis"))
+        if is_session and not is_live:
+            if active_tennis_cities:
+                search_text = f"{t_lower} {s_lower} {url_lower}"
+                _, city = cls._extract_tennis_circuit_and_city(raw_title)
+                if not city:
+                    _, city = cls._extract_tennis_circuit_and_city(search_text)
+                if city and city in active_tennis_cities:
+                    return True
+                if any(ac in search_text for ac in active_tennis_cities):
+                    return True
+            else:
                 return True
 
-        return False
-
-    @classmethod
-    def _is_replay_event(cls, title: str, synopsis: str = "") -> bool:
-        """Returns True if the event title or synopsis explicitly indicates a replay / rerun."""
-        t = (title or "").strip()
-        s = (synopsis or "").strip()
-        if cls.REPLAY_PATTERN.search(t):
-            return True
-        if s and re.search(r"\b(?:in\s+replica|replica\s+delle?|offre\s+in\s+replica)\b", s, re.I):
-            return True
         return False
 
     @classmethod
@@ -455,7 +554,13 @@ class ItalianEPGService:
 
         return "altri_sport", "altri_sport"
 
-    async def _fetch_sky_events(self, client: httpx.AsyncClient, iso_from: str, iso_to: str) -> List[Dict[str, Any]]:
+    async def _fetch_sky_events(
+        self,
+        client: httpx.AsyncClient,
+        iso_from: str,
+        iso_to: str,
+        active_tennis_cities: Optional[Set[str]] = None,
+    ) -> List[Dict[str, Any]]:
         """Queries Sky Italia API concurrently for each target channel."""
         matches: List[Dict[str, Any]] = []
 
@@ -490,10 +595,31 @@ class ItalianEPGService:
                     continue
 
                 content = ev.get("content", {})
+                content_url = content.get("url") or ""
                 genre_dict = content.get("genre") or {}
                 subgenre_dict = content.get("subgenre") or {}
                 genre_name = genre_dict.get("name") if isinstance(genre_dict, dict) else ""
                 subgenre_name = subgenre_dict.get("name") if isinstance(subgenre_dict, dict) else ""
+
+                # Live status determination
+                prog_hl = ev.get("programHighlights")
+                is_live = (
+                    prog_hl == "L"
+                    or bool(re.search(r"\b(live|diretta)\b", raw_title, re.I))
+                    or "/live-" in content_url
+                    or "/diretta-" in content_url
+                )
+
+                # Replay Event Filter: discard archival replays, past years, or inactive tournaments
+                if self._is_replay_event(
+                    raw_title,
+                    synopsis=synopsis,
+                    content_url=content_url,
+                    is_live=is_live,
+                    active_tennis_cities=active_tennis_cities,
+                ):
+                    logger.debug("EPG Filter: scartata replica d'archivio '%s'", raw_title)
+                    continue
 
                 # On generalist channels (Rai 1, etc.), strictly require sports genre
                 if is_generalist:
@@ -527,7 +653,14 @@ class ItalianEPGService:
                     continue
 
                 # Differita / Sintesi detection
-                is_diff = self._is_differita_or_sintesi(raw_title, synopsis, teams_dict)
+                is_diff = self._is_differita_or_sintesi(
+                    raw_title,
+                    synopsis=synopsis,
+                    teams_dict=teams_dict,
+                    is_live=is_live,
+                    active_tennis_cities=active_tennis_cities,
+                    content_url=content_url,
+                )
                 if is_diff and not title.startswith("[Differita / Sintesi]"):
                     title = f"[Differita / Sintesi] {title}"
 
@@ -622,6 +755,8 @@ class ItalianEPGService:
                     "id": match_id,
                     "_provider": "italian_epg",
                     "title": title,
+                    "is_live": is_live,
+                    "_is_live": is_live,
                     "is_differita": is_diff,
                     "_is_differita": is_diff,
                     "category": cat,
@@ -655,7 +790,12 @@ class ItalianEPGService:
 
         return matches
 
-    async def _fetch_tivusat_events(self, client: httpx.AsyncClient, target_dates: List[str]) -> List[Dict[str, Any]]:
+    async def _fetch_tivusat_events(
+        self,
+        client: httpx.AsyncClient,
+        target_dates: List[str],
+        active_tennis_cities: Optional[Set[str]] = None,
+    ) -> List[Dict[str, Any]]:
         """Queries Tivùsat Guida TV API for sport channels across today and tomorrow."""
         matches: List[Dict[str, Any]] = []
         all_tivu_channels = {**self.TIVUSAT_SPORTS_CHANNELS, **self.TIVUSAT_GENERALIST_CHANNELS}
@@ -708,6 +848,20 @@ class ItalianEPGService:
                     # On generalist channels, must be marked as sport
                     continue
 
+                # Live status determination
+                is_live = bool(re.search(r"\b(live|diretta)\b", raw_title, re.I))
+
+                # Replay Event Filter: discard archival replays, past years, or inactive tournaments
+                if self._is_replay_event(
+                    raw_title,
+                    synopsis=synopsis,
+                    content_url="",
+                    is_live=is_live,
+                    active_tennis_cities=active_tennis_cities,
+                ):
+                    logger.debug("Tivusat EPG Filter: scartata replica d'archivio '%s'", raw_title)
+                    continue
+
                 # Parse date_start (Rome local string: 'DD-MM-YYYY HH:MM')
                 date_str = ev.get("date_start")
                 date_end_str = ev.get("date_end")
@@ -735,7 +889,13 @@ class ItalianEPGService:
                     continue
 
                 # Differita / Sintesi detection
-                is_diff = self._is_differita_or_sintesi(raw_title, synopsis, teams_dict)
+                is_diff = self._is_differita_or_sintesi(
+                    raw_title,
+                    synopsis=synopsis,
+                    teams_dict=teams_dict,
+                    is_live=is_live,
+                    active_tennis_cities=active_tennis_cities,
+                )
                 if is_diff and not title.startswith("[Differita / Sintesi]"):
                     title = f"[Differita / Sintesi] {title}"
 
@@ -817,6 +977,8 @@ class ItalianEPGService:
                     "id": match_id,
                     "_provider": "italian_epg",
                     "title": title,
+                    "is_live": is_live,
+                    "_is_live": is_live,
                     "is_differita": is_diff,
                     "_is_differita": is_diff,
                     "category": cat,
@@ -892,10 +1054,11 @@ class ItalianEPGService:
                 "Accept": "application/json",
             }
 
+            active_tennis_cities = await self._get_active_tennis_cities()
             try:
                 async with httpx.AsyncClient(timeout=15.0, headers=headers) as client:
-                    sky_task = self._fetch_sky_events(client, iso_from, iso_to)
-                    tivu_task = self._fetch_tivusat_events(client, target_dates)
+                    sky_task = self._fetch_sky_events(client, iso_from, iso_to, active_tennis_cities)
+                    tivu_task = self._fetch_tivusat_events(client, target_dates, active_tennis_cities)
                     sky_res, tivu_res = await asyncio.gather(sky_task, tivu_task, return_exceptions=True)
 
                     fetched_sky = sky_res if isinstance(sky_res, list) else []

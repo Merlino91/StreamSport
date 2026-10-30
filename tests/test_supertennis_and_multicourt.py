@@ -240,18 +240,90 @@ class TestSuperTennisAndMulticourt(unittest.TestCase):
             self.assertEqual(lw, 220)
 
     def test_differita_sintesi_tagging(self):
-        """EPG events without LIVE or from previous years are tagged [Differita / Sintesi]."""
-        # 1. Live event retains LIVE
-        self.assertFalse(italian_epg_service._is_differita_or_sintesi("LIVE WTA 500 Tokyo"))
-        self.assertFalse(italian_epg_service._is_differita_or_sintesi("LIVE WTA 250 Guangzhou"))
+        """EPG events without LIVE for active tournaments are tagged [Differita / Sintesi]; replays are discarded."""
+        # 1. Live event retains LIVE (not replay, not differita)
+        self.assertFalse(italian_epg_service._is_differita_or_sintesi("LIVE WTA 500 Tokyo", is_live=True))
+        self.assertFalse(italian_epg_service._is_differita_or_sintesi("LIVE WTA 250 Guangzhou", is_live=True))
+        self.assertFalse(italian_epg_service._is_replay_event("LIVE WTA 500 Tokyo", is_live=True))
 
-        # 2. Tournament session without LIVE is tagged differita/sintesi
-        self.assertTrue(italian_epg_service._is_differita_or_sintesi("WTA 500 Tokyo 2026"))
-        self.assertTrue(italian_epg_service._is_differita_or_sintesi("WTA 250 Guangzhou 2026"))
+        # 2. Tournament session without LIVE for active tournaments is tagged differita/sintesi
+        active_cities = {"tokyo", "guangzhou", "vienna", "basilea"}
+        self.assertTrue(italian_epg_service._is_differita_or_sintesi("WTA 500 Tokyo 2026", active_tennis_cities=active_cities))
+        self.assertTrue(italian_epg_service._is_differita_or_sintesi("WTA 250 Guangzhou 2026", active_tennis_cities=active_cities))
+        self.assertFalse(italian_epg_service._is_replay_event("WTA 500 Tokyo 2026", active_tennis_cities=active_cities))
 
-        # 3. Previous year tournament is tagged differita/sintesi
-        self.assertTrue(italian_epg_service._is_differita_or_sintesi("ATP 1000 Parigi Bercy 2025 - Ep. 5"))
-        self.assertTrue(italian_epg_service._is_differita_or_sintesi("Nitto ATP Finals Torino 2025"))
+        # 3. Previous year tournament is an archival replay, NOT differita
+        self.assertTrue(italian_epg_service._is_replay_event("ATP 1000 Parigi Bercy 2025 - Ep. 5"))
+        self.assertFalse(italian_epg_service._is_differita_or_sintesi("ATP 1000 Parigi Bercy 2025 - Ep. 5"))
+        self.assertTrue(italian_epg_service._is_replay_event("Nitto ATP Finals Torino 2025"))
+        self.assertFalse(italian_epg_service._is_differita_or_sintesi("Nitto ATP Finals Torino 2025"))
+
+        # 4. Outdated tournament from current year (e.g. Berlino in October) is an archival replay
+        self.assertTrue(italian_epg_service._is_replay_event("WTA 500 Berlino 2026", active_tennis_cities=active_cities))
+        self.assertFalse(italian_epg_service._is_differita_or_sintesi("WTA 500 Berlino 2026", active_tennis_cities=active_cities))
+        self.assertTrue(italian_epg_service._is_replay_event("WTA 500 Berlino 2026 - Ep. 21 - Linda Noskova vs Jessica Pegula", active_tennis_cities=active_cities))
+        self.assertFalse(italian_epg_service._is_differita_or_sintesi("WTA 500 Berlino 2026 - Ep. 21 - Linda Noskova vs Jessica Pegula", active_tennis_cities=active_cities))
+
+    def test_fetch_sky_events_discards_replays_and_tags_active_differita(self):
+        """Verifies _fetch_sky_events skips archival replays (Parigi Bercy 2025, Berlino 2026) while retaining Tokyo differita and live."""
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "events": [
+                {
+                    "eventTitle": "LIVE WTA 500 Tokyo",
+                    "starttime": "2026-10-31T05:00:00Z",
+                    "endtime": "2026-10-31T08:00:00Z",
+                    "content": {"genre": {"name": "Sport"}, "subgenre": {"name": "Tennis"}},
+                },
+                {
+                    "eventTitle": "WTA 500 Tokyo 2026",
+                    "starttime": "2026-10-31T14:00:00Z",
+                    "endtime": "2026-10-31T17:00:00Z",
+                    "content": {"genre": {"name": "Sport"}, "subgenre": {"name": "Tennis"}},
+                },
+                {
+                    "eventTitle": "ATP 1000 Parigi Bercy 2025 - Ep. 2 - Alexander Zverev vs Daniil Medvedev",
+                    "starttime": "2026-10-31T17:00:00Z",
+                    "endtime": "2026-10-31T19:00:00Z",
+                    "content": {"genre": {"name": "Sport"}, "subgenre": {"name": "Tennis"}},
+                },
+                {
+                    "eventTitle": "WTA 500 Berlino 2026 - Ep. 21 - Linda Noskova vs Jessica Pegula WTA 500 Berlino Finale # 1",
+                    "starttime": "2026-10-31T19:00:00Z",
+                    "endtime": "2026-10-31T21:00:00Z",
+                    "content": {"genre": {"name": "Sport"}, "subgenre": {"name": "Tennis"}},
+                },
+            ]
+        }
+
+        active_cities = {"tokyo", "guangzhou"}
+        with patch.object(tvvoo_service, "get_channel_streams", return_value=[{"canonical": "supertennis", "tag": "c", "url": "https://test"}]), \
+             patch.object(tvvoo_service, "get_canonical_from_sky_id", return_value="supertennis"):
+            async def run_fetch():
+                mock_async_client = MagicMock()
+                mock_async_client.get = AsyncMock(return_value=mock_resp)
+                return await italian_epg_service._fetch_sky_events(
+                    mock_async_client,
+                    "2026-10-31T00:00:00Z",
+                    "2026-10-31T23:59:59Z",
+                    active_tennis_cities=active_cities,
+                )
+
+            events = asyncio.run(run_fetch())
+            titles = [e["title"] for e in events]
+
+            # 1. LIVE WTA 500 Tokyo must be present as LIVE
+            self.assertTrue(any("LIVE WTA 500 Tokyo" in t and "[Differita" not in t for t in titles))
+
+            # 2. WTA 500 Tokyo 2026 must be present with [Differita / Sintesi]
+            self.assertTrue(any("[Differita / Sintesi] WTA 500 Tokyo 2026" in t for t in titles))
+
+            # 3. ATP 1000 Parigi Bercy 2025 MUST BE DISCARDED (not in titles)
+            self.assertFalse(any("Parigi Bercy 2025" in t for t in titles))
+
+            # 4. WTA 500 Berlino 2026 MUST BE DISCARDED (not in titles)
+            self.assertFalse(any("Berlino" in t for t in titles))
 
     def test_end_date_sqlite_persistence_and_live_window(self):
         """Verifies end_date persists in SQLite matches table and drives catalog live window (+10 min)."""

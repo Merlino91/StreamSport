@@ -1379,16 +1379,19 @@ class CatalogService:
                 # Ingest certified multicourt tournament sessions and simulcasts from Italian EPG (Sky/Tivùsat)
                 epg_certified_sessions = [
                     m for m in epg_matches
-                    if (
-                        (m.get("_silo") == "tennis" or m.get("category") == "tennis")
-                        and not bool(isinstance(m.get("teams"), dict) and m["teams"].get("home") and m["teams"].get("away"))
-                        and any(k in (m.get("title") or "").lower() for k in ("live", "wta", "atp", "masters", "slam"))
+                    if not m.get("_is_replay") and not m.get("is_replay")
+                    and (
+                        (
+                            (m.get("_silo") == "tennis" or m.get("category") == "tennis")
+                            and not bool(isinstance(m.get("teams"), dict) and m["teams"].get("home") and m["teams"].get("away"))
+                            and any(k in (m.get("title") or "").lower() for k in ("live", "wta", "atp", "masters", "slam"))
+                        )
+                        or (
+                            (m.get("_silo") == "golf" or m.get("category") in ("golf", "altri_sport"))
+                            and not bool(isinstance(m.get("teams"), dict) and m["teams"].get("home") and m["teams"].get("away"))
+                        )
+                        or is_simulcast_event(m.get("title", ""))
                     )
-                    or (
-                        (m.get("_silo") == "golf" or m.get("category") in ("golf", "altri_sport"))
-                        and not bool(isinstance(m.get("teams"), dict) and m["teams"].get("home") and m["teams"].get("away"))
-                    )
-                    or is_simulcast_event(m.get("title", ""))
                 ]
                 if epg_certified_sessions:
                     combined_fresh = self.merge_and_deduplicate_by_silos(combined_fresh, epg_certified_sessions)
