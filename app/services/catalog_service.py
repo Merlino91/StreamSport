@@ -216,9 +216,19 @@ class CatalogService:
     def get_live_window_minutes(cls, match: Dict[str, Any]) -> int:
         """
         Returns the duration in minutes an event remains 'LIVE ORA' after its kickoff/start time.
-        Strictly determined by the canonical SPORT SILO of the event.
-        No complicated tournament or league checks needed: every sport has its standard duration.
+        EPG / Linear broadcast channels respect their exact scheduled broadcast duration
+        (Sequential Channel Handover).
+        Standard silo fallback durations apply when no linear end date is provided.
         """
+        # EPG / Linear broadcast channels: respect actual scheduled broadcast duration
+        d_start = match.get("date", 0)
+        d_end = match.get("end_date", 0)
+        if d_start and d_end and d_end > d_start:
+            delta_mins = int((d_end - d_start) / 60000)
+            if delta_mins > 0:
+                if match.get("_provider") == "italian_epg" or str(match.get("id", "")).startswith(("sky_", "tivusat_")):
+                    return max(15, delta_mins + 5)
+
         silo = cls.get_canonical_silo(match)
 
         # 1. Calcio (Soccer): 160 minutes (~2h 40m covers 90m + halftime + stoppage + extra-time/penalties)

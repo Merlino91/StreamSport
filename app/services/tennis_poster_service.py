@@ -255,18 +255,77 @@ class TennisPosterService:
 
         return self.clean_player_name(t), ""
 
-    @staticmethod
-    def format_short_display_name(full_name: str) -> str:
-        """Formats 'Jannik Sinner' into 'J. SINNER', 'Paolini J.' into 'J. PAOLINI', or doubles 'Garland / Hsieh' into 'GARLAND / HSIEH'."""
+    @classmethod
+    def _extract_single_player_surname(cls, player_name: str) -> str:
+        """
+        Extracts the full surname from various tennis naming formats:
+        - 'Bolelli S.' or 'Bolelli S' -> 'BOLELLI'
+        - 'S. Bolelli' -> 'BOLELLI'
+        - 'Simone Bolelli' -> 'BOLELLI'
+        - 'Bolelli' -> 'BOLELLI'
+        - 'De Minaur A.' -> 'DE MINAUR'
+        - 'Alex De Minaur' -> 'DE MINAUR'
+        - 'Van De Zandschulp B.' -> 'VAN DE ZANDSCHULP'
+        - 'Etcheverry T. M.' or 'Etcheverry T.M.' -> 'ETCHEVERRY'
+        """
+        p = (player_name or "").strip()
+        if not p:
+            return ""
+        parts = p.split()
+        if len(parts) == 1:
+            return parts[0].upper()
+
+        # 1. Trailing initials: 'Bolelli S.', 'Etcheverry T. M.', 'Etcheverry T.M.'
+        trailing_initials = 0
+        for tok in reversed(parts):
+            tok_clean = tok.replace(".", "")
+            if len(tok_clean) <= 2 and (len(tok) <= 2 or "." in tok):
+                trailing_initials += 1
+            else:
+                break
+        if 0 < trailing_initials < len(parts):
+            surname_parts = parts[:-trailing_initials]
+            return " ".join(surname_parts).upper()
+
+        # 2. Leading initials: 'S. Bolelli', 'T. M. Etcheverry', 'T.M. Etcheverry'
+        leading_initials = 0
+        for tok in parts:
+            tok_clean = tok.replace(".", "")
+            if len(tok_clean) <= 2 and (len(tok) <= 2 or "." in tok):
+                leading_initials += 1
+            else:
+                break
+        if 0 < leading_initials < len(parts):
+            surname_parts = parts[leading_initials:]
+            return " ".join(surname_parts).upper()
+
+        # 3. Multi-word surname prefixes (De Minaur, Van De Zandschulp, Del Potro)
+        if len(parts) > 2 and parts[-2].lower() in ("de", "van", "del", "di", "da", "von", "le", "la"):
+            return f"{parts[-2]} {parts[-1]}".upper()
+        return parts[-1].upper()
+
+    @classmethod
+    def format_short_display_name(cls, full_name: str) -> str:
+        """
+        Formats singles as 'J. SINNER' / 'J. PAOLINI'.
+        Formats doubles (2 vs 2) with full surnames as 'BOLELLI / VAVASSORI', 'ERRANI / PAOLINI', 'FRANTZEN / HAASE'.
+        """
         name = full_name.strip()
-        if "/" in name:
-            sub = [p.strip().split()[-1].upper() for p in name.split("/") if p.strip()]
-            return " / ".join(sub[:2])
+        if "/" in name or " & " in name:
+            delims = "/" if "/" in name else " & "
+            partners = [p.strip() for p in name.split(delims) if p.strip()]
+            surnames = [cls._extract_single_player_surname(p) for p in partners if p]
+            return " / ".join(surnames[:2])
         # If already formatted as 'Paolini J.' or 'Sinner J.'
         m = re.match(r"^(.+?)\s+([A-Za-z])[\.\-]?$", name)
         if m:
             last = m.group(1).upper()
             initial = m.group(2).upper()
+            return f"{initial}. {last}"
+        m2 = re.match(r"^([A-Za-z])[\.\-]?\s+(.+)$", name)
+        if m2:
+            initial = m2.group(1).upper()
+            last = m2.group(2).upper()
             return f"{initial}. {last}"
         parts = [p for p in name.split() if p]
         if not parts:

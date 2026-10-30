@@ -1,6 +1,6 @@
 import unittest
 import asyncio
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, AsyncMock
 
 from app.services.mandrakodi_service import mandrakodi_service
 from app.services.tvvoo_service import tvvoo_service
@@ -192,6 +192,66 @@ class TestSuperTennisAndMulticourt(unittest.TestCase):
         }
         res2 = asyncio.run(mandrakodi_service.resolve_live_match_streams(match_sabalenka))
         self.assertEqual(len(res2), 0)
+
+    def test_sequential_channel_handover_clamps_end_date_and_live_window(self):
+        """Sequential Channel Handover: consecutive events on linear channels clamp end_date and calculate live_window."""
+        t1_start = 1793344500000  # 08:35
+        t1_end_raw = 1793366100000  # 14:35 (6h later)
+        t2_start = 1793357100000  # 12:05 (next event starts)
+        t2_end = 1793364000000  # 14:00
+
+        mock_client = MagicMock()
+        mock_client.get = MagicMock()
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "events": [
+                {
+                    "eventTitle": "LIVE WTA 500 Tokyo",
+                    "starttime": "2026-10-30T07:35:00Z",
+                    "endtime": "2026-10-30T13:35:00Z",
+                    "content": {"genre": {"name": "Sport"}, "subgenre": {"name": "Tennis"}},
+                },
+                {
+                    "eventTitle": "LIVE WTA 250 Guangzhou",
+                    "starttime": "2026-10-30T11:05:00Z",
+                    "endtime": "2026-10-30T13:00:00Z",
+                    "content": {"genre": {"name": "Sport"}, "subgenre": {"name": "Tennis"}},
+                },
+            ]
+        }
+
+        with patch.object(tvvoo_service, "get_channel_streams", return_value=[{"canonical": "supertennis", "tag": "c", "url": "https://test"}]), \
+             patch.object(tvvoo_service, "get_canonical_from_sky_id", return_value="supertennis"):
+            async def run_fetch():
+                mock_async_client = MagicMock()
+                mock_async_client.get = AsyncMock(return_value=mock_resp)
+                return await italian_epg_service._fetch_sky_events(mock_async_client, "2026-10-30T00:00:00Z", "2026-10-30T23:59:59Z")
+
+            events = asyncio.run(run_fetch())
+            tokyo_ev = [e for e in events if "Tokyo" in e["title"]][0]
+            guangzhou_ev = [e for e in events if "Guangzhou" in e["title"]][0]
+
+            # Tokyo's end_date MUST be clamped to Guangzhou's start date
+            self.assertEqual(tokyo_ev["end_date"], guangzhou_ev["date"])
+
+            # Catalog live_window for Tokyo MUST be ~215 minutes (ends at Guangzhou start + 5m), NOT 360m!
+            lw = catalog_service.get_live_window_minutes(tokyo_ev)
+            self.assertEqual(lw, 215)
+
+    def test_differita_sintesi_tagging(self):
+        """EPG events without LIVE or from previous years are tagged [Differita / Sintesi]."""
+        # 1. Live event retains LIVE
+        self.assertFalse(italian_epg_service._is_differita_or_sintesi("LIVE WTA 500 Tokyo"))
+        self.assertFalse(italian_epg_service._is_differita_or_sintesi("LIVE WTA 250 Guangzhou"))
+
+        # 2. Tournament session without LIVE is tagged differita/sintesi
+        self.assertTrue(italian_epg_service._is_differita_or_sintesi("WTA 500 Tokyo 2026"))
+        self.assertTrue(italian_epg_service._is_differita_or_sintesi("WTA 250 Guangzhou 2026"))
+
+        # 3. Previous year tournament is tagged differita/sintesi
+        self.assertTrue(italian_epg_service._is_differita_or_sintesi("ATP 1000 Parigi Bercy 2025 - Ep. 5"))
+        self.assertTrue(italian_epg_service._is_differita_or_sintesi("Nitto ATP Finals Torino 2025"))
 
 
 if __name__ == "__main__":

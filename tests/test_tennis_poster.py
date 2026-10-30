@@ -45,6 +45,23 @@ class TennisPosterTestCase(unittest.IsolatedAsyncioTestCase):
             tennis_poster_service.format_short_display_name("Erin Routliffe / Aldila Sutjiadi"),
             "ROUTLIFFE / SUTJIADI",
         )
+        # Doubles with trailing initials (e.g. from Diretta) must show full surnames, not initials!
+        self.assertEqual(
+            tennis_poster_service.format_short_display_name("Bolelli S./Vavassori A."),
+            "BOLELLI / VAVASSORI",
+        )
+        self.assertEqual(
+            tennis_poster_service.format_short_display_name("Frantzen C./Haase R."),
+            "FRANTZEN / HAASE",
+        )
+        self.assertEqual(
+            tennis_poster_service.format_short_display_name("Errani S./Paolini J."),
+            "ERRANI / PAOLINI",
+        )
+        self.assertEqual(
+            tennis_poster_service.format_short_display_name("Cerundolo F./Etcheverry T. M."),
+            "CERUNDOLO / ETCHEVERRY",
+        )
 
     def test_theme_palette(self):
         atp = tennis_poster_service.get_theme_palette("ATP", "Sinner vs Alcaraz")

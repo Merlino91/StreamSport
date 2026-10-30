@@ -199,6 +199,43 @@ class ItalianEPGService:
         self._fetch_lock = asyncio.Lock()
 
     @classmethod
+    def _is_differita_or_sintesi(
+        cls,
+        raw_title: str,
+        synopsis: str = "",
+        teams_dict: Optional[Dict[str, Any]] = None,
+    ) -> bool:
+        """
+        Determines whether an EPG sports broadcast is a delayed rerun or summary
+        rather than a live first-run broadcast.
+        """
+        t_lower = (raw_title or "").lower()
+        s_lower = (synopsis or "").lower()
+
+        # 1. Explicit tags in title or synopsis
+        if cls.REPLAY_PATTERN.search(raw_title) or any(k in t_lower for k in ("differita", "sintesi", "highlights", "solo repl")):
+            return True
+        if any(k in s_lower for k in ("in replica", "differita", "sintesi", "offre in replica", "replica delle")):
+            return True
+
+        # 2. Previous year in title (e.g. 'ATP 1000 Parigi Bercy 2025' when current year is 2026)
+        now_year = datetime.datetime.now().year
+        m_year = re.search(r"\b(20[12][0-9])\b", raw_title)
+        if m_year and int(m_year.group(1)) < now_year:
+            return True
+
+        # 3. Multicourt tournament sessions without teams (e.g. 'WTA 500 Tokyo 2026', 'WTA 250 Guangzhou 2026')
+        # In Sky / SuperTennis palinsesto, live sessions always contain 'LIVE' or 'DIRETTA'.
+        # Sessions without 'LIVE' / 'DIRETTA' are delayed tournament summaries.
+        if not teams_dict:
+            has_live = any(k in t_lower for k in ("live", "diretta"))
+            is_session = any(k in t_lower for k in ("wta", "atp", "masters", "slam"))
+            if is_session and not has_live:
+                return True
+
+        return False
+
+    @classmethod
     def _is_replay_event(cls, title: str, synopsis: str = "") -> bool:
         """Returns True if the event title or synopsis explicitly indicates a replay / rerun."""
         t = (title or "").strip()
@@ -449,7 +486,7 @@ class ItalianEPGService:
             for ev in events:
                 raw_title = ev.get("eventTitle") or ""
                 synopsis = ev.get("eventSynopsis") or ""
-                if not raw_title or self._is_noise_event(raw_title) or self._is_replay_event(raw_title, synopsis):
+                if not raw_title or self._is_noise_event(raw_title):
                     continue
 
                 content = ev.get("content", {})
@@ -488,6 +525,11 @@ class ItalianEPGService:
                 title, teams_dict = self._normalize_teams_and_title(comp, details)
                 if not title or not self._is_real_sport_event(title, teams_dict):
                     continue
+
+                # Differita / Sintesi detection
+                is_diff = self._is_differita_or_sintesi(raw_title, synopsis, teams_dict)
+                if is_diff and not title.startswith("[Differita / Sintesi]"):
+                    title = f"[Differita / Sintesi] {title}"
 
                 # Category & Silo
                 sim_info = get_simulcast_info(title, raw_title)
@@ -580,6 +622,8 @@ class ItalianEPGService:
                     "id": match_id,
                     "_provider": "italian_epg",
                     "title": title,
+                    "is_differita": is_diff,
+                    "_is_differita": is_diff,
                     "category": cat,
                     "_silo": silo,
                     "competition": comp,
@@ -596,6 +640,16 @@ class ItalianEPGService:
                     match_obj["teams"] = teams_dict
 
                 channel_matches.append(match_obj)
+
+            # Sequential Channel Handover: on linear broadcast channels, clamp each event's end_date
+            # to the kickoff of the next scheduled event on this channel to avoid overlapping active cards
+            channel_matches.sort(key=lambda x: x.get("date", 0))
+            for i in range(len(channel_matches) - 1):
+                curr_ev = channel_matches[i]
+                next_ev = channel_matches[i + 1]
+                if curr_ev.get("end_date") and next_ev.get("date"):
+                    if curr_ev["end_date"] > next_ev["date"]:
+                        curr_ev["end_date"] = next_ev["date"]
 
             matches.extend(channel_matches)
 
@@ -641,7 +695,7 @@ class ItalianEPGService:
                 prog = ev.get("program", {})
                 raw_title = prog.get("title") or ""
                 synopsis = prog.get("description") or ""
-                if not raw_title or self._is_noise_event(raw_title) or self._is_replay_event(raw_title, synopsis):
+                if not raw_title or self._is_noise_event(raw_title):
                     continue
 
                 categories = prog.get("categories") or []
@@ -679,6 +733,11 @@ class ItalianEPGService:
                 title, teams_dict = self._normalize_teams_and_title(comp, details)
                 if not title or not self._is_real_sport_event(title, teams_dict):
                     continue
+
+                # Differita / Sintesi detection
+                is_diff = self._is_differita_or_sintesi(raw_title, synopsis, teams_dict)
+                if is_diff and not title.startswith("[Differita / Sintesi]"):
+                    title = f"[Differita / Sintesi] {title}"
 
                 # Category & Silo
                 sim_info = get_simulcast_info(title, raw_title)
@@ -758,6 +817,8 @@ class ItalianEPGService:
                     "id": match_id,
                     "_provider": "italian_epg",
                     "title": title,
+                    "is_differita": is_diff,
+                    "_is_differita": is_diff,
                     "category": cat,
                     "_silo": silo,
                     "competition": comp,
@@ -775,9 +836,17 @@ class ItalianEPGService:
 
                 channel_matches.append(match_obj)
 
-            matches.extend(channel_matches)
+            # Sequential Channel Handover: on linear broadcast channels, clamp each event's end_date
+            # to the kickoff of the next scheduled event on this channel to avoid overlapping active cards
+            channel_matches.sort(key=lambda x: x.get("date", 0))
+            for i in range(len(channel_matches) - 1):
+                curr_ev = channel_matches[i]
+                next_ev = channel_matches[i + 1]
+                if curr_ev.get("end_date") and next_ev.get("date"):
+                    if curr_ev["end_date"] > next_ev["date"]:
+                        curr_ev["end_date"] = next_ev["date"]
 
-        return matches
+            matches.extend(channel_matches)
 
         return matches
 
