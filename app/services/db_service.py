@@ -106,6 +106,7 @@ class DBService:
                         title TEXT NOT NULL,
                         category TEXT NOT NULL,
                         date INTEGER NOT NULL,
+                        end_date INTEGER DEFAULT 0,
                         poster TEXT,
                         popular INTEGER DEFAULT 0,
                         sources TEXT,
@@ -121,6 +122,8 @@ class DBService:
                 # Safe migrations: ensure optional columns exist if table already existed
                 cursor.execute("PRAGMA table_info(matches)")
                 cols = {c[1] for c in cursor.fetchall()}
+                if "end_date" not in cols:
+                    cursor.execute("ALTER TABLE matches ADD COLUMN end_date INTEGER DEFAULT 0")
                 if "competition" not in cols:
                     cursor.execute("ALTER TABLE matches ADD COLUMN competition TEXT")
                 if "country" not in cols:
@@ -155,13 +158,14 @@ class DBService:
             title = m.get("title", "Live Sports")
             category = (m.get("category") or "other").lower()
             date = int(m.get("date", 0))
+            end_date = int(m.get("end_date") or 0)
             poster = m.get("poster") or ""
             popular = 1 if m.get("popular") else 0
             sources = json.dumps(m.get("sources", []))
             comp = m.get("competition") or m.get("_competition") or ""
             country = m.get("country") or m.get("_country") or ""
             canon = m.get("canonical_competition") or m.get("_canonical_competition") or ""
-            records.append((m_id, title, category, date, poster, popular, sources, comp, country, canon, now))
+            records.append((m_id, title, category, date, end_date, poster, popular, sources, comp, country, canon, now))
 
         if not records:
             return
@@ -170,12 +174,16 @@ class DBService:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.executemany("""
-                    INSERT INTO matches (id, title, category, date, poster, popular, sources, competition, country, canonical_competition, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO matches (id, title, category, date, end_date, poster, popular, sources, competition, country, canonical_competition, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(id) DO UPDATE SET
                         title = excluded.title,
                         category = excluded.category,
                         date = excluded.date,
+                        end_date = CASE
+                            WHEN excluded.end_date IS NOT NULL AND excluded.end_date > 0 THEN excluded.end_date
+                            ELSE matches.end_date
+                        END,
                         poster = CASE 
                             WHEN excluded.poster IS NOT NULL AND excluded.poster != '' THEN excluded.poster 
                             ELSE matches.poster 
@@ -420,6 +428,7 @@ class DBService:
         comp = row["competition"] if "competition" in keys and row["competition"] else None
         country = row["country"] if "country" in keys and row["country"] else None
         canon = row["canonical_competition"] if "canonical_competition" in keys and row["canonical_competition"] else None
+        end_date = row["end_date"] if "end_date" in keys and row["end_date"] else 0
 
         d = {
             "id": row["id"],
@@ -430,6 +439,8 @@ class DBService:
             "popular": bool(row["popular"]),
             "sources": sources,
         }
+        if end_date:
+            d["end_date"] = end_date
         if comp:
             d["competition"] = comp
             d["_competition"] = comp

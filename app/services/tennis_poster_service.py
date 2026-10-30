@@ -565,7 +565,7 @@ class TennisPosterService:
         g_lower = (genre or "").lower()
         combined = f"{g_lower} {t_lower}"
 
-        # 1. Grand Slams
+        # 1. Grand Slams (evaluated on title & genre)
         if "wimbledon" in combined:
             return {"bg_file": "bg_wimbledon.jpg", "badge_text": "WIMBLEDON"}
         if "roland" in combined or "french" in combined:
@@ -577,31 +577,42 @@ class TennisPosterService:
         if "slam" in combined:
             return {"bg_file": "bg_us_open.jpg", "badge_text": "GRAND SLAM"}
 
-        # 2. Both ATP & WTA combined
-        if "atp" in combined and "wta" in combined:
-            return {"bg_file": "bg_atp.jpg", "badge_text": "ATP & WTA TOURS"}
-
-        # 3. WTA Tour
-        if "wta" in combined or "femminile" in combined:
-            return {"bg_file": "bg_wta.jpg", "badge_text": "WTA TOUR"}
-
-        # 3. Team Cups (United Cup, Laver Cup, Davis Cup, Billie Jean King Cup)
+        # 2. Team Cups (United Cup, Laver Cup, Davis Cup, Billie Jean King Cup)
         if "united" in combined:
             return {"bg_file": "bg_united_cup.jpg", "badge_text": "UNITED CUP"}
         if "laver" in combined:
             return {"bg_file": "bg_laver_cup.jpg", "badge_text": "LAVER CUP"}
         if any(w in t_lower for w in ("bjk", "billie", "king cup")):
             return {"bg_file": "bg_bjk_cup.jpg", "badge_text": "DAVIS CUP"}
-        if "davis" in t_lower:
-            return {"bg_file": "bg_davis_cup.jpg", "badge_text": "DAVIS CUP"}
-        if any(w in g_lower for w in ("davis", "king cup", "bjk")):
+        if "davis" in t_lower or any(w in g_lower for w in ("davis", "king cup", "bjk")):
             return {"bg_file": "bg_davis_cup.jpg", "badge_text": "DAVIS CUP"}
 
-        # 4. Challenger Tour & Altri
+        # 3. Explicit circuit identity in event TITLE (highest priority over any channel/genre noise)
+        has_atp_title = bool(re.search(r"\batp\b", t_lower))
+        has_wta_title = bool(re.search(r"\bwta\b", t_lower)) or bool(re.search(r"\b(femminile|donne|women(?:'s)?|ladies)\b", t_lower))
+
+        if has_atp_title and has_wta_title:
+            return {"bg_file": "bg_atp.jpg", "badge_text": "ATP & WTA TOURS"}
+        if has_atp_title:
+            return {"bg_file": "bg_atp.jpg", "badge_text": "ATP TOUR"}
+        if has_wta_title:
+            return {"bg_file": "bg_wta.jpg", "badge_text": "WTA TOUR"}
+
+        # 4. Fallback to classified genre if title does not declare the circuit
+        has_atp_genre = "atp" in g_lower
+        has_wta_genre = "wta" in g_lower or "femminile" in g_lower
+        if has_atp_genre and has_wta_genre:
+            return {"bg_file": "bg_atp.jpg", "badge_text": "ATP & WTA TOURS"}
+        if has_atp_genre:
+            return {"bg_file": "bg_atp.jpg", "badge_text": "ATP TOUR"}
+        if has_wta_genre:
+            return {"bg_file": "bg_wta.jpg", "badge_text": "WTA TOUR"}
+
+        # 5. Challenger Tour & Altri
         if "challenger" in combined or "itf" in combined:
             return {"bg_file": "bg_challenger.jpg", "badge_text": "CHALLENGER TOUR"}
 
-        # 5. Default ATP Tour
+        # 6. Default ATP Tour
         return {"bg_file": "bg_atp.jpg", "badge_text": "ATP TOUR"}
 
     def _render_cinematic_arena(self, theme: Dict[str, Any], tourn_title: str) -> Image.Image:
@@ -915,7 +926,10 @@ class TennisPosterService:
             async with sem:
                 m_id = str(m.get("id", ""))
                 title = m.get("title", "")
-                genre = m.get("_genre") or "ATP"
+                genre = m.get("_genre")
+                if not genre:
+                    from app.services.genre_classifier import genre_classifier
+                    _, genre = genre_classifier.classify(m)
                 try:
                     rel_poster = await self.generate_poster(m_id, title, genre)
                     if rel_poster:

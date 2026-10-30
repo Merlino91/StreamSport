@@ -637,7 +637,10 @@ async def get_dynamic_poster(
         if "tennis" in cat or "tennis" in silo:
             try:
                 from app.services.tennis_poster_service import tennis_poster_service
-                genre = match.get("_genre") or "ATP"
+                genre = match.get("_genre")
+                if not genre:
+                    from app.services.genre_classifier import genre_classifier
+                    _, genre = genre_classifier.classify(match)
                 title = match.get("title", "")
                 poster_url = await tennis_poster_service.generate_poster(clean_id, title, genre)
                 if poster_url:

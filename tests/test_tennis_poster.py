@@ -66,9 +66,20 @@ class TennisPosterTestCase(unittest.IsolatedAsyncioTestCase):
     def test_theme_palette(self):
         atp = tennis_poster_service.get_theme_palette("ATP", "Sinner vs Alcaraz")
         self.assertEqual(atp["badge_text"], "ATP TOUR")
+        self.assertEqual(atp["bg_file"], "bg_atp.jpg")
 
         wta = tennis_poster_service.get_theme_palette("WTA", "Sakkari vs Hibino (WTA)")
         self.assertEqual(wta["badge_text"], "WTA TOUR")
+        self.assertEqual(wta["bg_file"], "bg_wta.jpg")
+
+        # Explicit circuit in title must override any inherited/noisy genre
+        atp_title_override = tennis_poster_service.get_theme_palette("WTA", "ATP 1000 Parigi Bercy 2025: Jannik Sinner vs Felix Auger-Aliassime")
+        self.assertEqual(atp_title_override["badge_text"], "ATP TOUR")
+        self.assertEqual(atp_title_override["bg_file"], "bg_atp.jpg")
+
+        wta_title_override = tennis_poster_service.get_theme_palette("ATP", "WTA 500 Tokyo 2026")
+        self.assertEqual(wta_title_override["badge_text"], "WTA TOUR")
+        self.assertEqual(wta_title_override["bg_file"], "bg_wta.jpg")
 
         wim = tennis_poster_service.get_theme_palette("Grandi Slam", "Djokovic vs Alcaraz (Wimbledon Final)")
         self.assertEqual(wim["badge_text"], "WIMBLEDON")

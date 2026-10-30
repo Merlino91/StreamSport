@@ -227,7 +227,7 @@ class CatalogService:
             delta_mins = int((d_end - d_start) / 60000)
             if delta_mins > 0:
                 if match.get("_provider") == "italian_epg" or str(match.get("id", "")).startswith(("sky_", "tivusat_")):
-                    return max(15, delta_mins + 5)
+                    return max(15, delta_mins + 10)
 
         silo = cls.get_canonical_silo(match)
 

@@ -235,9 +235,9 @@ class TestSuperTennisAndMulticourt(unittest.TestCase):
             # Tokyo's end_date MUST be clamped to Guangzhou's start date
             self.assertEqual(tokyo_ev["end_date"], guangzhou_ev["date"])
 
-            # Catalog live_window for Tokyo MUST be ~215 minutes (ends at Guangzhou start + 5m), NOT 360m!
+            # Catalog live_window for Tokyo MUST be ~220 minutes (ends at Guangzhou start + 10m buffer), NOT 360m!
             lw = catalog_service.get_live_window_minutes(tokyo_ev)
-            self.assertEqual(lw, 215)
+            self.assertEqual(lw, 220)
 
     def test_differita_sintesi_tagging(self):
         """EPG events without LIVE or from previous years are tagged [Differita / Sintesi]."""
@@ -252,6 +252,35 @@ class TestSuperTennisAndMulticourt(unittest.TestCase):
         # 3. Previous year tournament is tagged differita/sintesi
         self.assertTrue(italian_epg_service._is_differita_or_sintesi("ATP 1000 Parigi Bercy 2025 - Ep. 5"))
         self.assertTrue(italian_epg_service._is_differita_or_sintesi("Nitto ATP Finals Torino 2025"))
+
+    def test_end_date_sqlite_persistence_and_live_window(self):
+        """Verifies end_date persists in SQLite matches table and drives catalog live window (+10 min)."""
+        from app.services.db_service import db_service
+        db_service._ensure_db()
+
+        test_id = "sky_6000_end_date_persist_unit_test"
+        start_ms = 1793370000000
+        end_ms = start_ms + (120 * 60 * 1000)  # 2 hours
+
+        match_data = {
+            "id": test_id,
+            "title": "WTA 500 Tokyo 2026",
+            "category": "tennis",
+            "_provider": "italian_epg",
+            "date": start_ms,
+            "end_date": end_ms,
+            "sources": [],
+        }
+
+        db_service.save_matches([match_data])
+        fetched = db_service.get_match_by_id(test_id)
+        self.assertIsNotNone(fetched)
+        self.assertEqual(fetched.get("end_date"), end_ms)
+
+        lw = catalog_service.get_live_window_minutes(fetched)
+        self.assertEqual(lw, 130)  # 120m duration + 10m extra buffer
+
+        db_service.delete_matches_by_ids([test_id])
 
 
 if __name__ == "__main__":
