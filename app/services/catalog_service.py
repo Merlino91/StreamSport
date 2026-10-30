@@ -1796,9 +1796,8 @@ class CatalogService:
             unique_filtered.append(meta_item)
         filtered = unique_filtered
 
-        # 7. Pagination & Schema Cleanup (Row limit: max 4 items on first page for Nuvio only)
-        effective_limit = 4 if (is_nuvio and skip == 0 and not search_query) else limit
-        page = filtered[skip : skip + effective_limit]
+        # 7. Pagination & Schema Cleanup
+        page = filtered[skip : skip + limit]
         for item in page:
             item.pop("_date_ms", None)
             item.pop("_live_window", None)

@@ -130,8 +130,8 @@ class TestNuvioAndStremioCatalogs(unittest.TestCase):
         self.assertIn("metas", data)
         self.assertIsInstance(data["metas"], list)
 
-    def test_pagination_stremio_full_vs_nuvio_capped(self):
-        """Verifies Stremio returns full limit while Nuvio caps at 4 items on skip=0."""
+    def test_pagination_full_limit_stremio_and_nuvio(self):
+        """Verifies both Stremio and Nuvio return full limit without 4-item cap on skip=0."""
         import asyncio
         from app.services.catalog_service import catalog_service
 
@@ -160,14 +160,14 @@ class TestNuvioAndStremioCatalogs(unittest.TestCase):
                 )
                 self.assertEqual(len(stremio_page), 10)
 
-                # 2. Nuvio: capped at 4 items on skip=0
+                # 2. Nuvio: also gets all 10 items without 4-item cap
                 nuvio_page = await catalog_service.get_catalog(
                     catalog_id="nuvio_calcio_italiano_serie_a",
                     skip=0,
                     limit=50,
                     is_nuvio=True,
                 )
-                self.assertEqual(len(nuvio_page), 4)
+                self.assertEqual(len(nuvio_page), 10)
 
         asyncio.run(run_check())
 
