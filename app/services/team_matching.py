@@ -257,6 +257,46 @@ def calculate_match_score(
                 result["reason"] = f"time_exceeded_{diff_min:.0f}m"
                 return result
 
+        # Special Session Matching for Motorsport (Non-1v1 cards)
+        m_silo = (match.get("_silo") or match.get("category") or "").lower()
+        c_silo = (candidate.get("_silo") or candidate.get("category") or "").lower()
+        if m_silo == "motor-sports" or c_silo == "motor-sports":
+            m_text = f"{match.get('title', '')} {match.get('competition', '')}".lower()
+            c_text = f"{candidate.get('title', '')} {candidate.get('competition', '')}".lower()
+
+            from app.services.thesportsdb_service import TheSportsDBService
+            m_ser = TheSportsDBService.get_motorsport_series_key(m_text)
+            c_ser = TheSportsDBService.get_motorsport_series_key(c_text)
+
+            series_ok = (m_ser == c_ser) if (m_ser and c_ser) else False
+            if not series_ok and m_ser:
+                if m_ser == "f1" and ("f1" in c_text or "formula 1" in c_text):
+                    series_ok = True
+                elif m_ser in ("motogp", "moto2", "moto3") and ("motogp" in c_text or "moto2" in c_text or "moto3" in c_text):
+                    series_ok = True
+                elif m_ser == "nascar" and "nascar" in c_text:
+                    series_ok = True
+
+            if series_ok:
+                m_is_race = "gara" in m_text or "race" in m_text
+                c_is_race = "gara" in c_text or "race" in c_text or "grand prix" in c_text or "gp" in c_text
+                m_is_qual = "qualif" in m_text
+                c_is_qual = "qualif" in c_text
+                m_is_fp = "prove liber" in m_text or "practice" in m_text or "fp" in m_text or "warm up" in m_text
+                c_is_fp = "prove liber" in c_text or "practice" in c_text or "fp" in c_text or "warm up" in c_text
+
+                sess_conflict = (
+                    (m_is_race and not c_is_race and (c_is_qual or c_is_fp)) or
+                    (m_is_qual and not c_is_qual and (c_is_race or c_is_fp)) or
+                    (m_is_fp and not c_is_fp and (c_is_race or c_is_qual))
+                )
+
+                if not sess_conflict:
+                    result["matched"] = True
+                    result["score"] = 0.90
+                    result["reason"] = "motorsport_session_matched"
+                    return result
+
         # 2. Extract Home & Away
         m_teams = match.get("teams") or {}
         m_h = extract_team_name(m_teams.get("home")) if isinstance(m_teams, dict) else ""

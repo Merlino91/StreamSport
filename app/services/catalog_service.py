@@ -1379,7 +1379,7 @@ class CatalogService:
                 # Ingest certified multicourt tournament sessions and simulcasts from Italian EPG (Sky/Tivùsat)
                 epg_certified_sessions = [
                     m for m in epg_matches
-                    if not m.get("_is_replay") and not m.get("is_replay")
+                    if not m.get("_is_replay") and not m.get("is_replay") and not m.get("is_differita")
                     and (
                         (
                             (m.get("_silo") == "tennis" or m.get("category") == "tennis")
@@ -1389,6 +1389,19 @@ class CatalogService:
                         or (
                             (m.get("_silo") == "golf" or m.get("category") in ("golf", "altri_sport"))
                             and not bool(isinstance(m.get("teams"), dict) and m["teams"].get("home") and m["teams"].get("away"))
+                        )
+                        or (
+                            # Certified live Padel tournament sessions (e.g. Premier Padel)
+                            (m.get("_silo") in ("padel", "altri_sport") or m.get("category") in ("padel", "altri_sport"))
+                            and any(k in (m.get("title") or "").lower() or k in (m.get("competition") or "").lower() for k in ("padel", "premier padel"))
+                            and m.get("is_live") is True
+                        )
+                        or (
+                            # Certified live Motorsport sessions from Sky (if not covered by Diretta)
+                            (m.get("_silo") == "motor-sports" or m.get("category") == "motori")
+                            and m.get("is_live") is True
+                            and any(k in (m.get("title") or "").lower() for k in ("prove libere", "qualifiche", "gara", "sprint", "warm up"))
+                            and not any(k in (m.get("title") or "").lower() for k in ("race anatomy", "aspettando", "storie di", "rubrica", "highlights"))
                         )
                         or is_simulcast_event(m.get("title", ""))
                     )
@@ -1420,7 +1433,27 @@ class CatalogService:
                 if official_schedule:
                     linked_schedule = self.link_official_schedule_to_provider_clusters(official_schedule, combined_fresh)
                     if epg_certified_sessions:
-                        linked_schedule.extend(epg_certified_sessions)
+                        orphan_epg = []
+                        for ep in epg_certified_sessions:
+                            ep_silo = (ep.get("_silo") or ep.get("category") or "").lower()
+                            ep_date = ep.get("date", 0)
+                            already_covered = False
+                            for off in linked_schedule:
+                                off_silo = (off.get("_silo") or off.get("category") or "").lower()
+                                if off_silo == ep_silo and abs((off.get("date") or 0) - ep_date) <= (90 * 60 * 1000):
+                                    if ep_silo == "motor-sports":
+                                        from app.services.thesportsdb_service import TheSportsDBService
+                                        m_ser = TheSportsDBService.get_motorsport_series_key(off.get("title", ""))
+                                        e_ser = TheSportsDBService.get_motorsport_series_key(ep.get("title", ""))
+                                        if m_ser and e_ser and m_ser == e_ser:
+                                            already_covered = True
+                                            break
+                                    elif ep_silo == "tennis":
+                                        already_covered = True
+                                        break
+                            if not already_covered:
+                                orphan_epg.append(ep)
+                        linked_schedule.extend(orphan_epg)
                     all_matches = linked_schedule
                     logger.info("Top-Down Pipeline: linked %d official matches to provider stream clusters.", len(all_matches))
                 else:

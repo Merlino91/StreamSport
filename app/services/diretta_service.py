@@ -23,8 +23,11 @@ FS_SUPPORTED_SPORTS: Dict[int, Tuple[str, str]] = {
     4: ("Hockey", "hockey"),
     5: ("Football Americano", "american-football"),
     6: ("Baseball", "baseball"),
-    7: ("Rugby", "rugby"),
+    7: ("Pallamano", "handball"),
+    8: ("Rugby", "rugby"),
     12: ("Volley", "volley"),
+    32: ("Formula 1", "motor-sports"),
+    33: ("MotoGP", "motor-sports"),
 }
 
 FS_IT_SPORTS: Dict[int, Tuple[str, str]] = FS_SUPPORTED_SPORTS
@@ -158,6 +161,9 @@ class DirettaService:
         matches: List[Dict[str, Any]] = []
         current_league = "Unknown"
         current_country = ""
+        raw_za = ""
+        current_session = ""
+        motorsport_session_emitted = False
 
         blocks = raw_text.split("~")
         for block in blocks:
@@ -173,11 +179,13 @@ class DirettaService:
             if "ZA" in fields:
                 raw_za = fields.get("ZA", "").strip()
                 current_country = fields.get("ZY", "").strip()
+                current_session = fields.get("ZAE", "").strip()
                 # Clean redundant country prefix (e.g. "ITALIA: Serie A" -> "Serie A")
                 if current_country and raw_za.upper().startswith(f"{current_country.upper()}:"):
                     current_league = raw_za[len(current_country) + 1:].strip()
                 else:
                     current_league = raw_za
+                motorsport_session_emitted = False
                 continue
 
             # Match block: starts with AA (Match ID)
@@ -201,6 +209,30 @@ class DirettaService:
                                     tv_channels.append(bn)
                         except Exception:
                             pass
+
+                # Special handling for motor-sports non-1v1 session cards (e.g. F1, MotoGP, NASCAR)
+                if silo_name == "motor-sports":
+                    if not motorsport_session_emitted and date_ms > 0 and raw_za:
+                        motorsport_session_emitted = True
+                        comp_name = current_league.strip() if current_league else (current_country or sport_name)
+                        matches.append({
+                            "id": f"diretta-{m_id}",
+                            "flashscore_id": m_id,
+                            "_silo": silo_name,
+                            "sport": sport_name,
+                            "country": current_country,
+                            "league": current_league,
+                            "competition": comp_name,
+                            "session": current_session,
+                            "home": "",
+                            "away": "",
+                            "full_home": "",
+                            "full_away": "",
+                            "title": raw_za,
+                            "date": date_ms,
+                            "tv_channels": tv_channels,
+                        })
+                    continue
 
                 if home and away:
                     # Clean competition name: use league name directly (fallback to country or Live Sports)
@@ -389,14 +421,31 @@ class DirettaService:
             country = m.get("country", "")
 
             # Livesport.com (English) names are authoritative for TheSportsDB and deduplication matching
-            primary_home = m.get("alt_home") or d_home
-            primary_away = m.get("alt_away") or d_away
-            primary_title = m.get("alt_title") or f"{primary_home} vs {primary_away}"
-            it_title = f"{d_home} vs {d_away}"
+            if silo == "motor-sports":
+                primary_home = ""
+                primary_away = ""
+                primary_title = m.get("title", "")
+                it_title = m.get("title", "")
+                teams_obj: Dict[str, Any] = {}
+                alt_teams_obj: List[Dict[str, Any]] = []
+            else:
+                primary_home = m.get("alt_home") or d_home
+                primary_away = m.get("alt_away") or d_away
+                primary_title = m.get("alt_title") or f"{primary_home} vs {primary_away}"
+                it_title = f"{d_home} vs {d_away}"
+                teams_obj = {
+                    "home": {"name": primary_home},
+                    "away": {"name": primary_away},
+                }
+                alt_teams_obj = [
+                    {"home": {"name": d_home}, "away": {"name": d_away}},
+                    {"home": {"name": primary_home}, "away": {"name": primary_away}},
+                ]
 
             # Infer canonical slug fallback if needed
             if not slug:
-                slug = detect_canonical_competition(f"{country}: {comp} {primary_home} vs {primary_away}", silo_hint=silo)
+                fallback_text = primary_title if silo == "motor-sports" else f"{country}: {comp} {primary_home} vs {primary_away}"
+                slug = detect_canonical_competition(fallback_text, silo_hint=silo)
 
             official_match = {
                 "id": f"diretta-{fid}",
@@ -408,6 +457,7 @@ class DirettaService:
                 "category": silo,
                 "_silo": silo,
                 "sport": m.get("sport", ""),
+                "session": m.get("session", ""),
                 "home": primary_home,
                 "away": primary_away,
                 "_diretta_home": primary_home,
@@ -415,14 +465,8 @@ class DirettaService:
                 "_diretta_title": primary_title,
                 "date": date_ms,
                 "_date_ms": date_ms,
-                "teams": {
-                    "home": {"name": primary_home},
-                    "away": {"name": primary_away},
-                },
-                "alt_teams": [
-                    {"home": {"name": d_home}, "away": {"name": d_away}},
-                    {"home": {"name": primary_home}, "away": {"name": primary_away}},
-                ],
+                "teams": teams_obj,
+                "alt_teams": alt_teams_obj,
                 "raw_titles": list(dict.fromkeys([t for t in (it_title, primary_title, m.get("alt_title", "")) if t])),
                 "competition": comp,
                 "_competition": comp,

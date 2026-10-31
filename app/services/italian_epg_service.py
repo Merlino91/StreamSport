@@ -1678,34 +1678,89 @@ class ItalianEPGService:
                         if circ_match and city_match:
                             is_same = True
 
+                # Motorsport Session Bridge:
+                # Matches Diretta motorsport session with live Sky Sport F1 / Sky Sport MotoGP broadcast
+                if not is_same and m_silo == "motor-sports" and ep_silo == "motor-sports":
+                    m_eval = f"{m.get('competition', '')} {m.get('title', '')}".lower()
+                    ep_eval = f"{ep.get('competition', '')} {ep.get('title', '')} {ep.get('eventSynopsis', '')}".lower()
+                    ep_chans = " ".join([s.get("name", "") for s in ep.get("sources", []) if isinstance(s, dict)]).lower()
+                    ep_full = f"{ep_eval} {ep_chans}"
+
+                    from app.services.thesportsdb_service import TheSportsDBService
+                    m_ser = TheSportsDBService.get_motorsport_series_key(m_eval)
+                    ep_ser = TheSportsDBService.get_motorsport_series_key(ep_full)
+
+                    ser_ok = (m_ser == ep_ser) if (m_ser and ep_ser) else False
+                    if not ser_ok and m_ser:
+                        if m_ser == "f1" and ("f1" in ep_chans or "formula 1" in ep_full or "formula 1" in ep_eval):
+                            ser_ok = True
+                        elif m_ser in ("motogp", "moto2", "moto3") and ("motogp" in ep_chans or "motogp" in ep_full):
+                            ser_ok = True
+
+                    if ser_ok:
+                        m_is_race = "gara" in m_eval or "race" in m_eval
+                        ep_is_race = "gara" in ep_eval or "race" in ep_eval
+                        m_is_qual = "qualif" in m_eval
+                        ep_is_qual = "qualif" in ep_eval
+                        m_is_fp = "prove liber" in m_eval or "practice" in m_eval or "fp" in m_eval or "warm up" in m_eval
+                        ep_is_fp = "prove liber" in ep_eval or "practice" in ep_eval or "fp" in ep_eval or "warm up" in ep_eval
+
+                        sess_conflict = (
+                            (m_is_race and not ep_is_race and (ep_is_qual or ep_is_fp)) or
+                            (m_is_qual and not ep_is_qual and (ep_is_race or ep_is_fp)) or
+                            (m_is_fp and not ep_is_fp and (ep_is_race or ep_is_qual))
+                        )
+
+                        locs = [
+                            "messico", "mexico", "sepang", "malesia", "malaysia", "austin", "texas",
+                            "interlagos", "brasile", "brazil", "vegas", "qatar", "monza", "imola",
+                            "mugello", "misano", "valencia", "barcellona", "silverstone", "spa", "belgio",
+                            "zandvoort", "austria", "suzuka", "giappone", "shanghai", "cina", "bahrain",
+                            "jeddah", "arabia", "miami", "monaco", "montecarlo", "montreal", "canada",
+                            "baku", "azerbaijan", "singapore"
+                        ]
+                        loc_match = any(loc in m_eval and loc in ep_full for loc in locs)
+
+                        if (loc_match or not any(loc in m_eval for loc in locs)) and not sess_conflict:
+                            is_same = True
+
                 if is_same:
                     matched_epg = ep
                     break
 
             if matched_epg:
-                # Poster inheritance from Sky/Tivùsat: strictly restricted to non-1v1 events (e.g. tournament sessions, Diretta Goal).
-                # 1v1 matches must NEVER inherit EPG artwork (they belong exclusively to TheSportsDB / athlete poster generators).
+                m["_matched_epg_id"] = matched_epg.get("id")
+
+                # Poster priority: Sky EPG artwork is primary when present
+                ep_poster = matched_epg.get("poster")
+                if ep_poster and str(ep_poster).startswith("http"):
+                    m["poster"] = ep_poster
+                    m["background"] = matched_epg.get("background") or ep_poster
+                    m["_poster_source"] = "sky"
+                    if m.get("id"):
+                        try:
+                            from app.services.db_service import db_service
+                            db_service.update_match_poster(m["id"], ep_poster)
+                        except Exception:
+                            pass
+
+                # If m is an aggregated multicourt event adopting a certified Sky tournament session:
                 is_m_1v1 = bool(
                     (isinstance(m_teams, dict) and m_teams.get("home") and m_teams.get("away"))
                     or (re.search(r"\b(vs\.?| v\. )\b", m_title, re.IGNORECASE) and not m_is_sim)
                 )
-
-                if not is_m_1v1 and matched_epg.get("poster"):
-                    if not m.get("poster") or "unknown" in str(m.get("poster")).lower() or "nostream" in str(m.get("poster")).lower():
-                        m["poster"] = matched_epg["poster"]
-                        if not m.get("background"):
-                            m["background"] = matched_epg.get("background") or matched_epg["poster"]
-
-                # If m is an aggregated multicourt event adopting a certified Sky tournament session:
                 ep_teams_obj = matched_epg.get("teams")
                 is_ep_1v1 = bool(isinstance(ep_teams_obj, dict) and ep_teams_obj.get("home") and ep_teams_obj.get("away"))
                 if not is_m_1v1 and not is_ep_1v1:
-                    m["title"] = matched_epg.get("title") or m.get("title")
-                    if matched_epg.get("competition"):
+                    if m_silo != "motor-sports":
+                        m["title"] = matched_epg.get("title") or m.get("title")
+                    if matched_epg.get("competition") and not m.get("competition"):
                         m["competition"] = matched_epg["competition"]
                     if matched_epg.get("eventSynopsis"):
                         m["eventSynopsis"] = matched_epg["eventSynopsis"]
                     m["_certified_by_sky"] = True
+                elif matched_epg.get("eventSynopsis"):
+                    m["eventSynopsis"] = matched_epg["eventSynopsis"]
 
                 existing_sources = m.setdefault("sources", [])
                 existing_keys = {

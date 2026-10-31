@@ -1260,10 +1260,12 @@ def is_tier_match(m: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
     if silo in ("motorsport", "motor-sports") or any(w in sport for w in ("motori", "f1", "motogp", "auto", "moto")):
         if any(w in league for w in ("formula 1", "formula one", "f1")):
             return True, "motorsport_f1"
-        if "motogp" in league:
+        if any(w in league for w in ("motogp", "moto2", "moto3", "moto 2", "moto 3")):
             return True, "motorsport_motogp"
         if any(w in league for w in ("superbike", "wsbk", "sbk")):
             return True, "motorsport_sbk"
+        if any(w in league for w in ("nascar", "cup series", "xfinity series", "craftsman truck", "trucks")):
+            return True, "motorsport_nascar"
         if "formula 2" in league or "f2" in league:
             return True, "motorsport_f2"
         if "formula 3" in league or "f3" in league:
