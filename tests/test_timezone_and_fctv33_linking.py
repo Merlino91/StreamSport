@@ -58,6 +58,20 @@ class TestTimezoneAndFctv33Linking(unittest.TestCase):
         self.assertEqual(tz, TIMEZONE)
         self.assertEqual(client, "nuvio")
 
+        # 4. Modern URL-safe Base64 without padding & special characters in password
+        raw5 = "https://ep.example.com|pass#123+&|nuvio"
+        b64_urlsafe = base64.urlsafe_b64encode(raw5.encode("utf-8")).decode("utf-8").rstrip("=")
+        ep_url5, ep_pass5, tz5, client5 = decode_config(b64_urlsafe)
+        self.assertEqual(ep_url5, "https://ep.example.com")
+        self.assertEqual(ep_pass5, "pass#123+&")
+        self.assertEqual(tz5, TIMEZONE)
+        self.assertEqual(client5, "nuvio")
+
+        # 5. EasyProxy password escaping test
+        from app.services.stream_service import stream_service
+        built_ep_url = stream_service.build_easyproxy_url(ep_url5, ep_pass5, "DLHD", "https://thedaddy.pk/watch.php?id=197")
+        self.assertIn("api_password=pass%23123%2B%26", built_ep_url)
+
     def test_fctv33_id_inheritance_in_topdown(self):
         """Verifies that official Diretta match inherits _fctv33_id and _sport_type from FCTV33 candidate."""
         official_schedule = [

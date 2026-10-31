@@ -1,31 +1,4 @@
 document.addEventListener('DOMContentLoaded', () => {
-  // Auto-select user's local timezone if not already set
-  const tzSelect = document.getElementById('tz');
-  if (tzSelect && !tzSelect.value) {
-    try {
-      const userTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-      if (userTz) {
-        let matched = false;
-        for (let i = 0; i < tzSelect.options.length; i++) {
-          if (tzSelect.options[i].value === userTz) {
-            tzSelect.selectedIndex = i;
-            matched = true;
-            break;
-          }
-        }
-        if (!matched) {
-          const opt = document.createElement('option');
-          opt.value = userTz;
-          opt.textContent = `${userTz} (Local)`;
-          opt.selected = true;
-          tzSelect.appendChild(opt);
-        }
-      }
-    } catch (e) {
-      console.warn('Could not determine local timezone:', e);
-    }
-  }
-
   // Copy button logic
   const copyBtn = document.getElementById('copyBtn');
   if (copyBtn) {
@@ -50,23 +23,21 @@ document.addEventListener('DOMContentLoaded', () => {
   function updateInstallUrls() {
     const epUrlInput = document.getElementById('epUrl');
     const epPassInput = document.getElementById('epPass');
-    const tzSelect = document.getElementById('tz');
     const clientSelect = document.getElementById('clientTarget');
 
     const epUrl = (epUrlInput ? epUrlInput.value : '').trim();
     const epPass = (epPassInput ? epPassInput.value : '').trim();
-    const tz = (tzSelect ? tzSelect.value : 'Europe/Rome').trim() || 'Europe/Rome';
     const client = (clientSelect ? clientSelect.value : 'stremio').trim().toLowerCase() || 'stremio';
 
     if (!epUrl) {
       return false;
     }
 
-    const rawConfig = client === 'nuvio'
-      ? `${epUrl}|${epPass}|${tz}|nuvio`
-      : `${epUrl}|${epPass}|${tz}`;
-
-    const encodedConfig = btoa(unescape(encodeURIComponent(rawConfig)));
+    const rawConfig = `${epUrl}|${epPass}|${client}`;
+    const encodedConfig = btoa(unescape(encodeURIComponent(rawConfig)))
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=+$/, '');
     const baseUrl = window.location.origin;
     
     // Explicit visible URL paths: /nuvio/manifest.json vs /manifest.json

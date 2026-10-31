@@ -301,7 +301,7 @@ class StreamService:
         encoded_d = urllib.parse.quote(destination_url, safe="")
         url = f"{base}/extractor/video.m3u8?host={host}&d={encoded_d}&redirect_stream=true"
         if ep_pass:
-            url += f"&api_password={urllib.parse.quote(ep_pass)}"
+            url += f"&api_password={urllib.parse.quote(ep_pass, safe='')}"
         return url
 
     def generate_status_card(self, match: Optional[Dict[str, Any]], user_tz: Optional[str] = None) -> List[Dict[str, Any]]:
@@ -765,7 +765,7 @@ class StreamService:
                     if clearkey_param:
                         dash_url += f"&clearkey={clearkey_param}"
                     if ep_pass:
-                        dash_url += f"&api_password={ep_pass}"
+                        dash_url += f"&api_password={urllib.parse.quote(ep_pass, safe='')}"
 
                     if dash_url not in seen_mandrakodi_urls:
                         seen_mandrakodi_urls.add(dash_url)
@@ -811,7 +811,7 @@ class StreamService:
                 if soc_url and ep_url:
                     stream_url = f"{ep_url.rstrip('/')}/proxy/manifest.m3u8?url={urllib.parse.quote_plus(soc_url)}"
                     if ep_pass:
-                        stream_url += f"&api_password={ep_pass}"
+                        stream_url += f"&api_password={urllib.parse.quote(ep_pass, safe='')}"
                     if stream_url not in seen_mandrakodi_urls:
                         seen_mandrakodi_urls.add(stream_url)
                         mandrakodi_streams.append({
@@ -833,7 +833,7 @@ class StreamService:
                     encoded_mpd = urllib.parse.quote_plus(mpd_url)
                     dash_url = f"{ep_url.rstrip('/')}/proxy/mpd/manifest.m3u8?d={encoded_mpd}"
                     if ep_pass:
-                        dash_url += f"&api_password={ep_pass}"
+                        dash_url += f"&api_password={urllib.parse.quote(ep_pass, safe='')}"
 
                     if dash_url not in seen_mandrakodi_urls:
                         seen_mandrakodi_urls.add(dash_url)
@@ -1044,7 +1044,7 @@ class StreamService:
 
                 stream_url = f"{ep_url.rstrip('/')}/proxy/manifest.m3u8?url={urllib.parse.quote_plus(raw_url)}"
                 if ep_pass:
-                    stream_url += f"&api_password={urllib.parse.quote_plus(ep_pass)}"
+                    stream_url += f"&api_password={urllib.parse.quote(ep_pass, safe='')}"
 
                 spon_streams.append({
                     "name": f"{flag_prefix}⚡ [Sportzonline] {ch_name} [720p]",

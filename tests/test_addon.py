@@ -91,6 +91,12 @@ class StreamSportTestCase(unittest.TestCase):
         data = response.json()
         self.assertFalse(data["behaviorHints"]["configurationRequired"])
 
+    def test_configure_page_generates_urlsafe_config(self):
+        resp = client.get("/configure?save=1&epUrl=https://ep.example.com&epPass=mysecret&clientTarget=stremio")
+        self.assertEqual(resp.status_code, 200)
+        expected = base64.urlsafe_b64encode(b"https://ep.example.com|mysecret|stremio").decode().rstrip("=")
+        self.assertIn(expected, resp.text)
+
     def test_genre_classifier_accuracy(self):
         test_cases = [
             ({"title": "Inter vs Milan", "category": "football", "teams": {"home": {"name": "Inter"}, "away": {"name": "Milan"}}}, ("calcio_italiano", "Serie A")),

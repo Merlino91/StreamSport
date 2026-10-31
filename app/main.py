@@ -295,7 +295,7 @@ async def configure_page(
     if save and epUrl:
         ep_pass_clean = epPass or ""
         raw_config = f"{epUrl.strip()}|{ep_pass_clean.strip()}|{target_client}"
-        encoded_config = base64.b64encode(raw_config.encode("utf-8")).decode("utf-8")
+        encoded_config = base64.urlsafe_b64encode(raw_config.encode("utf-8")).decode("utf-8").rstrip("=")
 
         base_url = get_base_url(request)
         if target_client == "nuvio":
