@@ -84,3 +84,69 @@ def test_parse_flashscore_feed_motorsports():
     assert m["session"] == "Prove Libere 2"
     assert m["_silo"] == "motor-sports"
     assert m["date"] == 1730419200000
+
+def test_epg_poster_isolation_to_motorsports():
+    import asyncio
+    from app.services.italian_epg_service import italian_epg_service
+
+    # 1. 1v1 match (e.g. Football) MUST NOT inherit Sky EPG poster
+    match_1v1 = {
+        "id": "test_1v1",
+        "title": "Inter vs Juventus",
+        "_silo": "football",
+        "category": "football",
+        "teams": {"home": {"name": "Inter"}, "away": {"name": "Juventus"}},
+        "date": 1730419200000,
+        "poster": "https://thesportsdb.com/images/inter_juve.jpg",
+    }
+    epg_fake_1v1 = {
+        "title": "Serie A: Inter vs Juventus",
+        "teams": {"home": {"name": "Inter"}, "away": {"name": "Juventus"}},
+        "_silo": "football",
+        "category": "football",
+        "date": 1730419200000,
+        "poster": "https://guidatv.sky.it/uuid/sky_inter_juve_poster.jpg",
+        "sources": [{"name": "Sky Sport Uno", "id": "sky sport uno"}],
+    }
+
+    # 2. Motorsport session MUST inherit Sky EPG poster
+    match_motor = {
+        "id": "test_motor",
+        "title": "FORMULA 1: GP Messico - Prove Libere 3",
+        "competition": "GP Messico",
+        "_silo": "motor-sports",
+        "category": "motor-sports",
+        "date": 1730419200000,
+        "poster": "https://thesportsdb.com/images/default_fallback.jpg",
+    }
+    epg_fake_motor = {
+        "title": "GP Messico: Prove libere 3",
+        "_silo": "motor-sports",
+        "category": "motori",
+        "date": 1730419200000,
+        "poster": "https://guidatv.sky.it/uuid/sky_f1_mexico_poster.jpg",
+        "sources": [{"name": "Sky Sport F1", "id": "sky sport f1"}],
+    }
+
+    async def _run():
+        # Mock get_matches on italian_epg_service
+        async def mock_get_matches(*args, **kwargs):
+            return [epg_fake_1v1, epg_fake_motor]
+
+        orig = italian_epg_service.get_matches
+        italian_epg_service.get_matches = mock_get_matches
+        try:
+            await italian_epg_service.enrich_matches_with_epg_channels([match_1v1, match_motor])
+
+            # Verification 1: 1v1 football retained its TheSportsDB poster
+            assert match_1v1["poster"] == "https://thesportsdb.com/images/inter_juve.jpg"
+            assert match_1v1.get("_poster_source") != "sky"
+
+            # Verification 2: Motorsport received the Sky EPG poster
+            assert match_motor["poster"] == "https://guidatv.sky.it/uuid/sky_f1_mexico_poster.jpg"
+            assert match_motor.get("_poster_source") == "sky"
+        finally:
+            italian_epg_service.get_matches = orig
+
+    asyncio.run(_run())
+

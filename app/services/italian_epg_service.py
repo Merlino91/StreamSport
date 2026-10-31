@@ -1731,24 +1731,34 @@ class ItalianEPGService:
             if matched_epg:
                 m["_matched_epg_id"] = matched_epg.get("id")
 
-                # Poster priority: Sky EPG artwork is primary when present
-                ep_poster = matched_epg.get("poster")
-                if ep_poster and str(ep_poster).startswith("http"):
-                    m["poster"] = ep_poster
-                    m["background"] = matched_epg.get("background") or ep_poster
-                    m["_poster_source"] = "sky"
-                    if m.get("id"):
-                        try:
-                            from app.services.db_service import db_service
-                            db_service.update_match_poster(m["id"], ep_poster)
-                        except Exception:
-                            pass
-
-                # If m is an aggregated multicourt event adopting a certified Sky tournament session:
                 is_m_1v1 = bool(
                     (isinstance(m_teams, dict) and m_teams.get("home") and m_teams.get("away"))
                     or (re.search(r"\b(vs\.?| v\. )\b", m_title, re.IGNORECASE) and not m_is_sim)
                 )
+
+                # Poster priority:
+                # 1. MOTOR-SPORTS ONLY: Sky EPG locandina is primary when available
+                if m_silo == "motor-sports":
+                    ep_poster = matched_epg.get("poster")
+                    if ep_poster and str(ep_poster).startswith("http"):
+                        m["poster"] = ep_poster
+                        m["background"] = matched_epg.get("background") or ep_poster
+                        m["_poster_source"] = "sky"
+                        if m.get("id"):
+                            try:
+                                from app.services.db_service import db_service
+                                db_service.update_match_poster(m["id"], ep_poster)
+                            except Exception:
+                                pass
+                # 2. ALL OTHER SPORTS: Restore strict non-1v1 rule.
+                # 1v1 matches and team sports MUST NEVER inherit EPG artwork (they belong exclusively to TheSportsDB / athlete poster generators).
+                elif not is_m_1v1 and matched_epg.get("poster"):
+                    if not m.get("poster") or "unknown" in str(m.get("poster")).lower() or "nostream" in str(m.get("poster")).lower():
+                        m["poster"] = matched_epg["poster"]
+                        if not m.get("background"):
+                            m["background"] = matched_epg.get("background") or matched_epg["poster"]
+
+                # If m is an aggregated multicourt event adopting a certified Sky tournament session:
                 ep_teams_obj = matched_epg.get("teams")
                 is_ep_1v1 = bool(isinstance(ep_teams_obj, dict) and ep_teams_obj.get("home") and ep_teams_obj.get("away"))
                 if not is_m_1v1 and not is_ep_1v1:
