@@ -568,7 +568,7 @@ class StreamService:
         # JIT Dynamic Mandrakodi Resolution:
         # If match does not have Mandrakodi OTT sources attached, trigger a real-time lookup
         has_mandrakodi = any(
-            isinstance(s, dict) and (s.get("provider") == "mandrakodi" or s.get("source") in ("amstaff", "acestream", "socceron", "direct"))
+            isinstance(s, dict) and (s.get("provider") == "mandrakodi" or s.get("source") in ("amstaff", "acestream", "socceron", "direct", "supertennis_ott"))
             for s in sources
         )
         if not has_mandrakodi:
@@ -579,13 +579,61 @@ class StreamService:
                     # Cleanly replace Mandrakodi sources for this match (no stale/dead links)
                     sources = [
                         s for s in sources
-                        if not (isinstance(s, dict) and (s.get("provider") == "mandrakodi" or s.get("source") in ("amstaff", "acestream", "socceron", "direct")))
+                        if not (isinstance(s, dict) and (s.get("provider") == "mandrakodi" or s.get("source") in ("amstaff", "acestream", "socceron", "direct", "supertennis_ott")))
                     ]
                     sources.extend(jit_sources)
                     match["sources"] = sources
                     match_updated = True
             except Exception as e:
                 logger.error("Error in JIT Mandrakodi stream resolution: %s", e)
+
+        # SuperTennis OTT Multi-Court Feeds:
+        # If match involves SuperTennis (from sources, EPG or Diretta TV channels),
+        # dynamically attach currently active live OTT feeds (1..4) from Mandrakodi
+        has_supertennis = False
+        for s in sources:
+            if isinstance(s, dict):
+                s_name = (s.get("name") or "").lower()
+                if "supertennis" in s_name or "super tennis" in s_name:
+                    has_supertennis = True
+                    break
+                if s.get("channel") in ("supertennis", "super tennis"):
+                    has_supertennis = True
+                    break
+        if not has_supertennis:
+            for ch in match.get("_diretta_tv_channels", []):
+                ch_str = str(ch).lower()
+                if "supertennis" in ch_str or "super tennis" in ch_str:
+                    has_supertennis = True
+                    break
+        if not has_supertennis:
+            epg_ch = str(match.get("_epg_channel") or "").lower()
+            if "supertennis" in epg_ch or "super tennis" in epg_ch:
+                has_supertennis = True
+        if not has_supertennis:
+            silo_str = (match.get("_silo") or match.get("category") or "").lower()
+            title_str = str(match.get("title") or "").lower()
+            comp_str = str(match.get("competition") or "").lower()
+            if silo_str == "tennis" and ("supertennis" in title_str or "super tennis" in title_str or "supertennis" in comp_str or "super tennis" in comp_str):
+                has_supertennis = True
+
+        if has_supertennis:
+            try:
+                from app.services.mandrakodi_service import mandrakodi_service
+                st_ott_feeds = await mandrakodi_service.get_active_supertennis_ott_streams()
+                if st_ott_feeds:
+                    existing_ott_ids = {str(s.get("id")) for s in sources if isinstance(s, dict)}
+                    added_any = False
+                    for feed in st_ott_feeds:
+                        if str(feed.get("id")) not in existing_ott_ids:
+                            sources.append(feed)
+                            existing_ott_ids.add(str(feed.get("id")))
+                            added_any = True
+                    if added_any:
+                        match["sources"] = sources
+                        match_updated = True
+            except Exception as e:
+                logger.error("Error in SuperTennis OTT feed attachment: %s", e)
 
         # On-Demand DaddyLive Fallback:
         # If match has NO DaddyLive sources, search in-memory DaddyLive schedule by teams/silo
@@ -609,7 +657,7 @@ class StreamService:
         # If match has NO Streamed sources, search in-memory Streamed schedule by teams/silo
         has_streamed = any(
             isinstance(s, dict)
-            and s.get("source") not in ("dlhd", "tvvoo", "fctv33", "amstaff", "acestream", "socceron", "direct", "sportsonline", "spon")
+            and s.get("source") not in ("dlhd", "tvvoo", "fctv33", "amstaff", "acestream", "socceron", "direct", "supertennis_ott", "sportsonline", "spon")
             and s.get("provider") != "mandrakodi"
             for s in sources
         )
@@ -621,7 +669,7 @@ class StreamService:
                     st_sources = [
                         s for s in matched_st["sources"]
                         if isinstance(s, dict)
-                        and s.get("source") not in ("dlhd", "tvvoo", "fctv33", "amstaff", "acestream", "socceron", "direct", "sportsonline", "spon")
+                        and s.get("source") not in ("dlhd", "tvvoo", "fctv33", "amstaff", "acestream", "socceron", "direct", "supertennis_ott", "sportsonline", "spon")
                         and s.get("provider") != "mandrakodi"
                     ]
                     if st_sources:
@@ -629,7 +677,7 @@ class StreamService:
                             s for s in sources
                             if not (
                                 isinstance(s, dict)
-                                and s.get("source") not in ("dlhd", "tvvoo", "fctv33", "amstaff", "acestream", "socceron", "direct", "sportsonline", "spon")
+                                and s.get("source") not in ("dlhd", "tvvoo", "fctv33", "amstaff", "acestream", "socceron", "direct", "supertennis_ott", "sportsonline", "spon")
                                 and s.get("provider") != "mandrakodi"
                             )
                         ]
@@ -654,14 +702,14 @@ class StreamService:
             except Exception:
                 pass
 
-        # 0. Process Mandrakodi (Amstaff ClearKey 1080p 50fps, Direct CDN, AceStream Media)
+        # 0. Process Mandrakodi (Amstaff ClearKey 1080p 50fps, Direct CDN, SuperTennis OTT, AceStream Media)
         mandrakodi_streams: List[Dict[str, Any]] = []
         acestream_streams: List[Dict[str, Any]] = []
         seen_mandrakodi_urls: Set[str] = set()
         seen_acestream_urls: Set[str] = set()
         mandrakodi_sources = [
             s for s in sources
-            if s.get("provider") == "mandrakodi" or s.get("source") in ("amstaff", "acestream", "socceron", "direct")
+            if s.get("provider") == "mandrakodi" or s.get("source") in ("amstaff", "acestream", "socceron", "direct", "supertennis_ott")
         ]
 
         for s in mandrakodi_sources:
@@ -773,9 +821,57 @@ class StreamService:
                             "behaviorHints": {"isLive": True, "notWebReady": False},
                         })
 
-        # Sort Mandrakodi and AceStream streams: Italian channels first
+            # Case E: SuperTennis Interactive Multi-Court Feeds (1..4)
+            elif src_type == "supertennis_ott":
+                ch_num = s_data.get("channel_num") or s.get("channel_num", 1)
+                mpd_url = s_data.get("mpd_url") or s_data.get("stream_url")
+                flag_str = "🇮🇹 "
+                title_name = f"🎾 SuperTennis OTT {ch_num} [Feed Extra - Live]"
+
+                # If EasyProxy is configured, generate transmuxed DASH -> HLS URL (broadest device compatibility)
+                if mpd_url and ep_url:
+                    encoded_mpd = urllib.parse.quote_plus(mpd_url)
+                    dash_url = f"{ep_url.rstrip('/')}/proxy/mpd/manifest.m3u8?d={encoded_mpd}"
+                    if ep_pass:
+                        dash_url += f"&api_password={ep_pass}"
+
+                    if dash_url not in seen_mandrakodi_urls:
+                        seen_mandrakodi_urls.add(dash_url)
+                        mandrakodi_streams.append({
+                            "name": f"{flag_str}{title_name} [HD 50fps]",
+                            "title": (
+                                f"🇮🇹 Fonte: SuperTennis OTT {ch_num} (Mandrakodi)\n"
+                                f"🎾 Multicampo Live • Qualità: HD 720p @ 50fps\n"
+                                f"⚡ Transmuxing HLS via EasyProxy"
+                            ),
+                            "url": dash_url,
+                            "behaviorHints": {"isLive": True, "notWebReady": False},
+                        })
+
+                # Also provide direct CDN MPD URL (native player playback, zero proxy load)
+                if mpd_url and mpd_url not in seen_mandrakodi_urls:
+                    seen_mandrakodi_urls.add(mpd_url)
+                    direct_suffix = " [Diretto CDN]" if ep_url else " [HD 50fps]"
+                    mandrakodi_streams.append({
+                        "name": f"{flag_str}{title_name}{direct_suffix}",
+                        "title": (
+                            f"🇮🇹 Fonte: SuperTennis OTT {ch_num} (Ufficiale CDN)\n"
+                            f"🎾 Multicampo Live • Qualità: HD 720p @ 50fps (DASH)\n"
+                            f"📡 Zero Carico Server • Connessione Diretta"
+                        ),
+                        "url": mpd_url,
+                        "behaviorHints": {"isLive": True, "notWebReady": False},
+                    })
+
+        # Sort Mandrakodi and AceStream streams: Italian linear channels first, then OTT feeds, then others
         mandrakodi_streams.sort(
-            key=lambda s: 0 if "🇮🇹" in s.get("name", "") or "italia" in s.get("title", "").lower() else 1
+            key=lambda s: (
+                0 if "Lineare" in s.get("name", "") else (
+                    1 if "SuperTennis OTT" in s.get("name", "") else (
+                        2 if "🇮🇹" in s.get("name", "") or "italia" in s.get("title", "").lower() else 3
+                    )
+                )
+            )
         )
         acestream_streams.sort(
             key=lambda s: 0 if "🇮🇹" in s.get("name", "") else 1

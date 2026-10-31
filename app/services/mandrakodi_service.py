@@ -130,6 +130,11 @@ class MandrakodiService:
         self._channels_lock: asyncio.Lock = asyncio.Lock()
         # Cache for dynamically resolved Sky Sport channels: {channel_id: (resolved_dict, expiry_ts)}
         self._sky_channel_cache: Dict[str, Tuple[Dict[str, Any], float]] = {}
+        # Cache for active SuperTennis OTT feeds: (cached_streams, expiry_ts)
+        self._st_ott_cache: List[Dict[str, Any]] = []
+        self._st_ott_cache_time: float = 0.0
+        self._st_ott_lock: Optional[asyncio.Lock] = None
+        self._st_ott_loop: Optional[asyncio.AbstractEventLoop] = None
         # Persistent HTTP client pool for keep-alive connection reuse
         self._client: Optional[httpx.AsyncClient] = None
         self._client_loop: Optional[asyncio.AbstractEventLoop] = None
@@ -144,6 +149,14 @@ class MandrakodiService:
                 self._client_lock = asyncio.Lock()
                 self._lock_loop = cur_loop
             return self._client_lock
+
+    def _get_st_ott_lock(self) -> asyncio.Lock:
+        with self._init_lock:
+            cur_loop = asyncio.get_running_loop()
+            if self._st_ott_lock is None or self._st_ott_loop is not cur_loop:
+                self._st_ott_lock = asyncio.Lock()
+                self._st_ott_loop = cur_loop
+            return self._st_ott_lock
 
     async def _get_client(self) -> httpx.AsyncClient:
         """Returns or lazily initializes the shared HTTP client with connection pooling."""
@@ -1190,6 +1203,98 @@ class MandrakodiService:
         except Exception as e:
             logger.error("Failed to parse resolved JSON for channel %s: %s", channel_id, e)
             return None
+
+    async def get_active_supertennis_ott_streams(self) -> List[Dict[str, Any]]:
+        """
+        Probes SuperTennis interactive OTT feeds (channels 1..4) in parallel using lightweight HTTP Range requests.
+        Only returns feeds actively broadcasting live video (> 250 KB segment size),
+        filtering out inactive feeds, offline states, or static cartels.
+        Results are cached in memory for 25 minutes (TTL) to avoid unnecessary requests.
+        """
+        now = time.time()
+        if self._st_ott_cache and (now - self._st_ott_cache_time < 1500):
+            return list(self._st_ott_cache)
+
+        lock = self._get_st_ott_lock()
+        async with lock:
+            now = time.time()
+            if self._st_ott_cache and (now - self._st_ott_cache_time < 1500):
+                return list(self._st_ott_cache)
+
+            client = await self._get_client()
+            headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+
+            async def _probe_channel(ch_num: int) -> Optional[Dict[str, Any]]:
+                manifest_url = f"https://421b2081187a40368f24e4fb496bfc26.msvdn.net/channel{ch_num}/manifest.mpd"
+                try:
+                    r = await client.get(manifest_url, headers=headers, follow_redirects=True, timeout=2.5)
+                    if r.status_code != 200:
+                        return None
+                    text = r.text
+                    rep_match = re.search(r'<Representation width="[0-9]+" height="[0-9]+"[^>]*id="([^"]+)"', text)
+                    time_match = re.search(r'<S t="([0-9]+)"', text)
+                    media_match = re.search(r'media="([^"]+)"', text)
+                    if not (rep_match and time_match and media_match):
+                        return None
+
+                    rep_id = rep_match.group(1)
+                    t_val = time_match.group(1)
+                    seg_rel = media_match.group(1).replace("$RepresentationID$", rep_id).replace("$Time$", t_val)
+                    seg_url = str(r.url).rsplit("/", 1)[0] + "/" + seg_rel
+
+                    seg_r = await client.get(
+                        seg_url,
+                        headers={**headers, "Range": "bytes=0-250000"},
+                        timeout=2.5,
+                    )
+                    if seg_r.status_code not in (200, 206):
+                        return None
+
+                    content_range = seg_r.headers.get("content-range", "")
+                    total_size = int(content_range.split("/")[-1]) if "/" in content_range else len(seg_r.content)
+
+                    # Active video (live 50fps tennis match) is > 500 KB per 2s segment.
+                    # Cartels/slates/frozen frames compress down to < 100 KB.
+                    if total_size > 250000:
+                        return {
+                            "provider": "mandrakodi",
+                            "source": "supertennis_ott",
+                            "id": f"mandrakodi:supertennis_ott_{ch_num}",
+                            "name": f"SuperTennis OTT {ch_num}",
+                            "channel_num": ch_num,
+                            "country": "Italia",
+                            "language": "ita",
+                            "quality": "720p 50fps",
+                            "stream_data": {
+                                "stream_url": manifest_url,
+                                "mpd_url": manifest_url,
+                                "channel_num": ch_num,
+                                "is_clear": True,
+                            },
+                        }
+                    else:
+                        logger.debug("SuperTennis OTT %d is idle/cartel (size %d bytes)", ch_num, total_size)
+                except Exception as e:
+                    logger.debug("SuperTennis OTT channel %d probe failed or timed out: %s", ch_num, e)
+                return None
+
+            tasks = [_probe_channel(i) for i in range(1, 5)]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+
+            active_streams: List[Dict[str, Any]] = []
+            for res in results:
+                if isinstance(res, dict) and res.get("id"):
+                    active_streams.append(res)
+
+            active_streams.sort(key=lambda x: x.get("channel_num", 0))
+            self._st_ott_cache = active_streams
+            self._st_ott_cache_time = time.time()
+            logger.info(
+                "SuperTennis OTT probe completed: %d/%d channels active (cached for 25 min)",
+                len(active_streams),
+                4,
+            )
+            return list(self._st_ott_cache)
 
 
 mandrakodi_service = MandrakodiService()
