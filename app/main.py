@@ -33,6 +33,7 @@ from app.config import (
     PUBLIC_URL,
     SPORT_GENRES,
     STREAMED_API_HOST,
+    TIMEZONE,
 )
 from app.services.banner_service import banner_service
 from app.services.catalog_service import catalog_service
@@ -93,11 +94,11 @@ templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 def decode_config(config_str: Optional[str]) -> Tuple[Optional[str], Optional[str], Optional[str], str]:
     """
     Decodes the Base64 config path parameter.
-    Format: 'epUrl|epPass|tz|client' (or JSON fallback).
-    Returns (ep_url, ep_pass, tz, client).
+    Format: 'epUrl|epPass|client' (or legacy 'epUrl|epPass|tz|client' / JSON).
+    Returns (ep_url, ep_pass, tz, client), where tz is guaranteed to be server TIMEZONE.
     """
     if not config_str:
-        return None, None, "Europe/Rome", "stremio"
+        return None, None, TIMEZONE, "stremio"
 
     try:
         b64 = config_str.replace("-", "+").replace("_", "/")
@@ -105,23 +106,26 @@ def decode_config(config_str: Optional[str]) -> Tuple[Optional[str], Optional[st
         raw = base64.b64decode(b64).decode("utf-8")
 
         if "|" in raw:
-            parts = raw.split("|")
-            ep_url = parts[0].strip() if len(parts) > 0 and parts[0].strip() else None
-            ep_pass = parts[1].strip() if len(parts) > 1 and parts[1].strip() else None
-            tz = parts[2].strip() if len(parts) > 2 and parts[2].strip() else "Europe/Rome"
-            client = parts[3].strip().lower() if len(parts) > 3 and parts[3].strip() else "stremio"
-            return ep_url, ep_pass, tz, client
+            parts = [p.strip() for p in raw.split("|")]
+            ep_url = parts[0] if len(parts) > 0 and parts[0] else None
+            ep_pass = parts[1] if len(parts) > 1 and parts[1] else None
+            client = "stremio"
+            if any(p.lower() == "nuvio" for p in parts[2:]):
+                client = "nuvio"
+            elif any(p.lower() == "stremio" for p in parts[2:]):
+                client = "stremio"
+            return ep_url, ep_pass, TIMEZONE, client
 
         data = json.loads(raw)
         return (
             data.get("epUrl"),
             data.get("epPass"),
-            data.get("tz", "Europe/Rome"),
+            TIMEZONE,
             (data.get("client") or "stremio").strip().lower(),
         )
     except Exception as e:
         logger.debug("Failed decoding config '%s': %s", config_str, e)
-        return None, None, "Europe/Rome", "stremio"
+        return None, None, TIMEZONE, "stremio"
 
 
 _HOST_REGEX = re.compile(r"^[a-zA-Z0-9.\-_]+(?::\d{1,5})?$")
@@ -278,7 +282,6 @@ async def configure_page(
     request: Request,
     epUrl: Optional[str] = None,
     epPass: Optional[str] = None,
-    tz: Optional[str] = None,
     client: Optional[str] = None,
     clientTarget: Optional[str] = None,
     save: Optional[str] = None,
@@ -291,11 +294,7 @@ async def configure_page(
 
     if save and epUrl:
         ep_pass_clean = epPass or ""
-        tz_clean = tz or "Europe/Rome"
-        if target_client == "nuvio":
-            raw_config = f"{epUrl.strip()}|{ep_pass_clean.strip()}|{tz_clean.strip()}|nuvio"
-        else:
-            raw_config = f"{epUrl.strip()}|{ep_pass_clean.strip()}|{tz_clean.strip()}"
+        raw_config = f"{epUrl.strip()}|{ep_pass_clean.strip()}|{target_client}"
         encoded_config = base64.b64encode(raw_config.encode("utf-8")).decode("utf-8")
 
         base_url = get_base_url(request)
@@ -310,7 +309,6 @@ async def configure_page(
         "genres": SPORT_GENRES,
         "epUrl": epUrl or "",
         "epPass": epPass or "",
-        "tz": tz or "Europe/Rome",
         "client": target_client,
         "install_url": install_url,
         "stremio_url": stremio_url,

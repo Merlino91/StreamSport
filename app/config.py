@@ -52,6 +52,9 @@ ENABLE_ITALIAN_EPG = os.getenv("ENABLE_ITALIAN_EPG", "true").lower() in ("true",
 TVVOO_CACHE_INTERVAL = int(os.getenv("TVVOO_CACHE_INTERVAL", "21600"))  # 6 hours (in seconds)
 ITALIAN_EPG_CACHE_INTERVAL = int(os.getenv("ITALIAN_EPG_CACHE_INTERVAL", "7200"))  # 2 hours (in seconds)
 
+# Server Timezone (Defaults to Europe/Rome, customizable via docker-compose / .env)
+TIMEZONE = os.getenv("TIMEZONE", os.getenv("DEFAULT_TIMEZONE", "Europe/Rome")).strip()
+
 # FCTV33 (RBTV / TCPWE) Provider Settings
 ENABLE_FCTV33 = os.getenv("ENABLE_FCTV33", "true").lower() in ("true", "1", "yes")
 FCTV33_API_BASE = os.getenv("FCTV33_API_BASE", "https://apis-data10.tcpwe138stya.ru")

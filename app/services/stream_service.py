@@ -878,9 +878,13 @@ class StreamService:
         # 3. Process FCTV33 streams with TencentEdgeOne CDN format
         fctv33_streams: List[Dict[str, Any]] = []
         if ep_url:
-            fctv_sources = [s for s in sources if s.get("source") == "fctv33"]
-            fctv_mid = match.get("_fctv33_id") or (match.get("id", "").replace("fctv33:", "") if "fctv33:" in match.get("id", "") else None)
-            fctv_sport = match.get("_sport_type", 1)
+            fctv_sources = [s for s in sources if isinstance(s, dict) and s.get("source") == "fctv33"]
+            fctv_mid = (
+                match.get("_fctv33_id")
+                or (match.get("id", "").replace("fctv33:", "") if "fctv33:" in match.get("id", "") else None)
+                or next((s.get("match_id") for s in fctv_sources if s.get("match_id")), None)
+            )
+            fctv_sport = match.get("_sport_type") or next((s.get("sport_type") for s in fctv_sources if s.get("sport_type")), 1)
 
             # Live-refresh: if match has FCTV33 ID and streams aren't resolved yet, query /api/match/detail in real-time
             has_concrete_streams = any(s.get("stream_id") for s in fctv_sources)

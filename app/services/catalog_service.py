@@ -20,6 +20,7 @@ from app.config import (
     NUVIO_CATALOG_LOOKUP,
     SPORT_GENRES,
     STREAMED_API_HOST,
+    TIMEZONE,
 )
 from app.services.daddylive_api import daddylive_api
 from app.services.db_service import db_service
@@ -54,11 +55,13 @@ except ImportError:
     ZoneInfo = None
     ZoneInfoNotFoundError = Exception
 
-DEFAULT_TIMEZONE = "Europe/Rome"
+DEFAULT_TIMEZONE = TIMEZONE
 
 def get_safe_timezone(user_tz: Optional[str] = None) -> datetime.tzinfo:
     """Safely resolves timezone from user string, gracefully falling back to Europe/Rome or UTC."""
     target = (user_tz or DEFAULT_TIMEZONE).strip()
+    if target.lower() in ("nuvio", "stremio", "invalid", "unknown", "none", ""):
+        target = DEFAULT_TIMEZONE
     if ZoneInfo is not None:
         try:
             return ZoneInfo(target)
@@ -72,7 +75,12 @@ def get_safe_timezone(user_tz: Optional[str] = None) -> datetime.tzinfo:
         return pytz.timezone(target)
     except Exception:
         pass
-    return datetime.timezone.utc
+    try:
+        import pytz
+        return pytz.timezone(DEFAULT_TIMEZONE)
+    except Exception:
+        pass
+    return datetime.timezone(datetime.timedelta(hours=1))
 
 
 logger = logging.getLogger("streamsport.catalog")
@@ -897,6 +905,10 @@ class CatalogService:
                 cand_sources = list(best_cand.get("sources", []))
                 off_copy["sources"] = cand_sources
                 off_copy["_matched_cluster_id"] = best_cand.get("id")
+                if best_cand.get("_fctv33_id"):
+                    off_copy["_fctv33_id"] = best_cand["_fctv33_id"]
+                if best_cand.get("_sport_type"):
+                    off_copy["_sport_type"] = best_cand["_sport_type"]
                 # Preserve any alternate titles from the provider
                 if best_cand.get("raw_titles"):
                     existing_raw = set(off_copy.get("raw_titles", []))
@@ -1384,7 +1396,7 @@ class CatalogService:
                         (
                             (m.get("_silo") == "tennis" or m.get("category") == "tennis")
                             and not bool(isinstance(m.get("teams"), dict) and m["teams"].get("home") and m["teams"].get("away"))
-                            and any(k in (m.get("title") or "").lower() for k in ("live", "wta", "atp", "masters", "slam"))
+                            and any(k in f"{m.get('title', '')} {m.get('competition', '')} {m.get('eventSynopsis', '')}".lower() for k in ("live", "wta", "atp", "masters", "slam"))
                         )
                         or (
                             (m.get("_silo") == "golf" or m.get("category") in ("golf", "altri_sport"))

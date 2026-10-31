@@ -55,15 +55,7 @@
             <input id="epPass" name="epPass" type="password" placeholder="Password API proxy se impostata" value="{{ epPass }}">
           </div>
 
-          <div class="form-group">
-            <label for="tz">Fuso Orario</label>
-            <select id="tz" name="tz">
-              <option value="Europe/Rome" {% if tz == 'Europe/Rome' or not tz %}selected{% endif %}>Europa / Roma (CET / CEST)</option>
-              <option value="UTC" {% if tz == 'UTC' %}selected{% endif %}>UTC</option>
-              <option value="Europe/London" {% if tz == 'Europe/London' %}selected{% endif %}>Europa / Londra</option>
-              <option value="America/New_York" {% if tz == 'America/New_York' %}selected{% endif %}>America / New York</option>
-            </select>
-          </div>
+
 
           <div class="form-group">
             <label for="clientTarget">Piattaforma Client Target</label>

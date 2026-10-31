@@ -447,6 +447,19 @@ class ItalianEPGService:
                 if c not in ("Tennis", "Diretta", "Giappone", "Austria", "Francia", "Spagna", "Italia", "Cina", "Germania"):
                     city = c
                     break
+            if not city:
+                KNOWN_TENNIS_CITIES = (
+                    "tokyo", "guangzhou", "vienna", "basilea", "basel", "hong kong", "jiujiang",
+                    "parigi", "paris", "torino", "turin", "milano", "roma", "madrid", "cincinnati",
+                    "miami", "indian wells", "shanghai", "beijing", "pechino", "brisbane", "adelaide",
+                    "auckland", "sydney", "doha", "dubai", "acapulco", "rio", "barcellona", "barcelona",
+                    "monte carlo", "montecarlo", "halle", "eastbourne", "berlino", "berlin", "stuttgart"
+                )
+                s_low = s.lower()
+                for kc in KNOWN_TENNIS_CITIES:
+                    if re.search(rf"\b{re.escape(kc)}\b", s_low):
+                        city = kc.title()
+                        break
             if tier and city:
                 return f"{circ} {tier} {city}"
             elif tier:
@@ -904,13 +917,16 @@ class ItalianEPGService:
                 comp, details = self._extract_competition_and_details(raw_title)
 
                 # If competition is missing or generic, enrich using semantic URL or synopsis
-                if not comp or comp.lower() in ("sport", "tennis", "calcio", "basket", "motori", "pallavolo", "diretta", "live") or len(comp) < 3:
-                    if url_comp:
+                GENERIC_COMPS = ("sport", "tennis", "calcio", "basket", "motori", "pallavolo", "diretta", "live", "altri sport")
+                if not comp or comp.lower() in GENERIC_COMPS or len(comp) < 3:
+                    if url_comp and url_comp.lower() not in GENERIC_COMPS:
                         comp = url_comp
                     else:
                         syn_comp = self._extract_competition_from_synopsis(synopsis)
                         if syn_comp:
                             comp = syn_comp
+                        elif url_comp:
+                            comp = url_comp
 
                 title, teams_dict = self._normalize_teams_and_title(comp, details)
                 if not title or not self._is_real_sport_event(title, teams_dict):
