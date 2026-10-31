@@ -196,6 +196,126 @@ class ItalianEPGService:
         re.I,
     )
 
+    SKY_SOCCER_MAP = {
+        "serie-a": "Serie A",
+        "serie-b": "Serie B",
+        "serie-c": "Serie C",
+        "premier-league": "Premier League",
+        "bundesliga": "Bundesliga",
+        "bundesliga-2": "2. Bundesliga",
+        "2-bundesliga": "2. Bundesliga",
+        "uefa-champions-league": "UEFA Champions League",
+        "champions-league": "UEFA Champions League",
+        "uefa-europa-league": "UEFA Europa League",
+        "europa-league": "UEFA Europa League",
+        "uefa-conference-league": "UEFA Conference League",
+        "conference-league": "UEFA Conference League",
+        "uefa-nations-league": "UEFA Nations League",
+        "nations-league": "UEFA Nations League",
+        "coppa-italia": "Coppa Italia",
+        "supercoppa-italiana": "Supercoppa Italiana",
+        "fa-cup": "FA Cup",
+        "carabao-cup": "Carabao Cup",
+        "efl-cup": "Carabao Cup",
+        "la-liga": "LaLiga",
+        "laliga": "LaLiga",
+        "ligue-1": "Ligue 1",
+        "copa-libertadores": "Copa Libertadores",
+        "copa-sudamericana": "Copa Sudamericana",
+        "fifa-world-cup": "FIFA World Cup",
+    }
+
+    SKY_TENNIS_SPECIAL_MAP = {
+        "tennis-wimbledon": "Wimbledon",
+        "tennis-roland-garros": "Roland Garros",
+        "tennis-us-open": "US Open",
+        "tennis-australian-open": "Australian Open",
+        "tennis-atp-finals": "ATP Finals",
+        "tennis-wta-finals": "WTA Finals",
+        "tennis-coppa-davis": "Coppa Davis",
+        "tennis-davis-cup": "Coppa Davis",
+        "tennis-billie-jean-king-cup": "BJK Cup",
+        "tennis-bjk-cup": "BJK Cup",
+        "tennis-laver-cup": "Laver Cup",
+        "tennis-united-cup": "United Cup",
+    }
+
+    SKY_MOTOR_MAP = {
+        "f1": "Formula 1",
+        "formula-1": "Formula 1",
+        "formula1": "Formula 1",
+        "f2": "Formula 2",
+        "formula-2": "Formula 2",
+        "f3": "Formula 3",
+        "formula-3": "Formula 3",
+        "motogp": "MotoGP",
+        "moto-gp": "MotoGP",
+        "moto2": "Moto2",
+        "moto3": "Moto3",
+        "superbike": "Superbike",
+        "worldsbk": "Superbike",
+        "sbk": "Superbike",
+        "indycar": "IndyCar",
+        "nascar": "NASCAR",
+        "wec": "WEC",
+        "wrc": "WRC",
+    }
+
+    SKY_BASKET_MAP = {
+        "eurolega": "Eurolega",
+        "euroleague": "Eurolega",
+        "eurocup": "Eurocup",
+        "nba": "NBA",
+        "wnba": "WNBA",
+        "serie-a-basket": "LBA Serie A",
+        "basket-serie-a": "LBA Serie A",
+        "lba": "LBA Serie A",
+        "serie-a2-basket": "Serie A2 Basket",
+        "bcl": "BCL",
+        "fiba": "FIBA",
+    }
+
+    SKY_VOLLEY_MAP = {
+        "superlega": "Superlega",
+        "superlega-credembanca": "Superlega",
+        "volley-superlega": "Superlega",
+        "serie-a1-femminile": "Serie A1 Femminile",
+        "volley-femminile": "Serie A1 Femminile",
+        "cev-champions-league": "CEV Champions League",
+    }
+
+    SKY_OTHER_MAP = {
+        "six-nations": "Sei Nazioni",
+        "sei-nazioni": "Sei Nazioni",
+        "rugby-serie-a-elite": "Serie A Elite Rugby",
+        "rugby-championship": "Rugby Championship",
+        "pga-tour": "PGA Tour",
+        "dp-world-tour": "DP World Tour",
+        "ryder-cup": "Ryder Cup",
+    }
+
+    MAGAZINE_SLUG_PATTERNS = [
+        re.compile(r"-remix\b", re.I), re.compile(r"\bremix\b", re.I),
+        re.compile(r"-magazine\b", re.I), re.compile(r"\bmagazine\b", re.I),
+        re.compile(r"-special\b", re.I), re.compile(r"-speciale\b", re.I), re.compile(r"\bspeciale\b", re.I),
+        re.compile(r"-preview\b", re.I), re.compile(r"\bpreview\b", re.I), re.compile(r"\banteprima\b", re.I),
+        re.compile(r"-talk\b", re.I), re.compile(r"\btalk\b", re.I),
+        re.compile(r"-stories\b", re.I), re.compile(r"-story\b", re.I),
+        re.compile(r"boat-show", re.I),
+        re.compile(r"this-is-padel", re.I),
+        re.compile(r"atp-tour-this-week", re.I),
+        re.compile(r"paddock-live", re.I),
+        re.compile(r"conf-stampa", re.I), re.compile(r"conferenza-stampa", re.I),
+        re.compile(r"talent-time", re.I),
+        re.compile(r"\b90-10\b", re.I),
+        re.compile(r"la-giovane-italia", re.I),
+        re.compile(r"\brubrica\b", re.I),
+        re.compile(r"matchplan", re.I),
+        re.compile(r"mondo-gol", re.I),
+        re.compile(r"calcio-show", re.I),
+        re.compile(r"calciomercato", re.I),
+    ]
+
     def __init__(self):
         self._cached_matches: List[Dict[str, Any]] = []
         self._last_fetch_time: float = 0.0
@@ -236,6 +356,130 @@ class ItalianEPGService:
         return cities
 
     @classmethod
+    def _parse_sky_semantic_url(cls, content_url: str) -> Tuple[Optional[str], bool]:
+        """
+        Parses Sky Italia semantic URL hierarchy:
+          /(sport|programmi-tv)/{comp_slug}/{event_slug}/{uuid}
+        Returns:
+          (competition_name, is_magazine_or_show)
+        """
+        if not content_url or not isinstance(content_url, str):
+            return None, False
+
+        m = re.search(r"/(sport|programmi-tv)/([^/]+)/([^/]+)", content_url)
+        if not m:
+            return None, False
+
+        section = m.group(1).lower()
+        comp_slug = m.group(2).lower()
+        event_slug = m.group(3).lower()
+
+        is_magazine = False
+        slug_combined = f"{comp_slug} {event_slug}"
+        if any(pat.search(slug_combined) for pat in cls.MAGAZINE_SLUG_PATTERNS):
+            is_magazine = True
+
+        if section == "programmi-tv" and not any(k in comp_slug for k in ("sport", "calcio", "tennis", "f1", "motogp", "basket", "volley")):
+            is_magazine = True
+
+        if comp_slug in cls.SKY_TENNIS_SPECIAL_MAP:
+            return cls.SKY_TENNIS_SPECIAL_MAP[comp_slug], is_magazine
+        if comp_slug in cls.SKY_SOCCER_MAP:
+            return cls.SKY_SOCCER_MAP[comp_slug], is_magazine
+        if comp_slug in cls.SKY_MOTOR_MAP:
+            return cls.SKY_MOTOR_MAP[comp_slug], is_magazine
+        if comp_slug in cls.SKY_BASKET_MAP:
+            return cls.SKY_BASKET_MAP[comp_slug], is_magazine
+        if comp_slug in cls.SKY_VOLLEY_MAP:
+            return cls.SKY_VOLLEY_MAP[comp_slug], is_magazine
+        if comp_slug in cls.SKY_OTHER_MAP:
+            return cls.SKY_OTHER_MAP[comp_slug], is_magazine
+
+        if comp_slug == "tennis-wta":
+            return "WTA", is_magazine
+        if comp_slug == "tennis-atp":
+            return "ATP", is_magazine
+        if comp_slug == "tennis-challenger":
+            return "Challenger", is_magazine
+
+        m_tennis = re.match(r"^tennis-(wta|atp|challenger)(?:-masters)?(?:-(\d{3,4}))?-([a-z0-9-]+)$", comp_slug)
+        if m_tennis:
+            circuit = m_tennis.group(1).upper()
+            tier = m_tennis.group(2)
+            raw_city = m_tennis.group(3)
+            has_masters = "masters" in comp_slug
+            city = " ".join(w.capitalize() for w in raw_city.split("-") if w not in ("atp", "wta", "men", "women"))
+            if circuit == "ATP" and (has_masters or tier == "1000"):
+                return f"ATP Masters 1000 {city}".strip(), is_magazine
+            elif tier:
+                return f"{circuit} {tier} {city}".strip(), is_magazine
+            else:
+                return f"{circuit} {city}".strip(), is_magazine
+
+        if "padel" in comp_slug:
+            clean_p = " ".join(w.capitalize() for w in comp_slug.replace("padel-", "").split("-"))
+            return f"Padel {clean_p}".strip(), is_magazine
+
+        clean_name = " ".join(w.capitalize() for w in comp_slug.split("-") if w not in ("live", "diretta", "sport"))
+        if clean_name and len(clean_name) >= 3:
+            return clean_name, is_magazine
+
+        return None, is_magazine
+
+    @classmethod
+    def _extract_competition_from_synopsis(cls, synopsis: str) -> Optional[str]:
+        """
+        Fallback heuristic: extracts official competition name from Guida TV event synopsis
+        when URL hierarchy or title is sparse.
+        """
+        if not synopsis or not isinstance(synopsis, str):
+            return None
+        s = synopsis.strip()
+
+        # 1. Tennis circuit + tier + city (e.g. 'Dai campi di Tokyo, Giappone, il torneo di tennis WTA 500...')
+        m_ten = re.search(r"\b(WTA|ATP)\s*(\d{3,4})?\b", s, re.I)
+        if m_ten:
+            circ = m_ten.group(1).upper()
+            tier = m_ten.group(2)
+            all_cities = re.findall(r"\b(?:di|da)\s+([A-Z][a-z]+)", s)
+            city = ""
+            for c in all_cities:
+                if c not in ("Tennis", "Diretta", "Giappone", "Austria", "Francia", "Spagna", "Italia", "Cina", "Germania"):
+                    city = c
+                    break
+            if tier and city:
+                return f"{circ} {tier} {city}"
+            elif tier:
+                return f"{circ} {tier}"
+            elif city:
+                return f"{circ} {city}"
+            return circ
+
+        # 2. Grand Slam or special tennis tournaments
+        m_slam = re.search(r"\b(Wimbledon|Roland Garros|US Open|Australian Open|Coppa Davis|BJK Cup)\b", s, re.I)
+        if m_slam:
+            return m_slam.group(1)
+
+        # 3. Motorsports Grand Prix
+        m_gp = re.search(r"\b(?:Gran Premio|GP)\s+(?:del\s+|della\s+|di\s+)?([A-Za-z\s]+?)(?:\s+di\s+(?:F1|Formula\s*1|MotoGP)|\s*[,.]|$)", s, re.I)
+        if m_gp and any(k in s.lower() for k in ("f1", "formula 1", "motogp")):
+            sport = "Formula 1" if ("f1" in s.lower() or "formula" in s.lower()) else "MotoGP"
+            gp_name = m_gp.group(1).strip()
+            return f"{sport}: GP {gp_name}"
+
+        # 4. Standard Football & Basketball & Volley Leagues
+        m_league = re.search(r"\b(Serie A|Serie B|Serie C|Premier League|Bundesliga|UEFA Champions League|Champions League|UEFA Europa League|Europa League|Conference League|Coppa Italia|Eurolega|Eurocup|Superlega)\b", s, re.I)
+        if m_league:
+            l_name = m_league.group(1).title()
+            if "Champions League" in l_name:
+                return "UEFA Champions League"
+            if "Europa League" in l_name:
+                return "UEFA Europa League"
+            return l_name
+
+        return None
+
+    @classmethod
     def _is_replay_event(
         cls,
         raw_title: str,
@@ -257,10 +501,12 @@ class ItalianEPGService:
         s_lower = s.lower()
         url_lower = (content_url or "").lower()
 
-        # 1. Explicit replay tags in title or synopsis
+        # 1. Explicit replay tags in title, synopsis, or content URL
         if cls.REPLAY_PATTERN.search(t):
             return True
-        if s and re.search(r"\b(?:in\s+replica|replica\s+delle?|offre\s+in\s+replica)\b", s, re.I):
+        if any(k in url_lower for k in ("/replica", "-replica", "-rerun")):
+            return True
+        if s and re.search(r"\b(?:in\s+replica|replica\s+delle?|offre\s+in\s+replica|andat[ao]\s+in\s+onda)\b", s, re.I):
             return True
 
         # 2. Previous year detection (e.g. 'ATP 1000 Parigi Bercy 2025' when current year is 2026)
@@ -322,8 +568,10 @@ class ItalianEPGService:
         s_lower = (synopsis or "").lower()
         url_lower = (content_url or "").lower()
 
-        # 1. Explicit differita/sintesi tags in title or synopsis
+        # 1. Explicit differita/sintesi tags in title, synopsis, or content URL
         if any(k in t_lower for k in ("differita", "sintesi", "highlights")):
+            return True
+        if any(k in url_lower for k in ("/differita", "/sintesi", "-differita", "-sintesi")):
             return True
         if any(k in s_lower for k in ("in differita", "differita", "sintesi")):
             return True
@@ -610,6 +858,12 @@ class ItalianEPGService:
                     or "/diretta-" in content_url
                 )
 
+                # Semantic URL parsing: extract competition and discard editorial magazine/shows
+                url_comp, is_magazine = self._parse_sky_semantic_url(content_url)
+                if is_magazine:
+                    logger.debug("EPG Filter: scartato magazine/studio show da URL '%s'", content_url)
+                    continue
+
                 # Replay Event Filter: discard archival replays, past years, or inactive tournaments
                 if self._is_replay_event(
                     raw_title,
@@ -648,6 +902,16 @@ class ItalianEPGService:
 
                 # Title & Teams
                 comp, details = self._extract_competition_and_details(raw_title)
+
+                # If competition is missing or generic, enrich using semantic URL or synopsis
+                if not comp or comp.lower() in ("sport", "tennis", "calcio", "basket", "motori", "pallavolo", "diretta", "live") or len(comp) < 3:
+                    if url_comp:
+                        comp = url_comp
+                    else:
+                        syn_comp = self._extract_competition_from_synopsis(synopsis)
+                        if syn_comp:
+                            comp = syn_comp
+
                 title, teams_dict = self._normalize_teams_and_title(comp, details)
                 if not title or not self._is_real_sport_event(title, teams_dict):
                     continue
@@ -884,6 +1148,13 @@ class ItalianEPGService:
 
                 # Title & Teams
                 comp, details = self._extract_competition_and_details(raw_title)
+
+                # If competition is missing or generic, enrich using synopsis
+                if not comp or comp.lower() in ("sport", "tennis", "calcio", "basket", "motori", "pallavolo", "diretta", "live") or len(comp) < 3:
+                    syn_comp = self._extract_competition_from_synopsis(synopsis)
+                    if syn_comp:
+                        comp = syn_comp
+
                 title, teams_dict = self._normalize_teams_and_title(comp, details)
                 if not title or not self._is_real_sport_event(title, teams_dict):
                     continue
@@ -1316,6 +1587,19 @@ class ItalianEPGService:
                         break
                     continue
 
+                # Guard: Senior broadcast match on Sky/Tivusat MUST NOT match a youth/primavera fixture
+                m_is_youth = m.get("_age") == "+" or any(k in m_title.lower() for k in ("u19", "u20", "u21", "u23", "primavera", "youth"))
+                ep_is_youth = any(k in ep.get("title", "").lower() for k in ("u19", "u20", "u21", "u23", "primavera", "youth"))
+                if m_is_youth != ep_is_youth:
+                    continue
+
+                # Guard: Non-tennis events must not cross men's and women's competitions
+                if m_silo != "tennis":
+                    m_is_women = m.get("_gender") == "+" or any(k in m_title.lower() for k in ("women", "femminile", "femm", "ladies", "donne"))
+                    ep_is_women = any(k in ep.get("title", "").lower() for k in ("women", "femminile", "femm", "ladies", "donne"))
+                    if m_is_women != ep_is_women:
+                        continue
+
                 ep_teams = ep.get("teams")
                 ep_tokens = self._clean_tokens(ep.get("title", ""))
 
@@ -1334,6 +1618,24 @@ class ItalianEPGService:
                         elif len(w1) >= 2 and len(w2) >= 2:
                             ratio = SequenceMatcher(None, m_tokens, ep_tokens).ratio()
                             if ratio >= 0.70:
+                                is_same = True
+
+                # Competition-reinforced matching:
+                # If team tokens share at least 1 significant token and competition names match
+                # (e.g. 'Serie A', 'Premier League', 'Eurolega', 'Formula 1', 'MotoGP'), confirm match
+                if not is_same and m_tokens and ep_tokens:
+                    m_c = (m.get("competition") or m.get("canonical_competition") or "").lower()
+                    ep_c = (ep.get("competition") or ep.get("_competition") or "").lower()
+                    if m_c and ep_c:
+                        major_comps = (
+                            "serie a", "serie b", "serie c", "premier league", "la liga", "laliga",
+                            "bundesliga", "ligue 1", "champions league", "europa league", "conference league",
+                            "eurolega", "eurocup", "formula 1", "motogp", "superbike"
+                        )
+                        if any(k in m_c and k in ep_c for k in major_comps):
+                            w1 = set(m_tokens.split())
+                            w2 = set(ep_tokens.split())
+                            if w1 & w2:
                                 is_same = True
 
                 # Tennis Tournament Session Bridge:

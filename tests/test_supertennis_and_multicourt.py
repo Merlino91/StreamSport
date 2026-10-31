@@ -354,6 +354,161 @@ class TestSuperTennisAndMulticourt(unittest.TestCase):
 
         db_service.delete_matches_by_ids([test_id])
 
+    def test_parse_sky_semantic_url(self):
+        """Verifies Sky URL hierarchy correctly maps competitions and flags studio/magazine shows."""
+        # 1. Real sporting competitions
+        cases_valid = [
+            ("/sport/tennis-wta-500-tokyo/1a-semifinale/uuid-1", "WTA 500 Tokyo", False),
+            ("/sport/tennis-atp-500-vienna/quarti-di-finale/uuid-2", "ATP 500 Vienna", False),
+            ("/sport/tennis-atp-masters-1000-parigi/1o-turno/uuid-3", "ATP Masters 1000 Parigi", False),
+            ("/sport/tennis-wimbledon/finale/uuid-4", "Wimbledon", False),
+            ("/sport/serie-a/venezia-inter/uuid-5", "Serie A", False),
+            ("/sport/premier-league/arsenal-chelsea/uuid-6", "Premier League", False),
+            ("/sport/f1/gp-messico-prove-libere-2/uuid-7", "Formula 1", False),
+            ("/sport/motogp/gp-indonesia-gara/uuid-8", "MotoGP", False),
+            ("/sport/eurolega/barcellona-olimpia-milano/uuid-9", "Eurolega", False),
+            ("/sport/padel-kuwait-major/semifinali/uuid-10", "Padel Kuwait Major", False),
+        ]
+        for url, expected_comp, expected_mag in cases_valid:
+            comp, is_mag = italian_epg_service._parse_sky_semantic_url(url)
+            self.assertEqual(comp, expected_comp, f"Failed for {url}")
+            self.assertEqual(is_mag, expected_mag, f"Failed magazine check for {url}")
+
+        # 2. Studio / Magazine TV shows that must be discarded
+        cases_magazine = [
+            "/sport/motogp-remix/motogp-remix-gp-thailandia/uuid-11",
+            "/sport/di-canio-premier-special/di-canio-premier-special-ep-3/uuid-12",
+            "/sport/f1-paddock-live-post-libere/f1-paddock-live/uuid-13",
+            "/sport/bundesliga-matchplan/bundesliga-matchplan/uuid-14",
+            "/sport/the-boat-show/the-boat-show-ep-10/uuid-15",
+            "/sport/atp-tour-this-week/atp-tour-this-week/uuid-16",
+            "/sport/premier-league-magazine/premier-league-magazine/uuid-17",
+            "/sport/f1-conf-stampa-piloti/f1-conf-stampa/uuid-18",
+            "/sport/motogp-talent-time/motogp-talent-time/uuid-19",
+        ]
+        for url in cases_magazine:
+            _, is_mag = italian_epg_service._parse_sky_semantic_url(url)
+            self.assertTrue(is_mag, f"Expected is_magazine=True for {url}")
+
+    def test_extract_competition_from_synopsis(self):
+        """Verifies fallback competition extraction from Guida TV event synopses."""
+        s1 = "Semifinali - Dai campi dell'Ariake Coliseum di Tokyo, Giappone, il torneo di tennis WTA 500..."
+        s2 = "Quarti - Dal Wiener Stadthalle di Vienna, Austria, il torneo di tennis ATP 500..."
+        s3 = "Da Citta' del Messico, le prove libere del Gran Premio del Messico di F1..."
+        s4 = "10a Giornata. Da San Siro, Milano, la sfida di Serie A tra Inter e Juventus..."
+        s5 = "7a Giornata di Eurolega dal Palau Blaugrana di Barcellona..."
+        s6 = "Regular season di Superlega di volley maschile da Perugia..."
+
+        self.assertEqual(italian_epg_service._extract_competition_from_synopsis(s1), "WTA 500 Tokyo")
+        self.assertEqual(italian_epg_service._extract_competition_from_synopsis(s2), "ATP 500 Vienna")
+        self.assertEqual(italian_epg_service._extract_competition_from_synopsis(s3), "Formula 1: GP Messico")
+        self.assertEqual(italian_epg_service._extract_competition_from_synopsis(s4), "Serie A")
+        self.assertEqual(italian_epg_service._extract_competition_from_synopsis(s5), "Eurolega")
+        self.assertEqual(italian_epg_service._extract_competition_from_synopsis(s6), "Superlega")
+
+    def test_sparse_sky_title_enrichment_and_wta_genre_classification(self):
+        """Verifies sparse Sky event '1a Semifinale' adopts WTA competition from URL and classifies into WTA genre tab."""
+        from app.services.genre_classifier import genre_classifier
+
+        mock_event = {
+            "eventTitle": "1a Semifinale",
+            "eventSynopsis": "Semifinali - Dai campi dell'Ariake Coliseum di Tokyo, Giappone, il torneo di tennis WTA 500.",
+            "starttime": "2026-10-31T04:00:00Z",
+            "endtime": "2026-10-31T06:00:00Z",
+            "programHighlights": "L",
+            "content": {
+                "url": "/sport/tennis-wta-500-tokyo/1a-semifinale/a581452a-cf39-4458-aa03-3ca01f2f010c",
+                "genre": {"name": "Sport"},
+                "subgenre": {"name": "Tennis"},
+            },
+        }
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"events": [mock_event]}
+
+        active_cities = {"tokyo"}
+        with patch.object(tvvoo_service, "get_channel_streams", return_value=[{"canonical": "sky_sport_tennis", "tag": "c", "url": "https://test"}]), \
+             patch.object(tvvoo_service, "get_canonical_from_sky_id", return_value="sky_sport_tennis"), \
+             patch.object(italian_epg_service, "SKY_SPORTS_CHANNELS", {"6000": {"name": "Sky Sport Tennis"}}), \
+             patch.object(italian_epg_service, "SKY_GENERALIST_CHANNELS", {}):
+            async def run_fetch():
+                mock_async_client = MagicMock()
+                mock_async_client.get = AsyncMock(return_value=mock_resp)
+                return await italian_epg_service._fetch_sky_events(
+                    mock_async_client,
+                    "2026-10-31T00:00:00Z",
+                    "2026-10-31T23:59:59Z",
+                    active_tennis_cities=active_cities,
+                )
+
+            events = asyncio.run(run_fetch())
+            self.assertEqual(len(events), 1)
+            ev = events[0]
+
+            # 1. Title must be enriched with competition
+            self.assertEqual(ev.get("title"), "WTA 500 Tokyo: 1a Semifinale")
+            self.assertEqual(ev.get("competition"), "WTA 500 Tokyo")
+
+            # 2. GenreClassifier MUST classify as ('tennis', 'WTA') - NOT ATP fallback!
+            catalog, genre = genre_classifier.classify(ev)
+            self.assertEqual(catalog, "tennis")
+            self.assertEqual(genre, "WTA")
+
+    def test_competition_reinforced_matching_and_youth_guard(self):
+        """Verifies competition data reinforces matching while youth guard prevents cross-capture."""
+        session_start = 1793400000000
+
+        with patch.object(italian_epg_service, "get_matches", return_value=[
+            {
+                "id": "sky-serie-a-venezia-inter",
+                "_provider": "italian_epg",
+                "title": "Serie A: Venezia vs Inter",
+                "competition": "Serie A",
+                "_competition": "Serie A",
+                "date": session_start,
+                "_silo": "football",
+                "category": "football",
+                "teams": {"home": {"name": "Venezia"}, "away": {"name": "Inter"}},
+                "sources": [{"source": "tvvoo", "id": "sky_sport_calcio", "name": "Sky Sport Calcio"}],
+            }
+        ]):
+            # Case 1: Senior match with Serie A competition -> Enriched!
+            match_senior = {
+                "id": "dlhd-venezia-inter",
+                "title": "Venezia vs Inter",
+                "competition": "Italy - Serie A",
+                "date": session_start,
+                "_silo": "football",
+                "category": "football",
+                "teams": {"home": {"name": "Venezia"}, "away": {"name": "Inter"}},
+                "sources": [{"source": "dlhd", "id": "1", "name": "Stream 1"}],
+            }
+
+            # Case 2: Youth match (Primavera) -> Youth guard BLOCKS enrichment from senior Serie A
+            match_youth = {
+                "id": "dlhd-venezia-inter-u19",
+                "title": "Venezia U19 vs Inter U19",
+                "competition": "Campionato Primavera 1",
+                "_age": "+",
+                "date": session_start,
+                "_silo": "football",
+                "category": "football",
+                "teams": {"home": {"name": "Venezia U19"}, "away": {"name": "Inter U19"}},
+                "sources": [{"source": "dlhd", "id": "2", "name": "Stream 2"}],
+            }
+
+            enriched_count = asyncio.run(italian_epg_service.enrich_matches_with_epg_channels([match_senior, match_youth]))
+            self.assertEqual(enriched_count, 1)
+
+            # Senior match received Sky Sport Calcio
+            senior_sources = [s.get("name") for s in match_senior.get("sources", [])]
+            self.assertIn("Sky Sport Calcio", senior_sources)
+
+            # Youth match did NOT receive Sky Sport Calcio
+            youth_sources = [s.get("name") for s in match_youth.get("sources", [])]
+            self.assertNotIn("Sky Sport Calcio", youth_sources)
+
 
 if __name__ == "__main__":
     unittest.main()
