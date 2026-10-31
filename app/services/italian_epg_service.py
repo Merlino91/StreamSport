@@ -788,6 +788,8 @@ class ItalianEPGService:
             return "motori", "motor-sports"
         if any(k in sg for k in ("calcio", "football", "soccer")):
             return "football", "football"
+        if any(k in sg for k in ("arti marziali", "boxe", "pugilato", "wrestling", "combattimento", "lotta")):
+            return "combattimento", "fight"
         if "rugby" in sg:
             return "altri_sport", "rugby"
         if "baseball" in sg:
@@ -796,6 +798,8 @@ class ItalianEPGService:
             return "altri_sport", "cycling"
 
         # 3. Keyword analysis (specific sports precede football)
+        if any(k in combined for k in ("ufc", "boxe", "boxing", "pugilato", "mma", "wwe", "raw", "smackdown", "nxt", "wrestling", "bellator", "pfl", "arti marziali")):
+            return "combattimento", "fight"
         if any(k in combined for k in ("volley", "pallavolo", "superlega")):
             return "volley", "volleyball"
         if any(k in combined for k in ("basket", "nba", "eurolega", "eurocup", "lba", "pallacanestro")):
@@ -892,7 +896,7 @@ class ItalianEPGService:
                 if is_generalist:
                     is_sport = (
                         genre_name.lower() in ("sport", "sport e calcio")
-                        or any(k in raw_title.lower() for k in ("calcio", "partita", "coppa italia", "f1", "motogp", "nations league"))
+                        or any(k in raw_title.lower() for k in ("calcio", "partita", "coppa italia", "f1", "motogp", "nations league", "wwe", "raw", "smackdown", "nxt", "wrestling", "boxe", "ufc", "mma"))
                     )
                     if not is_sport:
                         continue
@@ -1123,7 +1127,12 @@ class ItalianEPGService:
                 cat_names = [c.get("name", "").lower() for c in categories if isinstance(c, dict)]
                 genre_names = [g.get("name", "").lower() for g in genres if isinstance(g, dict)]
 
-                is_sport = "sport" in cat_names or "sport" in genre_names or "calcio" in genre_names
+                is_sport = (
+                    "sport" in cat_names
+                    or "sport" in genre_names
+                    or "calcio" in genre_names
+                    or any(k in raw_title.lower() for k in ("wwe", "raw", "smackdown", "nxt", "wrestling", "boxe", "ufc", "mma", "calcio", "motogp", "f1", "superbike"))
+                )
                 if is_generalist and not is_sport:
                     # On generalist channels, must be marked as sport
                     continue

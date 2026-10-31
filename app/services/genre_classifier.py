@@ -811,19 +811,24 @@ class GenreClassifier:
         # 8. SPORT DA COMBATTIMENTO (Dedicated Catalog: 'combattimento')
         # ------------------------------------------------------------------
         eval_fight = f"{title_lower} {comp}".strip()
+        sport_str = f"{match.get('sport') or ''} {match.get('category') or ''}".lower()
         if (
             cat in ("fight", "mma", "ufc", "boxing", "wrestling")
             or silo == "fight"
+            or "boxe" in sport_str
+            or "mma" in sport_str
             or bool(re.search(r"\b(ufc|wwe|aew|bellator|boxing|boxe|mma|pfl|one\s*championship)\b", eval_fight))
         ):
             if re.search(r"\b(wwe|aew|nxt|smackdown|raw|tna|wrestling|wrestlemania|royal\s*rumble|summerslam|survivor\s*series)\b", eval_fight):
                 return "combattimento", "Wrestling e WWE"
             if re.search(r"\b(ufc|dwcs|dana\s*white)\b", eval_fight):
                 return "combattimento", "UFC"
-            if re.search(r"\b(mma|bellator|pfl|one\s*championship|ksw|lfc|cage\s*warriors|combate|oktagon|rizin|invicta)\b", eval_fight):
-                return "combattimento", "MMA"
+            if "boxe" in sport_str or "boxing" in sport_str:
+                return "combattimento", "Boxe"
             if re.search(r"\b(boxing|boxe|pugilato|bout|heavyweight|title\s*fight|wba|wbc|wbo|ibf|top\s*rank|matchroom|golden\s*boy|queensberry|boxxer)\b", eval_fight):
                 return "combattimento", "Boxe"
+            if re.search(r"\b(mma|bellator|pfl|one\s*championship|ksw|lfc|cage\s*warriors|combate|oktagon|rizin|invicta)\b", eval_fight):
+                return "combattimento", "MMA"
             if "box" in eval_fight:
                 return "combattimento", "Boxe"
             return "combattimento", "MMA"

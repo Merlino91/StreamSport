@@ -521,39 +521,58 @@ class TennisPosterService:
             "Accept": "*/*",
         }
 
+        # Generate candidate permutations for multi-word or inverted Spanish/Portuguese names
+        # e.g. "Garfia Carlos Alcaraz" -> ["Garfia Carlos Alcaraz", "Carlos Alcaraz", "Garfia Carlos"]
+        def _get_query_candidates(name: str) -> List[str]:
+            cands = [name]
+            parts = name.split()
+            if len(parts) >= 3:
+                cands.append(" ".join(parts[1:]))      # e.g. "Carlos Alcaraz"
+                cands.append(" ".join(parts[:2]))      # e.g. "Leylah Annie"
+                cands.append(f"{parts[0]} {parts[-1]}") # e.g. "Carlos Alcaraz" if middle maternal
+            cleaned_parts = [p for p in parts if not p.isdigit() and len(p) > 1]
+            if 1 < len(cleaned_parts) < len(parts):
+                cands.append(" ".join(cleaned_parts))
+            return list(dict.fromkeys(cands))
+
         async with httpx.AsyncClient(timeout=8.0, headers=headers) as client:
-            full_name_resolved = None
-            # 1. ESPN Search API for Tennis Player Headshot
-            try:
-                espn_url = f"https://site.web.api.espn.com/apis/search/v2?query={urllib.parse.quote(search_query)}"
-                res = await client.get(espn_url)
-                if res.status_code == 200:
-                    data = res.json()
-                    for r in data.get("results", []):
-                        if r.get("type") == "player":
-                            for item in r.get("contents", []):
-                                sport = str(item.get("sport") or "").lower()
-                                desc = str(item.get("description") or "").lower()
-                                is_tennis = (sport == "tennis") or ("tennis" in desc) or ("/tennis/" in (item.get("image") or {}).get("default", "").lower())
-                                if is_tennis and item.get("displayName") and not full_name_resolved:
-                                    full_name_resolved = item.get("displayName")
+            candidates = _get_query_candidates(search_query)
+            for q in candidates:
+                try:
+                    espn_url = f"https://site.web.api.espn.com/apis/search/v2?query={urllib.parse.quote(q)}"
+                    res = await client.get(espn_url)
+                    if res.status_code == 200:
+                        data = res.json()
+                        for r in data.get("results", []):
+                            if r.get("type") == "player":
+                                for item in r.get("contents", []):
+                                    sport = str(item.get("sport") or "").lower()
+                                    desc = str(item.get("description") or "").lower()
+                                    is_tennis = (sport == "tennis") or ("tennis" in desc) or ("/tennis/" in (item.get("image") or {}).get("default", "").lower())
+                                    if not is_tennis:
+                                        continue
 
-                                img_url = (item.get("image") or {}).get("default") or ""
-                                if not is_tennis:
-                                    continue
+                                    img_url = (item.get("image") or {}).get("default") or ""
+                                    # Reject generic placeholder logos
+                                    if any(ph in img_url.lower() for ph in ["default-player-logo", "silhouette", "placeholder"]):
+                                        continue
 
-                                # Reject generic placeholder logos
-                                if any(ph in img_url.lower() for ph in ["default-player-logo", "silhouette", "placeholder"]):
-                                    continue
-
-                                if img_url.startswith("http"):
-                                    img_res = await client.get(img_url)
-                                    if img_res.status_code == 200:
-                                        img = Image.open(io.BytesIO(img_res.content)).convert("RGBA")
-                                        img.save(cached_file, "PNG")
-                                        return img
-            except Exception as e:
-                logger.debug("ESPN athlete search error for '%s': %s", search_query, e)
+                                    if img_url.startswith("http"):
+                                        img_res = await client.get(img_url)
+                                        if img_res.status_code == 200:
+                                            img = Image.open(io.BytesIO(img_res.content)).convert("RGBA")
+                                            img.save(cached_file, "PNG")
+                                            # Also cache under resolved canonical display name if different
+                                            disp_name = item.get("displayName")
+                                            if disp_name:
+                                                disp_slug = re.sub(r"[^a-zA-Z0-9]+", "_", disp_name.lower()).strip("_")
+                                                if disp_slug and disp_slug != slug:
+                                                    alt_file = ATHLETES_DIR / f"{disp_slug}.png"
+                                                    if not alt_file.exists():
+                                                        img.save(alt_file, "PNG")
+                                            return img
+                except Exception as e:
+                    logger.debug("ESPN athlete search error for '%s' (candidate '%s'): %s", search_query, q, e)
 
         # Immediate silhouette fallback without slow 13s TheSportsDB sleeps
         self._missing_athletes.add(slug)

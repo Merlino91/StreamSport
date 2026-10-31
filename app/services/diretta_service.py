@@ -26,6 +26,8 @@ FS_SUPPORTED_SPORTS: Dict[int, Tuple[str, str]] = {
     7: ("Pallamano", "handball"),
     8: ("Rugby", "rugby"),
     12: ("Volley", "volley"),
+    16: ("Boxe", "fight"),
+    28: ("MMA", "fight"),
     32: ("Formula 1", "motor-sports"),
     33: ("MotoGP", "motor-sports"),
 }
