@@ -1418,15 +1418,6 @@ class CatalogService:
                     p = m.get("poster")
                     if not p or "nostream" in str(p):
                         continue
-                    # Safeguard: Never propagate Sky EPG posters to 1v1 matches in non-motor sports
-                    m_silo = (m.get("_silo") or m.get("category") or "").lower()
-                    if m_silo != "motor-sports" and ("guidatv.sky.it" in str(p).lower() or "sky.it" in str(p).lower()):
-                        is_1v1 = bool(
-                            (isinstance(m.get("teams"), dict) and m["teams"].get("home") and m["teams"].get("away"))
-                            or re.search(r"\b(vs\.?| v\. )\b", m.get("title", ""), re.IGNORECASE)
-                        )
-                        if is_1v1:
-                            continue
                     if m.get("id"):
                         db_posters[m["id"]] = p
                     tk = self._get_teams_key(m)
@@ -1486,17 +1477,6 @@ class CatalogService:
 
                 # Transfer existing DB posters to fresh matches if missing
                 for m in all_matches:
-                    m_silo = (m.get("_silo") or m.get("category") or "").lower()
-                    is_1v1 = bool(
-                        (isinstance(m.get("teams"), dict) and m["teams"].get("home") and m["teams"].get("away"))
-                        or re.search(r"\b(vs\.?| v\. )\b", m.get("title", ""), re.IGNORECASE)
-                    )
-                    # If this is a 1v1 non-motor match and has a Sky EPG poster from stale DB cache, reset it
-                    if m_silo != "motor-sports" and is_1v1 and m.get("poster") and (
-                        "guidatv.sky.it" in str(m["poster"]).lower() or "sky.it" in str(m["poster"]).lower()
-                    ):
-                        m["poster"] = None
-
                     if m.get("poster") and "nostream" not in str(m.get("poster")):
                         continue
                     m_id = m.get("id")

@@ -131,15 +131,6 @@ class DBService:
                 if "canonical_competition" not in cols:
                     cursor.execute("ALTER TABLE matches ADD COLUMN canonical_competition TEXT")
 
-                # Purge accidental Sky EPG posters on non-motor 1v1 events from earlier run
-                cursor.execute("""
-                    UPDATE matches 
-                    SET poster = NULL 
-                    WHERE (poster LIKE '%guidatv.sky.it%' OR poster LIKE '%sky.it%') 
-                      AND category NOT IN ('motor-sports', 'motori', 'golf', 'altri_sport')
-                      AND (title LIKE '% vs %' OR title LIKE '% v %')
-                """)
-
                 cursor.execute("""
                     CREATE TABLE IF NOT EXISTS thesportsdb_cache (
                         query_key TEXT PRIMARY KEY,
