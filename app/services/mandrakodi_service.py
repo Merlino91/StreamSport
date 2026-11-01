@@ -327,6 +327,14 @@ class MandrakodiService:
             return "rsi la1"
         if "rsi la2" in norm or "rsi la 2" in norm:
             return "rsi la2"
+        if "cbs sport" in norm or "cbs golazo" in norm or "cbsgolazo" in norm:
+            return "cbs sports"
+        if "paramount" in norm:
+            return "paramount+"
+        if "prime video" in norm or "amazon prime" in norm:
+            return "prime video it"
+        if "nbc sport" in norm or "nbc" in norm:
+            return "nbc sports"
 
         return norm if norm in self._channels_by_canonical else None
 
@@ -416,13 +424,32 @@ class MandrakodiService:
         """
         Decodes an amstaff payload and detects whether it is an encrypted ClearKey stream (amstaff)
         or an unencrypted public stream (direct HLS).
+        Supports base64-encoded ClearKeys and forwards optional User-Agent.
         Returns (source_type, stream_meta).
         """
         try:
-            dec = raw_payload if raw_payload.startswith("http") else base64.b64decode(raw_payload).decode("utf-8", errors="ignore")
+            raw_payload = raw_payload.strip()
+            if raw_payload.startswith("http"):
+                dec = raw_payload
+            else:
+                padded_raw = raw_payload + "=" * (-len(raw_payload) % 4)
+                dec = base64.b64decode(padded_raw).decode("utf-8", errors="ignore")
+
             parts = dec.split("|")
-            mpd_url = parts[0].strip()
-            key_part = parts[1].strip() if len(parts) > 1 else ""
+            mpd_url = parts[0].strip().rstrip("?")
+            key_part = parts[1].strip().strip("'\"") if len(parts) > 1 else ""
+            ua = parts[2].strip() if len(parts) > 2 else ""
+
+            # Support base64-encoded kid:key (e.g. MGI0MmJlMjY2NGQ3...)
+            if ":" not in key_part and len(key_part) > 20:
+                try:
+                    padded_key = key_part + "=" * (-len(key_part) % 4)
+                    dec_key = base64.b64decode(padded_key).decode("utf-8", errors="ignore").strip()
+                    if ":" in dec_key:
+                        key_part = dec_key
+                except Exception:
+                    pass
+
             kid, key = key_part.split(":", 1) if ":" in key_part else ("", "")
 
             # Detect unencrypted clear streams (e.g. key == '0000', empty keys, or '-clr.isml')
@@ -437,17 +464,23 @@ class MandrakodiService:
                     hls_url = mpd_url.replace("/manifest.mpd", "/manifest.m3u8").replace(".mpd", ".m3u8")
                 else:
                     hls_url = mpd_url
-                return "direct", {
+                meta: Dict[str, Any] = {
                     "stream_url": hls_url,
                     "original_mpd": mpd_url,
                     "is_clear": True,
                 }
+                if ua:
+                    meta["user_agent"] = ua
+                return "direct", meta
 
-            return "amstaff", {
+            meta = {
                 "mpd_url": mpd_url,
                 "kid": kid,
                 "key": key,
             }
+            if ua:
+                meta["user_agent"] = ua
+            return "amstaff", meta
         except Exception as e:
             logger.debug("Failed to decode amstaff payload: %s", e)
             return None, {}
@@ -507,6 +540,12 @@ class MandrakodiService:
                     "SPORT TV",
                     "DMAX",
                     "NBA TV",
+                    "CBS SPORT",
+                    "CBSGOLAZO",
+                    "PARAMOUNT",
+                    "PRIME VIDEO",
+                    "AMAZON PRIME",
+                    "NBC",
                 )
                 for it in f_data.get("items", []):
                     raw_title = it.get("title", "")

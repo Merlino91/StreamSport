@@ -764,6 +764,9 @@ class StreamService:
                     dash_url = f"{ep_url.rstrip('/')}/proxy/mpd/manifest.m3u8?d={encoded_mpd}"
                     if clearkey_param:
                         dash_url += f"&clearkey={clearkey_param}"
+                    ua = s_data.get("user_agent")
+                    if ua:
+                        dash_url += f"&h_user-agent={urllib.parse.quote(ua, safe='')}"
                     if ep_pass:
                         dash_url += f"&api_password={urllib.parse.quote(ep_pass, safe='')}"
 
@@ -832,6 +835,9 @@ class StreamService:
                 if mpd_url and ep_url:
                     encoded_mpd = urllib.parse.quote_plus(mpd_url)
                     dash_url = f"{ep_url.rstrip('/')}/proxy/mpd/manifest.m3u8?d={encoded_mpd}"
+                    ua = s_data.get("user_agent")
+                    if ua:
+                        dash_url += f"&h_user-agent={urllib.parse.quote(ua, safe='')}"
                     if ep_pass:
                         dash_url += f"&api_password={urllib.parse.quote(ep_pass, safe='')}"
 

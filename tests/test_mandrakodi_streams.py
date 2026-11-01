@@ -328,6 +328,68 @@ class TestMandrakodiStreams(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(c2, 0)
         self.assertEqual(len(match["sources"]), 3)
 
+    def test_base64_clearkey_and_trailing_question_mark_parsing(self):
+        """Verifies that base64 encoded ClearKeys are properly decoded and trailing '?' are stripped."""
+        # 0b42be2664d7e811d04f3e504e0924c5:ae24090123b8c72ac5404dc152847cb7 base64 encoded
+        b64_key = "MGI0MmJlMjY2NGQ3ZTgxMWQwNGYzZTUwNGUwOTI0YzU6YWUyNDA5MDEyM2I4YzcyYWM1NDA0ZGMxNTI4NDdjYjc="
+        payload = f"https://abfjk.bia-cf.live.pv-cdn.net/live/clients/dash/enc/out/v1/cenc.mpd?|{b64_key}|Mozilla/5.0 CustomUA"
+
+        src_type, meta = mandrakodi_service._parse_amstaff_payload(payload)
+        self.assertEqual(src_type, "amstaff")
+        self.assertEqual(meta["mpd_url"], "https://abfjk.bia-cf.live.pv-cdn.net/live/clients/dash/enc/out/v1/cenc.mpd")
+        self.assertEqual(meta["kid"], "0b42be2664d7e811d04f3e504e0924c5")
+        self.assertEqual(meta["key"], "ae24090123b8c72ac5404dc152847cb7")
+        self.assertEqual(meta["user_agent"], "Mozilla/5.0 CustomUA")
+
+    async def test_amstaff_stream_generation_with_user_agent(self):
+        """Verifies that custom user_agent in amstaff stream_data is forwarded to EasyProxy via h_user-agent."""
+        now_ts = int(time.time() * 1000)
+        fake_pv_match = {
+            "id": "mandrakodi:test:pv",
+            "title": "Arsenal vs Chelsea",
+            "category": "football",
+            "_silo": "football",
+            "date": now_ts,
+            "sources": [
+                {
+                    "source": "amstaff",
+                    "provider": "mandrakodi",
+                    "id": "https://abfjk.bia-cf.live.pv-cdn.net/live/cenc.mpd",
+                    "name": "Prime Video IT",
+                    "stream_data": {
+                        "mpd_url": "https://abfjk.bia-cf.live.pv-cdn.net/live/cenc.mpd",
+                        "kid": "0b42be2664d7e811d04f3e504e0924c5",
+                        "key": "ae24090123b8c72ac5404dc152847cb7",
+                        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+                    },
+                    "country": "Italia",
+                    "language": "ita",
+                    "quality": "1080p 50fps",
+                }
+            ],
+            "_provider": "mandrakodi",
+        }
+
+        from app.services.catalog_service import catalog_service
+        catalog_service._cached_matches.append(fake_pv_match)
+
+        streams = await stream_service.get_streams_for_event(
+            "mandrakodi:test:pv",
+            ep_url="https://ep.bluccoj.com",
+            ep_pass="Z3r0EP"
+        )
+        self.assertGreaterEqual(len(streams), 1)
+        st = streams[0]
+        self.assertIn("h_user-agent=Mozilla%2F5.0", st["url"])
+        self.assertIn("clearkey=0b42be2664d7e811d04f3e504e0924c5:ae24090123b8c72ac5404dc152847cb7", st["url"])
+
+    def test_canonical_channel_key_cbs_paramount_prime_nbc(self):
+        """Verifies that new target sports channels map to canonical keys correctly."""
+        self.assertEqual(mandrakodi_service.get_canonical_channel_key("CBS Sports Network"), "cbs sports")
+        self.assertEqual(mandrakodi_service.get_canonical_channel_key("Paramount+ Live"), "paramount+")
+        self.assertEqual(mandrakodi_service.get_canonical_channel_key("Prime Video Sport"), "prime video it")
+        self.assertEqual(mandrakodi_service.get_canonical_channel_key("NBC Sports Channel"), "nbc sports")
+
 
 if __name__ == "__main__":
     unittest.main()
