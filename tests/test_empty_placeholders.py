@@ -1,3 +1,4 @@
+import time
 import unittest
 from app.services.catalog_service import catalog_service
 from app.services.stream_service import stream_service
@@ -58,6 +59,74 @@ class TestEmptyCatalogs(unittest.IsolatedAsyncioTestCase):
         meta = await catalog_service.get_meta_detail("streamsport:empty:calcio_italiano:serie_c")
         self.assertIsNone(meta)
 
+
+
+    def test_is_real_match_official_vs_third_party(self):
+        now = time.time() * 1000
+        # Official upcoming match with 0 sources -> must be allowed in catalog
+        off_upcoming = {
+            "id": "diretta-abc123",
+            "flashscore_id": "abc123",
+            "title": "Virtus Bologna vs Milano",
+            "date": now + 7200000,
+            "category": "basketball",
+            "_silo": "basketball",
+            "sources": []
+        }
+        self.assertTrue(catalog_service.is_real_match(off_upcoming))
+
+        # Official live match with 0 sources -> must be allowed for JIT stream fallback
+        off_live = {
+            "id": "diretta-abc123",
+            "flashscore_id": "abc123",
+            "title": "Virtus Bologna vs Milano",
+            "date": now - 1800000,
+            "category": "basketball",
+            "_silo": "basketball",
+            "sources": []
+        }
+        self.assertTrue(catalog_service.is_real_match(off_live))
+
+        # Official concluded match with 0 sources -> must NOT be allowed (no replay)
+        off_concluded = {
+            "id": "diretta-abc123",
+            "flashscore_id": "abc123",
+            "title": "Virtus Bologna vs Milano",
+            "date": now - 36000000,
+            "category": "basketball",
+            "_silo": "basketball",
+            "sources": []
+        }
+        self.assertFalse(catalog_service.is_real_match(off_concluded))
+
+        # Third-party provider match with 0 sources -> must NOT be allowed
+        provider_no_src = {
+            "id": "daddylive-12345",
+            "title": "Random Event",
+            "date": now + 7200000,
+            "sources": []
+        }
+        self.assertFalse(catalog_service.is_real_match(provider_no_src))
+
+    async def test_official_upcoming_match_without_sources_appears_in_catalog(self):
+        now = time.time() * 1000
+        off_upcoming = {
+            "id": "diretta-xyz789",
+            "flashscore_id": "xyz789",
+            "title": "Trento vs Roma",
+            "date": now + 7200000,
+            "_catalog": "basket",
+            "_genre": "LBA Serie A",
+            "sources": []
+        }
+        catalog_service._cached_matches.append(off_upcoming)
+        metas = await catalog_service.get_catalog(
+            catalog_id="basket",
+            genre_filter="LBA Serie A",
+            skip=0,
+        )
+        self.assertGreaterEqual(len(metas), 1)
+        self.assertTrue(any("Trento vs Roma" in m["name"] for m in metas))
 
 if __name__ == "__main__":
     unittest.main()

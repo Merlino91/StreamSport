@@ -1229,8 +1229,8 @@ class CatalogService:
 
         return all_deduped
 
-    @staticmethod
-    def is_real_match(m: Dict[str, Any]) -> bool:
+    @classmethod
+    def is_real_match(cls, m: Dict[str, Any]) -> bool:
         date_ms = m.get("date") or 0
         if date_ms <= 0:
             return False
@@ -1240,6 +1240,16 @@ class CatalogService:
         m_id = str(m.get("id") or "").lower()
         if m_id.startswith("admin-") or m_id.endswith("_live"):
             return False
+
+        # Certified official Diretta/LiveSport matches (pre-filtered by is_tier_match)
+        # are real scheduled sporting events. They do not need pre-existing stream links
+        # when upcoming or live, as sources can attach JIT on-demand when clicked.
+        is_official = bool(
+            m.get("flashscore_id")
+            or m.get("_official_id")
+            or m.get("_diretta_title")
+            or m_id.startswith("diretta-")
+        )
 
         # Must have at least one real playable stream source
         sources = m.get("sources") or []
@@ -1251,6 +1261,13 @@ class CatalogService:
             and "just ask in chat" not in (s.get("name") or "").lower()
         ]
         if not valid_sources:
+            if is_official:
+                now_ms = time.time() * 1000
+                live_window = cls.get_live_window_minutes(m)
+                is_concluded = (date_ms > 0) and ((date_ms - now_ms) / 60000 < -live_window)
+                if is_concluded:
+                    return False
+                return True
             return False
 
         return True
