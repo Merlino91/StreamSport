@@ -70,7 +70,14 @@ BASE_DIR = Path(__file__).resolve().parent
 TEMPLATES_DIR = BASE_DIR / "templates"
 STATIC_DIR = BASE_DIR / "static"
 
-app = FastAPI(title="StreamSport Stremio Addon", version=ADDON_VERSION, lifespan=lifespan)
+app = FastAPI(
+    title="StreamSport Stremio Addon",
+    version=ADDON_VERSION,
+    lifespan=lifespan,
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
+)
 
 # Enable CORS for all origins (required by Stremio)
 app.add_middleware(

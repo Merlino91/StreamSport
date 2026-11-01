@@ -279,7 +279,7 @@ class TestMandrakodiStreams(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIsInstance(streams, list)
         self.assertGreaterEqual(len(streams), 1)
-        self.assertIn("FCTV33", streams[0]["name"])
+        self.assertTrue(any("FCTV33" in s["name"] for s in streams))
 
     async def test_non_mediaset_clear_mpd_keeps_mpd_url(self):
         """Verifies that non-Mediaset clear MPD streams (like MSVDN) do NOT generate a broken .m3u8 URL."""

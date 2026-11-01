@@ -246,7 +246,17 @@ class DirettaService:
                         full_home = self.reconstruct_tennis_name(home, fields.get("WU") or "")
                         full_away = self.reconstruct_tennis_name(away, fields.get("WV") or "")
 
-                    matches.append({
+                    eval_text = f"{current_league} {home} {away} {current_country}".lower()
+                    is_w = bool(re.search(
+                        r"\b(women(?:[’']s)?|femminile|femenino|ladies|frauen|donne|dames|damen|w-|wta|wnba|uwcl)\b|(?<=\w)\s+[dwf]\b|\([dwf]\)",
+                        eval_text
+                    ))
+                    is_y = bool(re.search(
+                        r"\b(u-?1[5-9]|u-?2[01]|under\s*1[5-9]|under\s*2[01]|youth|primavera|junior)\b",
+                        eval_text
+                    ))
+
+                    match_obj = {
                         "id": f"diretta-{m_id}",
                         "flashscore_id": m_id,
                         "_silo": silo_name,
@@ -261,7 +271,15 @@ class DirettaService:
                         "title": f"{full_home} vs {full_away}" if silo_name == "tennis" else f"{home.strip()} vs {away.strip()}",
                         "date": date_ms,
                         "tv_channels": tv_channels,
-                    })
+                    }
+                    if is_w:
+                        match_obj["_gender"] = "+"
+                        match_obj["is_women"] = True
+                    if is_y:
+                        match_obj["_age"] = "+"
+                        match_obj["is_youth"] = True
+
+                    matches.append(match_obj)
         return matches
 
     async def get_events(self, force: bool = False) -> List[Dict[str, Any]]:

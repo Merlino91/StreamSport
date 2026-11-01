@@ -235,16 +235,18 @@ class GenreClassifier:
             # Women & Youth safety guards on canonical routing:
             # A men's senior canonical competition must NEVER hijack a women or youth event!
             if is_women:
-                if canon in ("football_serie_a", "football_serie_b", "football_serie_c", "football_serie_a_women"):
+                if canon.startswith("football_"):
+                    if canon == "football_uwcl" or not any(it in eval_text for it in ("italia", "italy", "roma", "juventus", "milan", "inter", "fiorentina", "serie a", "serie b")):
+                        return "calcio_estero", "Champions League Femminile"
                     return "calcio_italiano", "Calcio Femminile"
-                if canon == "football_uwcl":
-                    return "calcio_estero", "Champions League Femminile"
                 if canon.startswith("volleyball_"):
                     return "volley", "Volley Femminile"
                 if canon.startswith("basketball_"):
                     return "basket", "WNBA e Femminile"
+                if canon.startswith("tennis_"):
+                    return "tennis", "WTA"
             if is_youth:
-                if canon in ("football_serie_a", "football_serie_b", "football_serie_c", "football_primavera"):
+                if canon.startswith("football_"):
                     return "calcio_italiano", "Primavera e Giovanili"
 
             # Country-specific guard for homonym league names

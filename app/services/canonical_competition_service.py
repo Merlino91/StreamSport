@@ -1134,7 +1134,8 @@ def is_tier_match(m: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
                 return True, "football_serie_c"
             if "coppa italia" in league or "supercoppa italiana" in league:
                 return True, "football_coppa_italia"
-            if "serie a" in league and any(w in league for w in ("femminile", "women")):
+            is_femm = m.get("is_women") or m.get("_gender") == "+" or any(w in league for w in ("femminile", "women", "donne"))
+            if "serie a" in league and is_femm:
                 return True, "football_serie_a_women"
             return False, None
 
@@ -1257,7 +1258,7 @@ def is_tier_match(m: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
         if "champions league" in league:
             return True, "basketball_bcl"
         if country in ("italia", "italy"):
-            is_femm = any(w in league for w in ("femminile", "women", "dame", "femm"))
+            is_femm = m.get("is_women") or m.get("_gender") == "+" or any(w in league for w in ("femminile", "women", "dame", "femm"))
             if is_femm:
                 if "serie a2" in league:
                     return True, "basketball_serie_a2_femm"
@@ -1275,13 +1276,14 @@ def is_tier_match(m: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
     # ========================== VOLLEY ==========================
     if silo == "volley" or "pallavolo" in sport or "volleyball" in sport:
         if country in ("italia", "italy"):
-            if "superlega" in league or ("serie a1" in league and "femminile" not in league):
-                return True, "volleyball_superlega"
-            if "serie a1" in league and "femminile" in league:
-                return True, "volleyball_serie_a1_femm"
-            if "serie a2" in league:
-                if any(w in league for w in ("femminile", "women", "dame", "femm")):
+            is_femm = m.get("is_women") or m.get("_gender") == "+" or any(w in league for w in ("femminile", "women", "dame", "femm"))
+            if is_femm:
+                if "serie a2" in league:
                     return True, "volleyball_serie_a2_femm"
+                return True, "volleyball_serie_a1_femm"
+            if "superlega" in league or "serie a1" in league:
+                return True, "volleyball_superlega"
+            if "serie a2" in league:
                 return True, "volleyball_serie_a2"
             if "coppa italia" in league:
                 return True, "volleyball_coppa_italia"
