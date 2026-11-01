@@ -203,12 +203,12 @@ class GenreClassifier:
         """
         title = (match.get("title") or "").strip()
         title_lower = title.lower()
-        comp = (match.get("competition") or match.get("_competition") or "").lower().strip()
+        comp = (match.get("competition") or match.get("_competition") or match.get("league") or "").lower().strip()
         country = (match.get("country") or match.get("_country") or "").lower().strip()
         raw_title_lower = (match.get("raw_title") or "").strip().lower()
         eval_text = f"{title_lower} {country} {comp} {raw_title_lower}".strip()
-        is_women = bool(self._WOMEN_REGEX.search(eval_text)) or match.get("_gender") == "+"
-        is_youth = bool(self._YOUTH_REGEX.search(eval_text)) or match.get("_age") == "+"
+        is_women = bool(match.get("is_women")) or bool(self._WOMEN_REGEX.search(eval_text)) or match.get("_gender") == "+"
+        is_youth = bool(match.get("is_youth")) or bool(self._YOUTH_REGEX.search(eval_text)) or match.get("_age") == "+"
 
         # 0. Early Simulcast & Multi-match show routing (NFL RedZone, Golazo, Diretta Gol, etc.)
         sim_info = get_simulcast_info(title_lower, match.get("category") or match.get("_silo")) or get_simulcast_info(str(match.get("id", "")))
@@ -239,6 +239,8 @@ class GenreClassifier:
                     return "calcio_italiano", "Calcio Femminile"
                 if canon == "football_uwcl":
                     return "calcio_estero", "Champions League Femminile"
+                if canon.startswith("volleyball_"):
+                    return "volley", "Volley Femminile"
             if is_youth:
                 if canon in ("football_serie_a", "football_serie_b", "football_serie_c", "football_primavera"):
                     return "calcio_italiano", "Primavera e Giovanili"
@@ -356,6 +358,7 @@ class GenreClassifier:
                 "volleyball_superlega": ("volley", "Superlega e Serie A1"),
                 "volleyball_serie_a2": ("volley", "Superlega e Serie A1"),
                 "volleyball_serie_a1_femm": ("volley", "Volley Femminile"),
+                "volleyball_serie_a2_femm": ("volley", "Volley Femminile"),
                 "volleyball_cev_cl": ("volley", "Champions League Volley"),
                 "rugby_serie_a_elite": ("altri_sport", "Rugby e AFL"),
                 "rugby_six_nations": ("altri_sport", "Rugby e AFL"),
@@ -372,7 +375,7 @@ class GenreClassifier:
 
         cat = (match.get("category") or "").lower().strip()
         silo = (match.get("_silo") or "").lower().strip()
-        comp = (match.get("competition") or match.get("_competition") or "").lower().strip()
+        comp = (match.get("competition") or match.get("_competition") or match.get("league") or "").lower().strip()
         country = (match.get("country") or match.get("_country") or "").lower().strip()
         eval_text = f"{title_lower} {country} {comp}".strip()
 
@@ -391,8 +394,8 @@ class GenreClassifier:
             home = self._normalize_name(re.sub(r"[\(-].*$", "", parts[0]).strip())
             away = self._normalize_name(re.sub(r"[\(-].*$", "", parts[1]).strip())
 
-        is_women = bool(self._WOMEN_REGEX.search(eval_text)) or match.get("_gender") == "+"
-        is_youth = bool(self._YOUTH_REGEX.search(eval_text)) or match.get("_age") == "+"
+        is_women = bool(match.get("is_women")) or bool(self._WOMEN_REGEX.search(eval_text)) or match.get("_gender") == "+"
+        is_youth = bool(match.get("is_youth")) or bool(self._YOUTH_REGEX.search(eval_text)) or match.get("_age") == "+"
 
         # Guard: Cue sports (Snooker, Q Tour, Billiards) often mislabeled upstream
         if re.search(r"\b(snooker|q\s*tour|billiards|biliardo)\b", title_lower):

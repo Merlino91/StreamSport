@@ -54,10 +54,10 @@ class ItalianEPGService:
         "11909": {"name": "Sky Sport Mix", "lcn": 211, "default_silo": None},
         "6000": {"name": "SuperTennis HD", "lcn": 212, "default_silo": "tennis", "default_cat": "tennis"},
         "10013": {"name": "Sky Sport 4K", "lcn": 213, "default_silo": None},
-        "11402": {"name": "DAZN 1", "lcn": 214, "default_silo": "football", "default_cat": "football"},
-        "11401": {"name": "DAZN 2", "lcn": 215, "default_silo": "football", "default_cat": "football"},
-        "11849": {"name": "DAZN 3", "lcn": 216, "default_silo": "football", "default_cat": "football"},
-        "11850": {"name": "DAZN 4", "lcn": 217, "default_silo": "football", "default_cat": "football"},
+        "11402": {"name": "DAZN 1", "lcn": 214, "default_silo": None},
+        "11401": {"name": "DAZN 2", "lcn": 215, "default_silo": None},
+        "11849": {"name": "DAZN 3", "lcn": 216, "default_silo": None},
+        "11850": {"name": "DAZN 4", "lcn": 217, "default_silo": None},
         "807": {"name": "Rai Sport", "lcn": 227, "default_silo": None},
         "7587": {"name": "Sport TV", "lcn": 228, "default_silo": "motor-sports", "default_cat": "motori"},
         "9513": {"name": "Milan TV", "lcn": 230, "default_silo": "football", "default_cat": "football"},
@@ -1566,7 +1566,7 @@ class ItalianEPGService:
                 # Silo compatibility
                 if m_silo and ep_silo and m_silo != ep_silo:
                     # Allow football/soccer interchangeability
-                    if not (m_silo in ("football", "soccer") and ep_silo in ("football", "soccer")):
+                    if not ((m_silo in ("football", "soccer") and ep_silo in ("football", "soccer")) or (m_silo in ("volley", "volleyball") and ep_silo in ("volley", "volleyball")) or (m_silo in ("basket", "basketball") and ep_silo in ("basket", "basketball")) or (m_silo in ("motori", "motorsport", "motor-sports") and ep_silo in ("motori", "motorsport", "motor-sports"))):
                         continue
 
                 ep_date = ep.get("date", 0)

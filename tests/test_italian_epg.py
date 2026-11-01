@@ -625,6 +625,93 @@ class TestItalianEPGService(unittest.IsolatedAsyncioTestCase):
 
 
 
+
+    def test_dazn_dynamic_silo_matches_volleyball(self):
+        """Verifies DAZN 1 with dynamic silo matches a Superlega Volley event and enriches it."""
+        import asyncio
+        import time
+        match_time = 1793282100000
+        matches = [
+            {
+                "id": "match_superlega_1",
+                "title": "Modena vs Verona",
+                "date": match_time,
+                "_silo": "volley",
+                "category": "volley",
+                "teams": {"home": {"name": "Modena"}, "away": {"name": "Verona"}},
+                "sources": [],
+            }
+        ]
+
+        # EPG event on DAZN 1
+        epg_events = [
+            {
+                "id": "epg_dazn1_modena_verona",
+                "title": "Pallavolo: Modena - Verona",
+                "date": match_time,
+                "_silo": "volleyball",
+                "category": "volley",
+                "teams": {"home": {"name": "Modena"}, "away": {"name": "Verona"}},
+                "sources": [{"name": "DAZN 1", "id": "dazn 1", "country": "Italy", "source": "tvvoo"}],
+            }
+        ]
+
+        self.service._cached_matches = epg_events
+        self.service._last_fetch_time = time.time()
+        enriched_count = asyncio.run(self.service.enrich_matches_with_epg_channels(matches))
+        self.assertEqual(enriched_count, 1)
+        self.assertEqual(len(matches[0]["sources"]), 1)
+        self.assertEqual(matches[0]["sources"][0]["name"], "DAZN 1")
+
+    def test_volleyball_serie_a2_maschile_and_femminile_routing(self):
+        """Verifies Serie A2 Maschile routes to Superlega e Serie A1 while Serie A2 Femminile routes to Volley Femminile."""
+        from app.services.canonical_competition_service import is_tier_match
+        from app.services.genre_classifier import genre_classifier
+
+        m_maschile = {
+            "title": "Brescia vs Cuneo",
+            "country": "Italia",
+            "league": "Serie A2",
+            "_silo": "volley",
+            "category": "volley",
+        }
+        is_tier_m, canon_m = is_tier_match(m_maschile)
+        self.assertTrue(is_tier_m)
+        self.assertEqual(canon_m, "volleyball_serie_a2")
+        m_maschile["canonical_competition"] = canon_m
+        cat_m, genre_m = genre_classifier.classify(m_maschile)
+        self.assertEqual(cat_m, "volley")
+        self.assertEqual(genre_m, "Superlega e Serie A1")
+
+        m_femminile = {
+            "title": "Busto Arsizio vs Trento",
+            "country": "Italia",
+            "league": "Serie A2 Femminile",
+            "_silo": "volley",
+            "category": "volley",
+        }
+        is_tier_f, canon_f = is_tier_match(m_femminile)
+        self.assertTrue(is_tier_f)
+        self.assertEqual(canon_f, "volleyball_serie_a2_femm")
+        m_femminile["canonical_competition"] = canon_f
+        cat_f, genre_f = genre_classifier.classify(m_femminile)
+        self.assertEqual(cat_f, "volley")
+        self.assertEqual(genre_f, "Volley Femminile")
+
+        # General is_women guard on volleyball
+        m_cev_women = {
+            "title": "Vakifbank vs Fenerbahce",
+            "country": "Europa",
+            "league": "CEV Champions League Women",
+            "is_women": True,
+            "canonical_competition": "volleyball_cev_cl",
+            "_silo": "volley",
+        }
+        cat_w, genre_w = genre_classifier.classify(m_cev_women)
+        self.assertEqual(cat_w, "volley")
+        self.assertEqual(genre_w, "Volley Femminile")
+
+
 if __name__ == "__main__":
     unittest.main()
 

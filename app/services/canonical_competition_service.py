@@ -701,13 +701,26 @@ CANONICAL_LEAGUES = {
         ],
     },
     "volleyball_serie_a2": {
-        "display": "Serie A2 Volley",
+        "display": "Serie A2 Maschile Volley",
         "silo": "volley",
         "patterns": [
-            r"italy\s*serie\s*a2\b",
-            r"serie\s*a2\s*volley",
+            r"italy\s*serie\s*a2\b(?!\s*femm)(?!\s*women)",
+            r"serie\s*a2\s*volley(?!\s*femm)(?!\s*women)",
             r"serie\s*a2\s*maschile",
-            r"serie\s*a2\s*femm",
+        ],
+    },
+    "volleyball_serie_a2_femm": {
+        "display": "Serie A2 Femminile Volley",
+        "silo": "volley",
+        "patterns": [
+            r"serie\s*a2\s*femminile",
+            r"a2\s*femminile\s*volley",
+            r"italy\s*serie\s*a2\s*women",
+            r"italian\s*serie\s*a2\s*women",
+            r"serie\s*a2\s*women",
+            r"serie\s*a2\s*w\b",
+            r"a2\s*femm\b",
+            r"serie\s*a2\s*femm\b",
         ],
     },
     "volleyball_serie_a1_femm": {
@@ -1246,6 +1259,8 @@ def is_tier_match(m: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
             if "serie a1" in league and "femminile" in league:
                 return True, "volleyball_serie_a1_femm"
             if "serie a2" in league:
+                if any(w in league for w in ("femminile", "women", "dame", "femm")):
+                    return True, "volleyball_serie_a2_femm"
                 return True, "volleyball_serie_a2"
             if "coppa italia" in league:
                 return True, "volleyball_coppa_italia"
