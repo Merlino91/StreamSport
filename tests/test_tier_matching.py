@@ -86,6 +86,26 @@ class TestTierMatching(unittest.TestCase):
         self.assertTrue(ok)
         self.assertEqual(slug, "basketball_lba_serie_a")
 
+        # Diretta Lega A
+        ok, slug = is_tier_match({"_silo": "basketball", "country": "Italia", "league": "Lega A"})
+        self.assertTrue(ok)
+        self.assertEqual(slug, "basketball_lba_serie_a")
+
+        # Serie A2 Maschile
+        ok, slug = is_tier_match({"_silo": "basketball", "country": "Italia", "league": "Serie A2"})
+        self.assertTrue(ok)
+        self.assertEqual(slug, "basketball_serie_a2")
+
+        # Serie A1 Femminile Basket
+        ok, slug = is_tier_match({"_silo": "basketball", "country": "Italia", "league": "Serie A1 Femminile"})
+        self.assertTrue(ok)
+        self.assertEqual(slug, "basketball_serie_a1_femm")
+
+        # Serie A2 Femminile Basket
+        ok, slug = is_tier_match({"_silo": "basketball", "country": "Italia", "league": "Serie A2 Femminile - Gr. A"})
+        self.assertTrue(ok)
+        self.assertEqual(slug, "basketball_serie_a2_femm")
+
         # Volley
         ok, slug = is_tier_match({"_silo": "volley", "country": "Italia", "league": "SuperLega"})
         self.assertTrue(ok)
@@ -110,3 +130,47 @@ class TestTierMatching(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+from app.services.genre_classifier import genre_classifier
+
+class TestBasketGenreClassification(unittest.TestCase):
+    def test_basket_routing(self):
+        # 1. Lega A
+        cat, sub = genre_classifier.classify({
+            "silo": "basketball",
+            "country": "Italia",
+            "league": "Lega A",
+            "title": "Virtus Bologna - Milano"
+        })
+        self.assertEqual(cat, "basket")
+        self.assertEqual(sub, "LBA Serie A")
+
+        # 2. Serie A2 Maschile
+        cat, sub = genre_classifier.classify({
+            "silo": "basketball",
+            "country": "Italia",
+            "league": "Serie A2",
+            "title": "Fortitudo Bologna - Cantù"
+        })
+        self.assertEqual(cat, "basket")
+        self.assertEqual(sub, "LBA Serie A")
+
+        # 3. Serie A1 Femminile
+        cat, sub = genre_classifier.classify({
+            "silo": "basketball",
+            "country": "Italia",
+            "league": "Serie A1 Femminile",
+            "title": "Schio D - Venezia D"
+        })
+        self.assertEqual(cat, "basket")
+        self.assertEqual(sub, "WNBA e Femminile")
+
+        # 4. Serie A2 Femminile
+        cat, sub = genre_classifier.classify({
+            "silo": "basketball",
+            "country": "Italia",
+            "league": "Serie A2 Femminile - Gr. A",
+            "title": "Sanga Milano D - Broni D"
+        })
+        self.assertEqual(cat, "basket")
+        self.assertEqual(sub, "WNBA e Femminile")

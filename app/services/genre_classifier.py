@@ -221,7 +221,7 @@ class GenreClassifier:
             # Silo boundary guard: a canonical slug from another sport must NEVER hijack an event from a dedicated sport silo
             from app.services.canonical_competition_service import get_canonical_silo
             canon_silo = get_canonical_silo(canon)
-            event_silo = (match.get("_silo") or match.get("category") or "").lower().strip()
+            event_silo = (match.get("_silo") or match.get("category") or match.get("silo") or "").lower().strip()
             if event_silo in ("soccer",): event_silo = "football"
             if event_silo in ("basket",): event_silo = "basketball"
             if event_silo in ("motorsport", "motori"): event_silo = "motor-sports"
@@ -241,6 +241,8 @@ class GenreClassifier:
                     return "calcio_estero", "Champions League Femminile"
                 if canon.startswith("volleyball_"):
                     return "volley", "Volley Femminile"
+                if canon.startswith("basketball_"):
+                    return "basket", "WNBA e Femminile"
             if is_youth:
                 if canon in ("football_serie_a", "football_serie_b", "football_serie_c", "football_primavera"):
                     return "calcio_italiano", "Primavera e Giovanili"
@@ -318,6 +320,9 @@ class GenreClassifier:
                 "basketball_eurocup": ("basket", "Eurolega ed Eurocup"),
                 "basketball_bcl": ("basket", "Eurolega ed Eurocup"),
                 "basketball_lba_serie_a": ("basket", "LBA Serie A"),
+                "basketball_serie_a2": ("basket", "LBA Serie A"),
+                "basketball_serie_a1_femm": ("basket", "WNBA e Femminile"),
+                "basketball_serie_a2_femm": ("basket", "WNBA e Femminile"),
                 "basketball_acb": ("basket", "Campionati Esteri ed NBL"),
                 "basketball_cba": ("basket", "Campionati Esteri ed NBL"),
                 "basketball_nbl": ("basket", "Campionati Esteri ed NBL"),
@@ -374,7 +379,7 @@ class GenreClassifier:
                 return canon_map[canon]
 
         cat = (match.get("category") or "").lower().strip()
-        silo = (match.get("_silo") or "").lower().strip()
+        silo = (match.get("_silo") or match.get("category") or match.get("silo") or "").lower().strip()
         comp = (match.get("competition") or match.get("_competition") or match.get("league") or "").lower().strip()
         country = (match.get("country") or match.get("_country") or "").lower().strip()
         eval_text = f"{title_lower} {country} {comp}".strip()
@@ -517,7 +522,7 @@ class GenreClassifier:
                 or "🇮🇹" in title
                 or bool(re.search(r"\b(italy|italia|italian)\b", eval_text))
             )
-            is_lba_comp = bool(re.search(r"\b(lba|serie\s*a\s*basket|lega\s*basket|serie\s*a2|coppa\s*italia\s*basket|supercoppa\s*basket)\b", eval_text))
+            is_lba_comp = bool(re.search(r"\b(lba|lega\s*a|serie\s*a\s*basket|lega\s*basket|serie\s*a2|coppa\s*italia\s*basket|supercoppa\s*basket)\b", eval_text))
             if is_lba_comp or (is_italy and not is_foreign_league):
                 return "basket", "LBA Serie A"
 

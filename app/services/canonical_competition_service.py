@@ -454,7 +454,22 @@ CANONICAL_LEAGUES = {
     "basketball_lba_serie_a": {
         "display": "LBA Serie A",
         "silo": "basketball",
-        "patterns": [r"\blba\b", r"serie\s*a\s*basket", r"italy\s*-\s*lba", r"lega\s*basket", r"coppa\s*italia\s*basket", r"serie\s*a2"],
+        "patterns": [r"\blba\b", r"\blega\s*a\b", r"serie\s*a\s*basket", r"italy\s*-\s*lba", r"lega\s*basket", r"coppa\s*italia\s*basket"],
+    },
+    "basketball_serie_a2": {
+        "display": "Serie A2 Basket",
+        "silo": "basketball",
+        "patterns": [r"serie\s*a2(?!\s*(?:femm|women))"],
+    },
+    "basketball_serie_a1_femm": {
+        "display": "Serie A1 Femminile Basket",
+        "silo": "basketball",
+        "patterns": [r"serie\s*a1\s*femm", r"serie\s*a1\s*women", r"serie\s*a\s*femm"],
+    },
+    "basketball_serie_a2_femm": {
+        "display": "Serie A2 Femminile Basket",
+        "silo": "basketball",
+        "patterns": [r"serie\s*a2\s*femm", r"serie\s*a2\s*women"],
     },
     "basketball_acb": {
         "display": "Liga ACB",
@@ -1241,10 +1256,16 @@ def is_tier_match(m: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
             return True, "basketball_eurocup"
         if "champions league" in league:
             return True, "basketball_bcl"
-        if country in ("italia", "italy") and ("serie a" in league or "lba" in league or "coppa italia" in league):
-            return True, "basketball_lba_serie_a"
-        if country in ("italia", "italy") and "serie a2" in league:
-            return True, "basketball_serie_a2"
+        if country in ("italia", "italy"):
+            is_femm = any(w in league for w in ("femminile", "women", "dame", "femm"))
+            if is_femm:
+                if "serie a2" in league:
+                    return True, "basketball_serie_a2_femm"
+                return True, "basketball_serie_a1_femm"
+            if "serie a2" in league:
+                return True, "basketball_serie_a2"
+            if any(k in league for k in ("serie a", "lega a", "lba", "coppa italia", "supercoppa")):
+                return True, "basketball_lba_serie_a"
         if country in ("spagna", "spain") and ("acb" in league or "liga endesa" in league):
             return True, "basketball_acb"
         if country in ("mondo", "world", "europa", "europe") and ("fiba" in league or "mondiali" in league or "europei" in league or "qualificazioni" in league):
