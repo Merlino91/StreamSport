@@ -79,6 +79,13 @@ class ItalianEPGService:
         "899": {"name": "Rai 1 HD", "lcn": 101},
         "898": {"name": "Rai 2 HD", "lcn": 102},
         "897": {"name": "Rai 3 HD", "lcn": 103},
+        "10354": {"name": "Canale 5 HD", "lcn": 105},
+        "10454": {"name": "Italia 1 HD", "lcn": 106},
+        "8195": {"name": "TV8 HD", "lcn": 125},
+        "8133": {"name": "Cielo HD", "lcn": 126},
+        "12116": {"name": "NOVE HD", "lcn": 149},
+        "10458": {"name": "20 Mediaset HD", "lcn": 151},
+        "12120": {"name": "DMAX HD", "lcn": 170},
     }
 
     # 2. Tivùsat Channel Definitions
@@ -90,10 +97,19 @@ class ItalianEPGService:
 
     # Tivùsat Generalist Channels (Ingest ONLY if category/genre is Sport)
     TIVUSAT_GENERALIST_CHANNELS: Dict[str, Dict[str, Any]] = {
+        "42": {"name": "Rai 1 HD"},
+        "43": {"name": "Rai 2 HD"},
+        "44": {"name": "Rai 3 HD"},
+        "145": {"name": "Canale 5 HD"},
+        "5": {"name": "Canale 5"},
+        "148": {"name": "Italia 1 HD"},
+        "6": {"name": "Italia 1"},
+        "140": {"name": "NOVE HD"},
         "249": {"name": "20 Mediaset HD"},
         "279": {"name": "TV8 HD"},
         "280": {"name": "Cielo HD"},
         "32": {"name": "DMAX HD"},
+        "256": {"name": "Rai 4K"},
     }
 
     # Italian to English country name translations for International National Teams
@@ -892,11 +908,16 @@ class ItalianEPGService:
                     logger.debug("EPG Filter: scartata replica d'archivio '%s'", raw_title)
                     continue
 
-                # On generalist channels (Rai 1, etc.), strictly require sports genre
+                # On generalist channels (Rai 1, TV8, Canale 5, etc.), strictly require sports genre or sports keywords
                 if is_generalist:
                     is_sport = (
                         genre_name.lower() in ("sport", "sport e calcio")
-                        or any(k in raw_title.lower() for k in ("calcio", "partita", "coppa italia", "f1", "motogp", "nations league", "wwe", "raw", "smackdown", "nxt", "wrestling", "boxe", "ufc", "mma"))
+                        or any(k in raw_title.lower() for k in (
+                            "calcio", "partita", "coppa", "f1", "formula 1", "motogp", "moto2", "moto3",
+                            "superbike", "nations league", "europa league", "champions league", "conference league",
+                            "serie a", "tennis", "basket", "rugby", "volley", "pallavolo", "ciclismo", "gp ",
+                            "wwe", "raw", "smackdown", "nxt", "wrestling", "boxe", "ufc", "mma"
+                        ))
                     )
                     if not is_sport:
                         continue
@@ -1131,7 +1152,12 @@ class ItalianEPGService:
                     "sport" in cat_names
                     or "sport" in genre_names
                     or "calcio" in genre_names
-                    or any(k in raw_title.lower() for k in ("wwe", "raw", "smackdown", "nxt", "wrestling", "boxe", "ufc", "mma", "calcio", "motogp", "f1", "superbike"))
+                    or any(k in raw_title.lower() for k in (
+                        "calcio", "partita", "coppa", "f1", "formula 1", "motogp", "moto2", "moto3",
+                        "superbike", "nations league", "europa league", "champions league", "conference league",
+                        "serie a", "tennis", "basket", "rugby", "volley", "pallavolo", "ciclismo", "gp ",
+                        "wwe", "raw", "smackdown", "nxt", "wrestling", "boxe", "ufc", "mma"
+                    ))
                 )
                 if is_generalist and not is_sport:
                     # On generalist channels, must be marked as sport

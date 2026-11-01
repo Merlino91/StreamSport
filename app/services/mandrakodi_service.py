@@ -315,6 +315,14 @@ class MandrakodiService:
             return "rai 3"
         if "tv8" in norm:
             return "tv8"
+        if "nove" in norm:
+            return "nove"
+        if "sportitalia solocalcio" in norm or "solocalcio" in norm:
+            return "sportitalia solocalcio"
+        if "sportitalia plus" in norm:
+            return "sportitalia plus"
+        if "sportitalia" in norm:
+            return "sportitalia"
         if "rsi la1" in norm or "rsi la 1" in norm:
             return "rsi la1"
         if "rsi la2" in norm or "rsi la 2" in norm:
@@ -326,7 +334,11 @@ class MandrakodiService:
         """Returns all registered Mandrakodi streams for a canonical channel."""
         if not canonical_key:
             return []
-        return list(self._channels_by_canonical.get(canonical_key.strip().lower(), []))
+        key = canonical_key.strip().lower()
+        streams = list(self._channels_by_canonical.get(key, []))
+        if not streams and key == "sportitalia":
+            streams = list(self._channels_by_canonical.get("sportitalia solocalcio", [])) or list(self._channels_by_canonical.get("sportitalia plus", []))
+        return streams
 
     def enrich_matches_with_mandrakodi(self, matches: List[Dict[str, Any]]) -> int:
         """

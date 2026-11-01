@@ -417,6 +417,14 @@ class TvVooService:
         "899": "rai 1",               # LCN 101
         "898": "rai 2",               # LCN 102
         "897": "rai 3",               # LCN 103
+        "8195": "tv8",                 # LCN 125
+        "10354": "canale 5",           # LCN 105
+        "10454": "italia 1",           # LCN 106
+        "12116": "nove",               # LCN 149
+        "10458": "20 mediaset",        # LCN 151
+        "8133": "cielo",               # LCN 126
+        "12120": "dmax",               # LCN 170
+        "8293": "equtv",               # LCN 220
     }
 
     # Direct mapping for Tivùsat EPG API (services.tivulaguida.it) channel IDs
@@ -426,12 +434,17 @@ class TvVooService:
         "44": "rai 3",                # Rai 3 HD
         "88": "rai sport",            # Rai Sport HD
         "145": "canale 5",            # Canale 5 HD
+        "5": "canale 5",              # Canale 5
         "148": "italia 1",            # Italia 1 HD
+        "6": "italia 1",              # Italia 1
+        "140": "nove",                # NOVE HD
         "249": "20 mediaset",         # 20 Mediaset HD
         "279": "tv8",                 # TV8 HD
         "280": "cielo",               # Cielo HD
         "295": "sportitalia solocalcio", # SOLOCALCIO (Sportitalia)
+        "277": "equtv",               # EQUtv
         "32": "dmax",                 # DMAX HD
+        "256": "rai 4k",              # Rai 4K
     }
 
     # Country-specific alias mapping (Silos) including official LCN numbering
@@ -716,15 +729,27 @@ class TvVooService:
             "rai sport hd": "rai sport",
             "rai sport 1": "rai sport",
             "sportitalia": "sportitalia",
+            "sportitalia hd": "sportitalia",
+            "sportitalia 60": "sportitalia",
             "sportitalia plus": "sportitalia plus",
             "sportitalia solocalcio": "sportitalia solocalcio",
+            "solocalcio": "sportitalia solocalcio",
             "tv8": "tv8",
             "tv 8": "tv8",
+            "tv8 hd": "tv8",
+            "tv 8 hd": "tv8",
             "cielo": "cielo",
             "canale 5": "canale 5",
             "canale 5 hd": "canale 5",
             "italia 1": "italia 1",
             "italia 1 hd": "italia 1",
+            "nove": "nove",
+            "nove hd": "nove",
+            "nove tv": "nove",
+            "canale nove": "nove",
+            "il nove": "nove",
+            "equtv": "equtv",
+            "equ tv": "equtv",
             "rai 1": "rai 1",
             "rai 1 hd": "rai 1",
             "rai 2": "rai 2",
@@ -1089,6 +1114,8 @@ class TvVooService:
         "cielo": "Cielo",
         "canale 5": "Canale 5",
         "italia 1": "Italia 1",
+        "nove": "NOVE",
+        "equtv": "EQUtv",
         "rai 1": "Rai 1",
         "rai 2": "Rai 2",
         "rai 3": "Rai 3",
@@ -1604,12 +1631,20 @@ class TvVooService:
             return []
 
         # If country is provided, check scoped key first
+        results = []
         if country:
             scoped_key = f"{country.lower()[:2]}:{canonical}"
             if scoped_key in self._channels_by_canonical:
-                return list(self._channels_by_canonical[scoped_key])
+                results = list(self._channels_by_canonical[scoped_key])
 
-        return list(self._channels_by_canonical.get(canonical, []))
+        if not results:
+            results = list(self._channels_by_canonical.get(canonical, []))
+
+        # Seamless fallback for sportitalia: if main feed has 0 streams, check solocalcio or plus
+        if not results and canonical == "sportitalia":
+            results = self.get_channel_streams("sportitalia solocalcio", country=country) or self.get_channel_streams("sportitalia plus", country=country)
+
+        return results
 
     def has_channel(
         self,

@@ -707,9 +707,52 @@ class TestItalianEPGService(unittest.IsolatedAsyncioTestCase):
             "canonical_competition": "volleyball_cev_cl",
             "_silo": "volley",
         }
-        cat_w, genre_w = genre_classifier.classify(m_cev_women)
+        cat_w, genre_f = genre_classifier.classify(m_cev_women)
         self.assertEqual(cat_w, "volley")
-        self.assertEqual(genre_w, "Volley Femminile")
+        self.assertEqual(genre_f, "Volley Femminile")
+
+    def test_new_channels_in_sky_and_tivusat_definitions(self):
+        """Verifies TV8, Canale 5, Italia 1, Nove, Rai 4K, 20 Mediaset are defined in Sky/Tivusat."""
+        from app.services.tvvoo_service import tvvoo_service
+        from app.services.mandrakodi_service import mandrakodi_service
+
+        epg = ItalianEPGService()
+        # Sky Generalist
+        self.assertIn("8195", epg.SKY_GENERALIST_CHANNELS)
+        self.assertEqual(epg.SKY_GENERALIST_CHANNELS["8195"]["name"], "TV8 HD")
+        self.assertIn("10354", epg.SKY_GENERALIST_CHANNELS)
+        self.assertIn("10454", epg.SKY_GENERALIST_CHANNELS)
+        self.assertIn("12116", epg.SKY_GENERALIST_CHANNELS)
+
+        # Tivusat Generalist
+        self.assertIn("279", epg.TIVUSAT_GENERALIST_CHANNELS)
+        self.assertEqual(epg.TIVUSAT_GENERALIST_CHANNELS["279"]["name"], "TV8 HD")
+        self.assertIn("145", epg.TIVUSAT_GENERALIST_CHANNELS)
+        self.assertIn("148", epg.TIVUSAT_GENERALIST_CHANNELS)
+        self.assertIn("140", epg.TIVUSAT_GENERALIST_CHANNELS)
+        self.assertIn("256", epg.TIVUSAT_GENERALIST_CHANNELS)
+
+        # TvVoo Sky ID and Tivusat ID resolution
+        self.assertEqual(tvvoo_service.get_canonical_from_sky_id("8195"), "tv8")
+        self.assertEqual(tvvoo_service.get_canonical_from_sky_id("10354"), "canale 5")
+        self.assertEqual(tvvoo_service.get_canonical_from_sky_id("10454"), "italia 1")
+        self.assertEqual(tvvoo_service.get_canonical_from_sky_id("12116"), "nove")
+        self.assertEqual(tvvoo_service.get_canonical_from_tivusat_id("279"), "tv8")
+        self.assertEqual(tvvoo_service.get_canonical_from_tivusat_id("140"), "nove")
+        self.assertEqual(tvvoo_service.get_canonical_from_tivusat_id("256"), "rai 4k")
+
+        # Country alias resolution
+        self.assertEqual(tvvoo_service.get_canonical_key("TV8 HD", country="Italy"), "tv8")
+        self.assertEqual(tvvoo_service.get_canonical_key("Nove HD", country="Italy"), "nove")
+        self.assertEqual(tvvoo_service.get_canonical_key("Canale 5 HD", country="Italy"), "canale 5")
+        self.assertEqual(tvvoo_service.get_canonical_key("Italia 1 HD", country="Italy"), "italia 1")
+        self.assertEqual(tvvoo_service.get_canonical_key("Sportitalia HD", country="Italy"), "sportitalia")
+
+        # Mandrakodi canonical resolution
+        self.assertEqual(mandrakodi_service.get_canonical_channel_key("Nove"), "nove")
+        self.assertEqual(mandrakodi_service.get_canonical_channel_key("EuroSport 1 (ITA)"), "eurosport 1")
+        self.assertEqual(mandrakodi_service.get_canonical_channel_key("EuroSport 2 (ITA)"), "eurosport 2")
+        self.assertEqual(mandrakodi_service.get_canonical_channel_key("Sportitalia SoloCalcio"), "sportitalia solocalcio")
 
 
 if __name__ == "__main__":
