@@ -76,6 +76,7 @@ class DoHClient:
             limits=self._doh_limits,
             timeout=httpx.Timeout(6.0, connect=3.0)
         )
+        self._doh_client_loop: Optional[asyncio.AbstractEventLoop] = None
 
         # 2. Upstream Client: Direct IP / CDN fetching with custom SNI support
         # Allows routing via direct numerical IP when local ISP DNS blocks hostnames
@@ -92,7 +93,41 @@ class DoHClient:
         self._limits = httpx.Limits(max_keepalive_connections=50, max_connections=100, keepalive_expiry=60.0)
         self._transport = httpx.AsyncHTTPTransport(verify=self._ssl_context, limits=self._limits)
         self._client = httpx.AsyncClient(transport=self._transport, timeout=httpx.Timeout(8.0, connect=4.0))
+        self._client_loop: Optional[asyncio.AbstractEventLoop] = None
         self._resolve_lock: asyncio.Lock = asyncio.Lock()
+
+    def _ensure_doh_client(self) -> httpx.AsyncClient:
+        """Returns the active DoH client, recreating it if the previous event loop was closed."""
+        try:
+            current_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            current_loop = None
+
+        if self._doh_client_loop is None:
+            self._doh_client_loop = current_loop
+        elif self._doh_client_loop != current_loop or getattr(self._doh_client, "is_closed", False):
+            self._doh_client = httpx.AsyncClient(
+                verify=True,
+                limits=self._doh_limits,
+                timeout=httpx.Timeout(6.0, connect=3.0)
+            )
+            self._doh_client_loop = current_loop
+        return self._doh_client
+
+    def _ensure_client(self) -> httpx.AsyncClient:
+        """Returns the active upstream client, recreating it if the previous event loop was closed."""
+        try:
+            current_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            current_loop = None
+
+        if self._client_loop is None:
+            self._client_loop = current_loop
+        elif self._client_loop != current_loop or getattr(self._client, "is_closed", False):
+            self._transport = httpx.AsyncHTTPTransport(verify=self._ssl_context, limits=self._limits)
+            self._client = httpx.AsyncClient(transport=self._transport, timeout=httpx.Timeout(8.0, connect=4.0))
+            self._client_loop = current_loop
+        return self._client
 
     def _save_to_image_cache(self, url: str, content: bytes, content_type: str, now: float) -> None:
         """Stores image in RAM with true LRU eviction (Least Recently Used) and bounded capacity."""
@@ -127,11 +162,12 @@ class DoHClient:
                 if now < expire_at:
                     return ip
 
+            doh_http = self._ensure_doh_client()
             for endpoint in self._doh_endpoints:
                 try:
                     params = {"name": hostname, "type": "A"}
                     headers = {"accept": "application/dns-json"}
-                    res = await self._doh_client.get(endpoint, params=params, headers=headers)
+                    res = await doh_http.get(endpoint, params=params, headers=headers)
                     if res.status_code == 200:
                         data = res.json()
                         answers = data.get("Answer", [])
@@ -169,7 +205,8 @@ class DoHClient:
             headers["Host"] = host_header or hostname
 
         try:
-            response = await self._client.get(target_url, headers=headers, timeout=timeout)
+            http_cli = self._ensure_client()
+            response = await http_cli.get(target_url, headers=headers, timeout=timeout)
             if response.status_code == 200:
                 return response.json()
             logger.warning("Request to %s returned status %d", url, response.status_code)
@@ -178,7 +215,7 @@ class DoHClient:
                 try:
                     # Fallback to direct URL if SNI was rejected by target server
                     fallback_headers = {"User-Agent": headers["User-Agent"], "Accept": headers.get("Accept", "*/*")}
-                    response = await self._client.get(url, headers=fallback_headers, timeout=timeout)
+                    response = await http_cli.get(url, headers=fallback_headers, timeout=timeout)
                     if response.status_code == 200:
                         return response.json()
                 except Exception:
@@ -324,7 +361,8 @@ class DoHClient:
             req_headers["Host"] = host_header or hostname
 
         try:
-            response = await self._client.get(target_url, headers=req_headers, timeout=timeout)
+            http_cli = self._ensure_client()
+            response = await http_cli.get(target_url, headers=req_headers, timeout=timeout)
             if response.status_code == 200:
                 content_type = response.headers.get("content-type", "image/webp")
                 content = response.content
@@ -336,7 +374,7 @@ class DoHClient:
                 try:
                     fallback_headers = req_headers.copy()
                     fallback_headers.pop("Host", None)
-                    response = await self._client.get(url, headers=fallback_headers, timeout=timeout)
+                    response = await http_cli.get(url, headers=fallback_headers, timeout=timeout)
                     if response.status_code == 200:
                         content_type = response.headers.get("content-type", "image/webp")
                         content = response.content

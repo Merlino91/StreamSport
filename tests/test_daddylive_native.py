@@ -178,20 +178,41 @@ class TestDaddyLiveNative(unittest.IsolatedAsyncioTestCase):
         from app.services.catalog_service import catalog_service
         catalog_service._cached_matches.append(fake_match)
 
-        streams = await stream_service.get_streams_for_event(
-            "dlhd:test:multi",
-            ep_url="https://ep.bluccoj.com",
-            ep_pass="Z3r0EP",
-            base_url="https://streamsport.example.com",
-            config="myconfig",
-        )
+        # 1. With Player 6 active -> returns Direct stream + Auto-Fallback stream
+        with patch.object(daddylive_api, "check_player6_direct_active", return_value=True):
+            streams = await stream_service.get_streams_for_event(
+                "dlhd:test:multi",
+                ep_url="https://ep.bluccoj.com",
+                ep_pass="Z3r0EP",
+                base_url="https://streamsport.example.com",
+                config="myconfig",
+            )
 
-        # Must be deduplicated into 1 single clean stream
-        self.assertEqual(len(streams), 1)
-        s = streams[0]
-        self.assertEqual(s["name"], "DAZN 1")
-        self.assertIn("Fonte: DaddyLive", s["title"])
-        self.assertEqual(s["url"], "https://streamsport.example.com/myconfig/daddylive/stream/877.m3u8")
+            self.assertEqual(len(streams), 2)
+            # Direct stream first
+            s_direct = streams[0]
+            self.assertEqual(s_direct["name"], "DAZN 1")
+            self.assertIn("(Direct)", s_direct["title"])
+            self.assertEqual(s_direct["url"], "https://streamsport.example.com/myconfig/daddylive/direct/877.m3u8")
+
+            # EasyProxy Auto-Fallback stream second
+            s_fallback = streams[1]
+            self.assertEqual(s_fallback["name"], "DAZN 1")
+            self.assertEqual(s_fallback["title"], "📡 Fonte: DaddyLive • Qualità: Live TV")
+            self.assertEqual(s_fallback["url"], "https://streamsport.example.com/myconfig/daddylive/stream/877.m3u8")
+
+        # 2. With Player 6 inactive -> returns only 1 clean Auto-Fallback stream
+        with patch.object(daddylive_api, "check_player6_direct_active", return_value=False):
+            streams_no_p6 = await stream_service.get_streams_for_event(
+                "dlhd:test:multi",
+                ep_url="https://ep.bluccoj.com",
+                ep_pass="Z3r0EP",
+                base_url="https://streamsport.example.com",
+                config="myconfig",
+            )
+            self.assertEqual(len(streams_no_p6), 1)
+            self.assertEqual(streams_no_p6[0]["title"], "📡 Fonte: DaddyLive • Qualità: Live TV")
+            self.assertEqual(streams_no_p6[0]["url"], "https://streamsport.example.com/myconfig/daddylive/stream/877.m3u8")
 
     async def test_daddylive_cascade_resolution(self):
         """Verifies resolve_active_stream_url cascades across players on failure."""
@@ -227,6 +248,18 @@ class TestDaddyLiveNative(unittest.IsolatedAsyncioTestCase):
             resp = client.get(f"/{cfg}/daddylive/stream/877.m3u8", follow_redirects=False)
             self.assertEqual(resp.status_code, 307)
             self.assertEqual(resp.headers["location"], "https://ep.bluccoj.com/resolved.m3u8")
+
+    def test_fastapi_daddylive_direct_endpoint(self):
+        """Verifies /{config}/daddylive/direct/{channel_id}.m3u8 returns 307 redirect to wideiptv CDN."""
+        from fastapi.testclient import TestClient
+        from app.main import app
+
+        with patch.object(daddylive_api, "resolve_player6_direct", return_value="https://cdn.wideiptv.top/ZonaDAZN/index.m3u8?token=xyz"):
+            client = TestClient(app)
+            cfg = "aHR0cHM6Ly9lcC5ibHVjY29qLmNvbXxaM3IwRVB8bnV2aW8="
+            resp = client.get(f"/{cfg}/daddylive/direct/877.m3u8", follow_redirects=False)
+            self.assertEqual(resp.status_code, 307)
+            self.assertEqual(resp.headers["location"], "https://cdn.wideiptv.top/ZonaDAZN/index.m3u8?token=xyz")
 
 
 if __name__ == "__main__":

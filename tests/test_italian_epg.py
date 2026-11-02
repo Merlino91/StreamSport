@@ -301,6 +301,41 @@ class TestItalianEPGService(unittest.IsolatedAsyncioTestCase):
         purged_count = self.service.filter_conflicting_italian_channels([match])
         self.assertEqual(purged_count, 0)
         self.assertEqual(len(match["sources"]), 1)
+
+    def test_filter_conflicting_preserves_channel_when_preceded_by_studio_show(self):
+        """Verifies that if a channel has a pre-match studio show (e.g. at 18:00) followed by the actual match (18:25), the channel is preserved."""
+        match_time = 1793640600000  # 18:30
+        self.service._cached_matches = [
+            {
+                "id": "sky_calcio_studio",
+                "title": "Serie A: Sky Calcio vs L'originale",
+                "date": match_time - (30 * 60 * 1000),  # 18:00
+                "teams": {"home": {"name": "Sky Calcio"}, "away": {"name": "L'originale"}},
+                "sources": [{"name": "Sky Sport Calcio", "id": "sky sport calcio", "country": "Italy"}],
+            },
+            {
+                "id": "sky_calcio_sassuolo_fiorentina",
+                "title": "Serie A: Sassuolo vs Fiorentina",
+                "date": match_time - (5 * 60 * 1000),  # 18:25
+                "teams": {"home": {"name": "Sassuolo"}, "away": {"name": "Fiorentina"}},
+                "sources": [{"name": "Sky Sport Calcio", "id": "sky sport calcio", "country": "Italy"}],
+            },
+        ]
+
+        match = {
+            "id": "diretta-YHemANS7",
+            "title": "Sassuolo vs Fiorentina",
+            "date": match_time,
+            "teams": {"home": {"name": "Sassuolo"}, "away": {"name": "Fiorentina"}},
+            "sources": [
+                {"source": "tvvoo", "name": "Sky Sport Calcio", "id": "sky sport calcio"},
+                {"source": "dlhd", "name": "Sky Sport Calcio IT", "id": "870"},
+            ],
+        }
+
+        purged_count = self.service.filter_conflicting_italian_channels([match])
+        self.assertEqual(purged_count, 0)
+        self.assertEqual(len(match["sources"]), 2)
         self.assertEqual(match["sources"][0]["name"], "Sky Sport Max")
 
     def test_filter_conflicting_italian_channels_preserves_generic_container(self):
@@ -326,6 +361,41 @@ class TestItalianEPGService(unittest.IsolatedAsyncioTestCase):
         purged_count = self.service.filter_conflicting_italian_channels([match])
         self.assertEqual(purged_count, 0)
         self.assertEqual(len(match["sources"]), 1)
+
+    def test_filter_conflicting_preserves_channel_when_preceded_by_studio_show(self):
+        """Verifies that if a channel has a pre-match studio show (e.g. at 18:00) followed by the actual match (18:25), the channel is preserved."""
+        match_time = 1793640600000  # 18:30
+        self.service._cached_matches = [
+            {
+                "id": "sky_calcio_studio",
+                "title": "Serie A: Sky Calcio vs L'originale",
+                "date": match_time - (30 * 60 * 1000),  # 18:00
+                "teams": {"home": {"name": "Sky Calcio"}, "away": {"name": "L'originale"}},
+                "sources": [{"name": "Sky Sport Calcio", "id": "sky sport calcio", "country": "Italy"}],
+            },
+            {
+                "id": "sky_calcio_sassuolo_fiorentina",
+                "title": "Serie A: Sassuolo vs Fiorentina",
+                "date": match_time - (5 * 60 * 1000),  # 18:25
+                "teams": {"home": {"name": "Sassuolo"}, "away": {"name": "Fiorentina"}},
+                "sources": [{"name": "Sky Sport Calcio", "id": "sky sport calcio", "country": "Italy"}],
+            },
+        ]
+
+        match = {
+            "id": "diretta-YHemANS7",
+            "title": "Sassuolo vs Fiorentina",
+            "date": match_time,
+            "teams": {"home": {"name": "Sassuolo"}, "away": {"name": "Fiorentina"}},
+            "sources": [
+                {"source": "tvvoo", "name": "Sky Sport Calcio", "id": "sky sport calcio"},
+                {"source": "dlhd", "name": "Sky Sport Calcio IT", "id": "870"},
+            ],
+        }
+
+        purged_count = self.service.filter_conflicting_italian_channels([match])
+        self.assertEqual(purged_count, 0)
+        self.assertEqual(len(match["sources"]), 2)
 
     def test_asymmetric_tv_schedule_window(self):
         """Verifies TV EPG allows up to 90m pre-match studio, but rejects late joinings > 20m."""

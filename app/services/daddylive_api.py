@@ -104,11 +104,18 @@ class DaddyLiveAPI:
         self._last_domain_check: float = 0.0
         self._active_player_cache: Dict[str, Tuple[str, float]] = {}
         self._fallback_lock: Optional[asyncio.Lock] = None
+        self._player6_cache: Dict[str, Tuple[Optional[str], float]] = {}
+        self._player6_lock: Optional[asyncio.Lock] = None
 
     def _get_fallback_lock(self) -> asyncio.Lock:
         if self._fallback_lock is None:
             self._fallback_lock = asyncio.Lock()
         return self._fallback_lock
+
+    def _get_player6_lock(self) -> asyncio.Lock:
+        if self._player6_lock is None:
+            self._player6_lock = asyncio.Lock()
+        return self._player6_lock
 
     async def get_active_domain(self) -> str:
         """
@@ -247,6 +254,83 @@ class DaddyLiveAPI:
             finally:
                 if close_client:
                     await client.aclose()
+
+    async def check_player6_direct_active(self, ch_id: str) -> bool:
+        """
+        Lightweight check to verify whether Player 6 (WideIPTV Direct CDN) is active
+        and playable for the given DaddyLive channel.
+        """
+        stream_url = await self.resolve_player6_direct(ch_id)
+        return bool(stream_url)
+
+    async def resolve_player6_direct(self, ch_id: str) -> Optional[str]:
+        """
+        Extracts and resolves unencrypted WideIPTV HLS stream URL from Player 6
+        (https://thedaddy.pk/player/stream-{id}.php).
+        Returns the direct playable M3U8 URL (e.g. https://cdn.wideiptv.top/.../index.m3u8?token=...)
+        which uses refererMode 'omit' and token with 'no_check_ip' parameter (0% VPS video bandwidth).
+        Results are cached in RAM for 240 seconds.
+        """
+        if not ch_id or not str(ch_id).isalnum():
+            return None
+
+        now = time.time()
+        cached = self._player6_cache.get(ch_id)
+        if cached and cached[1] > now:
+            return cached[0]
+
+        lock = self._get_player6_lock()
+        async with lock:
+            cached = self._player6_cache.get(ch_id)
+            if cached and cached[1] > now:
+                return cached[0]
+
+            dl_domain = await self.get_active_domain()
+            page_url = f"https://{dl_domain}/player/stream-{ch_id}.php"
+
+            try:
+                headers = {
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                    "Referer": f"https://{dl_domain}/",
+                }
+                content, _ = await doh_client.get_raw(page_url, headers=headers, timeout=2.5)
+                if not content:
+                    self._player6_cache[ch_id] = (None, now + 60)
+                    return None
+
+                html_text = content.decode("utf-8", errors="ignore")
+                m = re.search(r'wideiptv\.top/daddy\.php\?stream=([a-zA-Z0-9_-]+)', html_text)
+                if not m:
+                    m = re.search(r'wideiptv\.top/player/([a-zA-Z0-9_-]+)', html_text)
+                if not m:
+                    self._player6_cache[ch_id] = (None, now + 60)
+                    return None
+
+                slug = m.group(1)
+                player_url = f"https://wideiptv.top/player/{slug}"
+                p_headers = {
+                    "User-Agent": headers["User-Agent"],
+                    "Referer": f"https://wideiptv.top/daddy.php?stream={slug}",
+                }
+                p_content, _ = await doh_client.get_raw(player_url, headers=p_headers, timeout=2.5)
+                if not p_content:
+                    self._player6_cache[ch_id] = (None, now + 60)
+                    return None
+
+                p_html = p_content.decode("utf-8", errors="ignore")
+                s_match = re.search(r'streamUrl:\s*"((?:\\/|[^"])+)"', p_html)
+                if not s_match:
+                    self._player6_cache[ch_id] = (None, now + 60)
+                    return None
+
+                stream_url = s_match.group(1).replace(r"\/", "/")
+                logger.info("DaddyLive: Channel %s resolved via Player 6 WideIPTV Direct: %s", ch_id, stream_url[:70])
+                self._player6_cache[ch_id] = (stream_url, now + 240)
+                return stream_url
+            except Exception as e:
+                logger.debug("DaddyLive: Player 6 resolution failed for %s: %s", ch_id, e)
+                self._player6_cache[ch_id] = (None, now + 60)
+                return None
 
     def _extract_channel_id(self, href: str) -> Optional[str]:
         """Extracts channel id from URL patterns."""

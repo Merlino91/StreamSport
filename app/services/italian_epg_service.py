@@ -1889,7 +1889,7 @@ class ItalianEPGService:
             "diretta gol", "zona gol", "zona dazn", "zona serie a", "zona serie b",
             "studio", "speciale", "mondo gol", "magazine", "highlights", "tg24",
             "sport24", "rubrica", "calcio show", "sky calcio club", "tutto il calcio",
-            "linea notte", "anteprima"
+            "linea notte", "anteprima", "l'originale", "calcio l'originale", "sky calcio l'originale"
         )
 
         for m in matches:
@@ -2000,9 +2000,11 @@ class ItalianEPGService:
                         has_matching_or_ambiguous = True
                         break
 
-                    # Distinct conflicting event found!
-                    conflicting_event = ep
-                    break
+                    # Distinct non-matching program found: record as candidate conflict, but DO NOT break!
+                    # Continue scanning remaining EPG events in window; if any event matches our match,
+                    # the channel is legitimate and must be preserved (e.g. pre-match studio followed by match).
+                    if not conflicting_event:
+                        conflicting_event = ep
 
                 if not has_any_epg_on_channel:
                     # Incertezza / ignoranza: EPG does not have programs for this channel at this time -> KEEP!

@@ -710,6 +710,7 @@ class StreamSportTestCase(unittest.TestCase):
         try:
             with patch("app.services.mandrakodi_service.mandrakodi_service.resolve_live_match_streams", new_callable=AsyncMock, return_value=[]), \
                  patch("app.services.mandrakodi_service.mandrakodi_service.get_matches", new_callable=AsyncMock, return_value=[]), \
+                 patch("app.services.daddylive_api.daddylive_api.check_player6_direct_active", new_callable=AsyncMock, return_value=False), \
                  patch("app.services.daddylive_api.daddylive_api.get_active_domain", new_callable=AsyncMock, return_value="dlive.sx"):
 
                 catalog_service._cached_matches = [mock_match]
