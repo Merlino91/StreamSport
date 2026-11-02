@@ -580,14 +580,6 @@ async def daddylive_direct_stream(channel_id: str, config: Optional[str] = None)
     if direct_url:
         return RedirectResponse(url=direct_url, status_code=307)
 
-    # Automatic fallback to EasyProxy if direct resolution failed and config is present
-    if config:
-        ep_url, ep_pass, _, _ = decode_config(config)
-        if ep_url:
-            fallback_ep = await daddylive_api.resolve_active_stream_url(channel_id, ep_url, ep_pass)
-            if fallback_ep:
-                return RedirectResponse(url=fallback_ep, status_code=307)
-
     raise HTTPException(status_code=502, detail="Player 6 Direct non disponibile per questo canale")
 
 

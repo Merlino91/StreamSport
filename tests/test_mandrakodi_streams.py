@@ -202,13 +202,13 @@ class TestMandrakodiStreams(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(streams[3]["externalUrl"], "acestream://16519c3e10c7f1dddea05eb2dae6182cbdd34e4f")
         self.assertTrue(streams[3]["behaviorHints"]["notWebReady"])
 
-    async def test_daddylive_streams_capped_at_six_and_italian_first(self):
-        """Verifies that DaddyLive exposes at most 6 streams, with Italian channels prioritised at the top."""
+    async def test_daddylive_streams_capped_at_thirty_and_italian_first(self):
+        """Verifies that DaddyLive exposes at most 30 streams, with Italian channels prioritised at the top."""
         now_ts = int(time.time() * 1000)
-        # Create 10 DaddyLive sources: 8 foreign and 2 Italian
+        # Create 35 DaddyLive sources: 33 foreign and 2 Italian
         dl_sources = [
             {"source": "dlhd", "id": f"src_{i}", "name": f"Foreign Channel {i} UK"}
-            for i in range(1, 9)
+            for i in range(1, 34)
         ]
         # Insert 2 Italian sources at the end
         dl_sources.append({"source": "dlhd", "id": "src_it1", "name": "Sky Sport Calcio IT"})
@@ -233,8 +233,8 @@ class TestMandrakodiStreams(unittest.IsolatedAsyncioTestCase):
             ep_pass="Z3r0EP"
         )
 
-        # Must be capped at exactly 6 streams
-        self.assertEqual(len(streams), 6)
+        # Must be capped at exactly 30 streams
+        self.assertEqual(len(streams), 30)
         # Italian streams must be at the very top (indices 0 and 1)
         self.assertIn("🇮🇹", streams[0]["name"])
         self.assertIn("🇮🇹", streams[1]["name"])
@@ -389,6 +389,78 @@ class TestMandrakodiStreams(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(mandrakodi_service.get_canonical_channel_key("Paramount+ Live"), "paramount+")
         self.assertEqual(mandrakodi_service.get_canonical_channel_key("Prime Video Sport"), "prime video it")
         self.assertEqual(mandrakodi_service.get_canonical_channel_key("NBC Sports Channel"), "nbc sports")
+
+    async def test_mandrakodi_unclassified_channel_no_italian_flag_fallback(self):
+        """Verifies that Mandrakodi channels without defined country or recognized keyword do NOT fall back to 🇮🇹."""
+        now_ts = int(time.time() * 1000)
+        fake_match = {
+            "id": "mandrakodi:test:paramount",
+            "title": "Sassuolo vs Fiorentina",
+            "category": "football",
+            "_silo": "football",
+            "date": now_ts,
+            "sources": [
+                {
+                    "source": "amstaff",
+                    "provider": "mandrakodi",
+                    "id": "https://example.com/cenc.mpd",
+                    "name": "PARAMOUNT+ (ENG - MPD)",
+                    "stream_data": {
+                        "mpd_url": "https://example.com/cenc.mpd",
+                        "kid": "abc",
+                        "key": "123",
+                    },
+                }
+            ],
+            "_provider": "mandrakodi",
+        }
+        from app.services.catalog_service import catalog_service
+        catalog_service._cached_matches.append(fake_match)
+
+        streams = await stream_service.get_streams_for_event(
+            "mandrakodi:test:paramount",
+            ep_url="https://ep.bluccoj.com",
+            ep_pass="Z3r0EP"
+        )
+        self.assertGreaterEqual(len(streams), 1)
+        st = streams[0]
+        self.assertNotIn("🇮🇹", st["name"])
+        self.assertNotIn("🇮🇹", st["title"])
+        self.assertTrue(st["name"].startswith("PARAMOUNT+"))
+
+    async def test_fctv33_and_sportzonline_no_lightning_emoji(self):
+        """Verifies that FCTV33 and Sportzonline stream names do NOT contain the lightning bolt emoji ⚡."""
+        now_ts = int(time.time() * 1000)
+        fake_match = {
+            "id": "test:lightning",
+            "title": "Match Test",
+            "category": "football",
+            "_silo": "football",
+            "date": now_ts,
+            "sources": [
+                {
+                    "source": "fctv33",
+                    "match_id": "12345",
+                    "stream_id": "67890",
+                    "name": "FCTV Feed 1",
+                },
+                {
+                    "source": "sportsonline",
+                    "id": "https://example.com/live.m3u8",
+                    "channel": "SPON 1",
+                }
+            ]
+        }
+        from app.services.catalog_service import catalog_service
+        catalog_service._cached_matches.append(fake_match)
+
+        streams = await stream_service.get_streams_for_event(
+            "test:lightning",
+            ep_url="https://ep.bluccoj.com",
+            ep_pass="Z3r0EP"
+        )
+        for s in streams:
+            self.assertNotIn("⚡", s["name"])
 
 
 if __name__ == "__main__":

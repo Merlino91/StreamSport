@@ -222,7 +222,7 @@ class DaddyLiveAPI:
             base_ep = ep_url.rstrip("/")
             close_client = False
             if client is None:
-                client = httpx.AsyncClient(timeout=3.5, verify=False)
+                client = httpx.AsyncClient(timeout=4.5, verify=False)
                 close_client = True
 
             try:
@@ -235,7 +235,7 @@ class DaddyLiveAPI:
                         probe_url += f"&api_password={urllib.parse.quote(ep_pass, safe='')}"
 
                     try:
-                        r = await client.get(probe_url, follow_redirects=False, timeout=2.5)
+                        r = await client.get(probe_url, follow_redirects=False, timeout=4.0)
                         if r.status_code in (200, 302, 307):
                             logger.info(
                                 "DaddyLive: Channel %s active on %s (EasyProxy returned %d)",
@@ -293,9 +293,9 @@ class DaddyLiveAPI:
                     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
                     "Referer": f"https://{dl_domain}/",
                 }
-                content, _ = await doh_client.get_raw(page_url, headers=headers, timeout=2.5)
+                content, _ = await doh_client.get_raw(page_url, headers=headers, timeout=5.0)
                 if not content:
-                    self._player6_cache[ch_id] = (None, now + 60)
+                    self._player6_cache[ch_id] = (None, now + 15)
                     return None
 
                 html_text = content.decode("utf-8", errors="ignore")
@@ -303,7 +303,7 @@ class DaddyLiveAPI:
                 if not m:
                     m = re.search(r'wideiptv\.top/player/([a-zA-Z0-9_-]+)', html_text)
                 if not m:
-                    self._player6_cache[ch_id] = (None, now + 60)
+                    self._player6_cache[ch_id] = (None, now + 15)
                     return None
 
                 slug = m.group(1)
@@ -312,15 +312,15 @@ class DaddyLiveAPI:
                     "User-Agent": headers["User-Agent"],
                     "Referer": f"https://wideiptv.top/daddy.php?stream={slug}",
                 }
-                p_content, _ = await doh_client.get_raw(player_url, headers=p_headers, timeout=2.5)
+                p_content, _ = await doh_client.get_raw(player_url, headers=p_headers, timeout=5.0)
                 if not p_content:
-                    self._player6_cache[ch_id] = (None, now + 60)
+                    self._player6_cache[ch_id] = (None, now + 15)
                     return None
 
                 p_html = p_content.decode("utf-8", errors="ignore")
                 s_match = re.search(r'streamUrl:\s*"((?:\\/|[^"])+)"', p_html)
                 if not s_match:
-                    self._player6_cache[ch_id] = (None, now + 60)
+                    self._player6_cache[ch_id] = (None, now + 15)
                     return None
 
                 stream_url = s_match.group(1).replace(r"\/", "/")
@@ -329,7 +329,7 @@ class DaddyLiveAPI:
                 return stream_url
             except Exception as e:
                 logger.debug("DaddyLive: Player 6 resolution failed for %s: %s", ch_id, e)
-                self._player6_cache[ch_id] = (None, now + 60)
+                self._player6_cache[ch_id] = (None, now + 15)
                 return None
 
     def _extract_channel_id(self, href: str) -> Optional[str]:

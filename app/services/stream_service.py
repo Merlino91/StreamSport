@@ -717,7 +717,7 @@ class StreamService:
             src_type = s.get("source")
             ch_name = s.get("name") or match.get("title") or "Evento Live"
             s_data = s.get("stream_data") or {}
-            flag = self.get_channel_flag(ch_name) or self.get_channel_flag(s.get("country", "")) or "🇮🇹"
+            flag = self.get_channel_flag(ch_name) or self.get_channel_flag(s.get("country", "")) or ""
             flag_prefix = f"{flag} " if flag else ""
 
             # Case A: Amstaff (MPEG-DASH with ClearKey DRM) -> via EasyProxy DASH
@@ -1020,12 +1020,12 @@ class StreamService:
                         "behaviorHints": {"notWebReady": False},
                     })
 
-            # Sort DaddyLive streams: Italian channels first, Direct (⚡) first, then cap to maximum 6 streams
+            # Sort DaddyLive streams: Italian channels first, Direct (⚡) first, then cap to maximum 30 streams
             dlhd_streams.sort(key=lambda s: (
                 0 if "🇮🇹" in s.get("name", "") else 1,
                 0 if "(Direct)" in s.get("title", "") else 1
             ))
-            dlhd_streams = dlhd_streams[:6]
+            dlhd_streams = dlhd_streams[:30]
 
         # 3. Process FCTV33 streams with TencentEdgeOne CDN format
         fctv33_streams: List[Dict[str, Any]] = []
@@ -1076,7 +1076,7 @@ class StreamService:
                 stream_url = self.build_easyproxy_url(ep_url, ep_pass, "fctv33", target_d)
 
                 fctv33_streams.append({
-                    "name": f"{flag_prefix}⚡ FCTV33 [{raw_name}]",
+                    "name": f"{flag_prefix}FCTV33 [{raw_name}]",
                     "title": f"FCTV33 Live • 1080p 50fps • {raw_name}\n📡 Rete Edge Tencent",
                     "url": stream_url,
                     "behaviorHints": {"notWebReady": False},
@@ -1095,7 +1095,7 @@ class StreamService:
                     continue
                 ch_name = s.get("channel") or f"HD{idx}"
                 lang = s.get("lang") or "Italiano"
-                flag = s.get("flag") or self.get_channel_flag(ch_name) or "🇮🇹"
+                flag = s.get("flag") or self.get_channel_flag(ch_name) or ""
                 flag_prefix = f"{flag} " if flag else ""
 
                 stream_url = f"{ep_url.rstrip('/')}/proxy/manifest.m3u8?url={urllib.parse.quote_plus(raw_url)}"
@@ -1103,7 +1103,7 @@ class StreamService:
                     stream_url += f"&api_password={urllib.parse.quote(ep_pass, safe='')}"
 
                 spon_streams.append({
-                    "name": f"{flag_prefix}⚡ [Sportzonline] {ch_name} [720p]",
+                    "name": f"{flag_prefix}[Sportzonline] {ch_name} [720p]",
                     "title": f"{flag_prefix}Fonte: Sportzonline • Qualità: 720p 30fps Real HD\n🌐 Audio: {lang} • Bypassa blocchi via EasyProxy",
                     "url": stream_url,
                     "behaviorHints": {"isLive": True, "notWebReady": False},

@@ -162,8 +162,8 @@ class TestDaddyLiveNative(unittest.IsolatedAsyncioTestCase):
     async def test_stream_service_auto_fallback_stream(self):
         """Verifies StreamService constructs 1 clean auto-fallback stream instead of exposing multiple player entries."""
         fake_match = {
-            "id": "dlhd:test:multi",
-            "title": "Inter vs Milan",
+            "id": "dlhd:test_dlhd_multi_p6",
+            "title": "FakeAlphaFC vs FakeBetaFC",
             "category": "football",
             "_silo": "football",
             "date": int(time.time() * 1000),
@@ -181,7 +181,7 @@ class TestDaddyLiveNative(unittest.IsolatedAsyncioTestCase):
         # 1. With Player 6 active -> returns Direct stream + Auto-Fallback stream
         with patch.object(daddylive_api, "check_player6_direct_active", return_value=True):
             streams = await stream_service.get_streams_for_event(
-                "dlhd:test:multi",
+                "dlhd:test_dlhd_multi_p6",
                 ep_url="https://ep.bluccoj.com",
                 ep_pass="Z3r0EP",
                 base_url="https://streamsport.example.com",
@@ -204,7 +204,7 @@ class TestDaddyLiveNative(unittest.IsolatedAsyncioTestCase):
         # 2. With Player 6 inactive -> returns only 1 clean Auto-Fallback stream
         with patch.object(daddylive_api, "check_player6_direct_active", return_value=False):
             streams_no_p6 = await stream_service.get_streams_for_event(
-                "dlhd:test:multi",
+                "dlhd:test_dlhd_multi_p6",
                 ep_url="https://ep.bluccoj.com",
                 ep_pass="Z3r0EP",
                 base_url="https://streamsport.example.com",
@@ -260,6 +260,13 @@ class TestDaddyLiveNative(unittest.IsolatedAsyncioTestCase):
             resp = client.get(f"/{cfg}/daddylive/direct/877.m3u8", follow_redirects=False)
             self.assertEqual(resp.status_code, 307)
             self.assertEqual(resp.headers["location"], "https://cdn.wideiptv.top/ZonaDAZN/index.m3u8?token=xyz")
+
+        # When direct resolution fails -> must return 502 without fallback to EasyProxy
+        with patch.object(daddylive_api, "resolve_player6_direct", return_value=None):
+            client = TestClient(app)
+            cfg = "aHR0cHM6Ly9lcC5ibHVjY29qLmNvbXxaM3IwRVB8bnV2aW8="
+            resp = client.get(f"/{cfg}/daddylive/direct/877.m3u8", follow_redirects=False)
+            self.assertEqual(resp.status_code, 502)
 
 
 if __name__ == "__main__":
