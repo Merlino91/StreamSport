@@ -111,6 +111,63 @@ class TestSoccerClassificationAndFallback(unittest.TestCase):
         for ev in junk_events:
             self.assertTrue(fctv33_service.is_junk_event(ev), f"Expected junk for {ev['title']}")
 
+    def test_foreign_youth_routing_isolation(self):
+        """Foreign youth matches (e.g. English U21) must route to Europei Under 21 and NEVER hijack into Italian Primavera."""
+        cases = [
+            {"title": "Bolton U21 vs QPR U21", "competition": "Premier League Cup U21", "country": "England", "category": "football"},
+            {"title": "Bournemouth U21 vs Cardiff U21", "competition": "Professional Development League", "country": "England", "category": "football"},
+            {"title": "Chelsea U21 vs Arsenal U21", "canonical_competition": "football_premier_league", "competition": "Premier League 2", "country": "Inghilterra", "category": "football"},
+            {"title": "Leeds U21 vs Watford U21", "canonical_competition": "football_championship", "competition": "U21 League", "country": "England", "category": "football"},
+            {"title": "Valencia U19 vs Villarreal U19", "competition": "Division de Honor Juvenil", "country": "Spain", "category": "football"},
+        ]
+        for c in cases:
+            cat, genre = genre_classifier.classify(c)
+            self.assertEqual(cat, "calcio_estero", f"Expected calcio_estero for {c['title']}, got {cat}")
+            self.assertEqual(genre, "Europei Under 21 e Nazionali Giovanili", f"Failed for {c['title']}")
+
+    def test_serie_c_reserve_teams_not_hijacked_to_youth(self):
+        """Serie C matches with reserve teams (Atalanta U23, Juventus Next Gen, Milan Futuro) must remain in Serie C."""
+        cases = [
+            {"title": "Atalanta U23 vs Renate", "canonical_competition": "football_serie_c", "competition": "Serie C - Girone A", "country": "Italia", "category": "football"},
+            {"title": "Juventus Next Gen vs Pro Vercelli", "canonical_competition": "football_serie_c", "competition": "Serie C - Girone A", "country": "Italy", "category": "football"},
+            {"title": "Milan Futuro vs Lucchese", "canonical_competition": "football_serie_c", "competition": "Serie C - Girone B", "country": "Italia", "category": "football"},
+            # Level 2 fallback (without canonical competition)
+            {"title": "Atalanta U23 vs Renate", "competition": "Serie C", "country": "Italia", "category": "football"},
+            {"title": "Juventus Next Gen vs Novara", "competition": "Serie C - Girone A", "country": "Italy", "category": "football"},
+            {"title": "Milan Futuro vs Carpi", "competition": "Serie C - Girone B", "country": "Italia", "category": "football"},
+        ]
+        for c in cases:
+            cat, genre = genre_classifier.classify(c)
+            self.assertEqual(cat, "calcio_italiano", f"Expected calcio_italiano for {c['title']}, got {cat}")
+            self.assertEqual(genre, "Serie C", f"Failed for {c['title']}")
+
+    def test_italian_youth_primavera_routing(self):
+        """Italian youth matches must route to Primavera e Giovanili."""
+        cases = [
+            {"title": "Inter Primavera vs Milan Primavera", "canonical_competition": "football_primavera", "competition": "Primavera 1", "country": "Italia", "category": "football"},
+            {"title": "Roma U19 vs Fiorentina U19", "competition": "Campionato Primavera 1", "country": "Italia", "category": "football"},
+            {"title": "Juventus Primavera vs Lazio Primavera", "competition": "Primavera 1", "country": "Italia", "category": "football"},
+        ]
+        for c in cases:
+            cat, genre = genre_classifier.classify(c)
+            self.assertEqual(cat, "calcio_italiano", f"Expected calcio_italiano for {c['title']}, got {cat}")
+            self.assertEqual(genre, "Primavera e Giovanili", f"Failed for {c['title']}")
+
+    def test_canonical_competition_additions(self):
+        """Tests the 6 canonical competitions completed in canon_map."""
+        cases = [
+            ({"title": "Athletic Bilbao vs Barcelona", "canonical_competition": "football_copa_del_rey", "category": "football"}, ("calcio_estero", "La Liga")),
+            ({"title": "Bayern Munich vs Dortmund", "canonical_competition": "football_dfb_pokal", "category": "football"}, ("calcio_estero", "Bundesliga e Ligue 1")),
+            ({"title": "Arsenal vs Chelsea", "canonical_competition": "football_fa_cup", "category": "football"}, ("calcio_estero", "Premier League")),
+            ({"title": "Winnipeg Blue Bombers vs BC Lions", "canonical_competition": "am_football_cfl", "category": "american-football"}, ("football_americano", "CFL e Altre Leghe")),
+            ({"title": "Birmingham Stallions vs Michigan Panthers", "canonical_competition": "am_football_ufl", "category": "american-football"}, ("football_americano", "CFL e Altre Leghe")),
+            ({"title": "6 Hours of Spa-Francorchamps", "canonical_competition": "motorsport_wec", "category": "motor-sports"}, ("motori", "NASCAR e IndyCar")),
+        ]
+        for ev, (expected_cat, expected_genre) in cases:
+            cat, genre = genre_classifier.classify(ev)
+            self.assertEqual(cat, expected_cat, f"Catalog mismatch for {ev['canonical_competition']}")
+            self.assertEqual(genre, expected_genre, f"Genre mismatch for {ev['canonical_competition']}")
+
 
 if __name__ == "__main__":
     unittest.main()

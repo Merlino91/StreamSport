@@ -246,8 +246,18 @@ class GenreClassifier:
                 if canon.startswith("tennis_"):
                     return "tennis", "WTA"
             if is_youth:
-                if canon.startswith("football_"):
-                    return "calcio_italiano", "Primavera e Giovanili"
+                # Never hijack senior professional Serie C matches (e.g. Atalanta U23, Juventus Next Gen, Milan Futuro)
+                if canon == "football_serie_c":
+                    pass
+                elif canon.startswith("football_"):
+                    country_clean = (match.get("country") or "").strip().lower()
+                    is_ita_youth = (
+                        (country_clean in ("italia", "italy") or "🇮🇹" in eval_text)
+                        and not bool(self._FOREIGN_LEAGUE_REGEX.search(eval_text))
+                    ) or bool(re.search(r"\b(primavera|allievi|giovanissimi)\b", eval_text))
+                    if is_ita_youth:
+                        return "calcio_italiano", "Primavera e Giovanili"
+                    return "calcio_estero", "Europei Under 21 e Nazionali Giovanili"
 
             # Country-specific guard for homonym league names
             # If the event explicitly originates from a non-domestic country, invalidate canonical override
@@ -270,10 +280,13 @@ class GenreClassifier:
                 "football_coppa_italia": ("calcio_italiano", "Coppa Italia e Supercoppa"),
                 "football_primavera": ("calcio_italiano", "Primavera e Giovanili"),
                 "football_premier_league": ("calcio_estero", "Premier League"),
+                "football_fa_cup": ("calcio_estero", "Premier League"),
                 "football_championship": ("calcio_estero", "Altri Campionati Europei"),
                 "football_la_liga": ("calcio_estero", "La Liga"),
+                "football_copa_del_rey": ("calcio_estero", "La Liga"),
                 "football_segunda": ("calcio_estero", "Altri Campionati Europei"),
                 "football_bundesliga": ("calcio_estero", "Bundesliga e Ligue 1"),
+                "football_dfb_pokal": ("calcio_estero", "Bundesliga e Ligue 1"),
                 "football_austrian_bundesliga": ("calcio_estero", "Altri Campionati Europei"),
                 "football_danish_superliga": ("calcio_estero", "Altri Campionati Europei"),
                 "football_swiss_super_league": ("calcio_estero", "Altri Campionati Europei"),
@@ -345,9 +358,12 @@ class GenreClassifier:
                 "motorsport_sbk": ("motori", "MotoGP e Superbike"),
                 "motorsport_nascar": ("motori", "NASCAR e IndyCar"),
                 "motorsport_indycar": ("motori", "NASCAR e IndyCar"),
+                "motorsport_wec": ("motori", "NASCAR e IndyCar"),
                 "motorsport_rally_wrc": ("motori", "Rally e WRC"),
                 "am_football_nfl": ("football_americano", "NFL"),
                 "am_football_ncaa": ("football_americano", "NCAA College Football"),
+                "am_football_cfl": ("football_americano", "CFL e Altre Leghe"),
+                "am_football_ufl": ("football_americano", "CFL e Altre Leghe"),
                 "baseball_mlb": ("baseball", "MLB"),
                 "baseball_ncaa": ("baseball", "NCAA College Baseball"),
                 "hockey_chl": ("hockey", "KHL e Leghe Europee"),
@@ -924,8 +940,14 @@ class GenreClassifier:
             # Evaluated BEFORE national senior matches so "World Cup U17" or "U19 Friendly"
             # never pollutes senior "Nazionali e Amichevoli"
             # --------------------------------------------------------------
-            if is_youth and not bool(re.search(r"\b(primavera|u23|next\s*gen|futuro)\b", eval_text)):
-                return "calcio_estero", "Europei Under 21 e Nazionali Giovanili"
+            if is_youth:
+                is_ita_youth = (
+                    (country in ("italia", "italy") or "🇮🇹" in eval_text)
+                    and not is_foreign
+                    and not is_extra_eu
+                ) or bool(re.search(r"\b(primavera|allievi|giovanissimi)\b", eval_text))
+                if not is_ita_youth:
+                    return "calcio_estero", "Europei Under 21 e Nazionali Giovanili"
 
             # --------------------------------------------------------------
             # 2. NATIONAL TEAMS & AMICHEVOLI (e.g. Italia vs Spagna, Nations League, Qualificazioni)
@@ -982,8 +1004,6 @@ class GenreClassifier:
             if is_ita_nation and not is_foreign and not is_extra_eu:
                 if is_women:
                     return "calcio_italiano", "Calcio Femminile"
-                if is_youth or bool(re.search(r"\b(primavera|allievi|giovanissimi|u23|next\s*gen|futuro)\b", eval_text)):
-                    return "calcio_italiano", "Primavera e Giovanili"
                 if re.search(r"\b(coppa\s*italia|supercoppa\s*italiana|supercoppa)\b", eval_text):
                     return "calcio_italiano", "Coppa Italia e Supercoppa"
                 if re.search(r"\bserie\s*c\b", eval_text):
@@ -992,6 +1012,8 @@ class GenreClassifier:
                     return "calcio_italiano", "Serie B"
                 if re.search(r"\bserie\s*a\b", eval_text):
                     return "calcio_italiano", "Serie A"
+                if is_youth or bool(re.search(r"\b(primavera|allievi|giovanissimi|u23|next\s*gen|futuro)\b", eval_text)):
+                    return "calcio_italiano", "Primavera e Giovanili"
                 # Fallback for Italian clubs/derbies not in Serie A/B/C
                 return "calcio_italiano", "Serie A"
 
