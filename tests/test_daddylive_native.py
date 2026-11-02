@@ -178,41 +178,17 @@ class TestDaddyLiveNative(unittest.IsolatedAsyncioTestCase):
         from app.services.catalog_service import catalog_service
         catalog_service._cached_matches.append(fake_match)
 
-        # 1. With Player 6 active -> returns Direct stream + Auto-Fallback stream
-        with patch.object(daddylive_api, "check_player6_direct_active", return_value=True):
-            streams = await stream_service.get_streams_for_event(
-                "dlhd:test_dlhd_multi_p6",
-                ep_url="https://ep.bluccoj.com",
-                ep_pass="Z3r0EP",
-                base_url="https://streamsport.example.com",
-                config="myconfig",
-            )
-
-            self.assertEqual(len(streams), 2)
-            # Direct stream first
-            s_direct = streams[0]
-            self.assertEqual(s_direct["name"], "DAZN 1")
-            self.assertIn("(Direct)", s_direct["title"])
-            self.assertEqual(s_direct["url"], "https://streamsport.example.com/myconfig/daddylive/direct/877.m3u8")
-
-            # EasyProxy Auto-Fallback stream second
-            s_fallback = streams[1]
-            self.assertEqual(s_fallback["name"], "DAZN 1")
-            self.assertEqual(s_fallback["title"], "📡 Fonte: DaddyLive • Qualità: Live TV")
-            self.assertEqual(s_fallback["url"], "https://streamsport.example.com/myconfig/daddylive/stream/877.m3u8")
-
-        # 2. With Player 6 inactive -> returns only 1 clean Auto-Fallback stream
-        with patch.object(daddylive_api, "check_player6_direct_active", return_value=False):
-            streams_no_p6 = await stream_service.get_streams_for_event(
-                "dlhd:test_dlhd_multi_p6",
-                ep_url="https://ep.bluccoj.com",
-                ep_pass="Z3r0EP",
-                base_url="https://streamsport.example.com",
-                config="myconfig",
-            )
-            self.assertEqual(len(streams_no_p6), 1)
-            self.assertEqual(streams_no_p6[0]["title"], "📡 Fonte: DaddyLive • Qualità: Live TV")
-            self.assertEqual(streams_no_p6[0]["url"], "https://streamsport.example.com/myconfig/daddylive/stream/877.m3u8")
+        # Multiple player sources for ID 877 are deduplicated to 1 clean Auto-Fallback stream
+        streams = await stream_service.get_streams_for_event(
+            "dlhd:test_dlhd_multi_p6",
+            ep_url="https://ep.bluccoj.com",
+            ep_pass="Z3r0EP",
+            base_url="https://streamsport.example.com",
+            config="myconfig",
+        )
+        self.assertEqual(len(streams), 1)
+        self.assertEqual(streams[0]["title"], "📡 Fonte: DaddyLive • Qualità: Live TV")
+        self.assertEqual(streams[0]["url"], "https://streamsport.example.com/myconfig/daddylive/stream/877.m3u8")
 
     async def test_daddylive_cascade_resolution(self):
         """Verifies resolve_active_stream_url cascades across players on failure."""
@@ -248,120 +224,6 @@ class TestDaddyLiveNative(unittest.IsolatedAsyncioTestCase):
             resp = client.get(f"/{cfg}/daddylive/stream/877.m3u8", follow_redirects=False)
             self.assertEqual(resp.status_code, 307)
             self.assertEqual(resp.headers["location"], "https://ep.bluccoj.com/resolved.m3u8")
-
-    def test_fastapi_daddylive_direct_endpoint(self):
-        """Verifies /{config}/daddylive/direct/{channel_id}.m3u8 returns 307 redirect to wideiptv CDN."""
-        from fastapi.testclient import TestClient
-        from app.main import app
-
-        with patch.object(daddylive_api, "resolve_player6_direct", return_value="https://cdn.wideiptv.top/ZonaDAZN/index.m3u8?token=xyz"):
-            client = TestClient(app)
-            cfg = "aHR0cHM6Ly9lcC5ibHVjY29qLmNvbXxaM3IwRVB8bnV2aW8="
-            resp = client.get(f"/{cfg}/daddylive/direct/877.m3u8", follow_redirects=False)
-            self.assertEqual(resp.status_code, 307)
-            self.assertEqual(resp.headers["location"], "https://cdn.wideiptv.top/ZonaDAZN/index.m3u8?token=xyz")
-
-        # When direct resolution fails -> must return 502 without fallback to EasyProxy
-        with patch.object(daddylive_api, "resolve_player6_direct", return_value=None):
-            client = TestClient(app)
-            cfg = "aHR0cHM6Ly9lcC5ibHVjY29qLmNvbXxaM3IwRVB8bnV2aW8="
-            resp = client.get(f"/{cfg}/daddylive/direct/877.m3u8", follow_redirects=False)
-            self.assertEqual(resp.status_code, 502)
-
-    def test_verify_wideiptv_stream_active_ts(self):
-        """Verifies _verify_wideiptv_stream returns True for valid HLS stream with MPEG-TS sync byte 0x47."""
-        import httpx
-        from unittest.mock import AsyncMock
-
-        master_content = "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=2000000\nindex-0.m3u8?token=xyz\n"
-        media_content = "#EXTM3U\n#EXTINF:4.000,\nseg-0.ts\n"
-        # 188-byte valid MPEG-TS packet starting with 0x47
-        ts_packet = b"\x47" + (b"\x10" * 187)
-
-        async def _run():
-            mock_client = AsyncMock(spec=httpx.AsyncClient)
-            
-            async def _fake_get(url, **kwargs):
-                resp = MagicMock()
-                if "index.m3u8" in url:
-                    resp.status_code = 200
-                    resp.text = master_content
-                elif "index-0.m3u8" in url:
-                    resp.status_code = 200
-                    resp.text = media_content
-                elif "seg-0.ts" in url:
-                    resp.status_code = 206
-                    resp.content = ts_packet
-                else:
-                    resp.status_code = 404
-                    resp.content = b""
-                return resp
-
-            mock_client.get = AsyncMock(side_effect=_fake_get)
-            mock_client.__aenter__.return_value = mock_client
-            mock_client.__aexit__.return_value = None
-
-            with patch("httpx.AsyncClient", return_value=mock_client):
-                res = await daddylive_api._verify_wideiptv_stream("https://cdn.wideiptv.top/channel/index.m3u8")
-                self.assertTrue(res)
-
-        asyncio.run(_run())
-
-    def test_verify_wideiptv_stream_filters_404_and_cartel(self):
-        """Verifies _verify_wideiptv_stream returns False for 404 or non-TS cartel streams."""
-        import httpx
-        from unittest.mock import AsyncMock
-
-        async def _run():
-            # Case A: Master playlist 404
-            mock_client_404 = AsyncMock(spec=httpx.AsyncClient)
-            resp_404 = MagicMock()
-            resp_404.status_code = 404
-            mock_client_404.get = AsyncMock(return_value=resp_404)
-            mock_client_404.__aenter__.return_value = mock_client_404
-            mock_client_404.__aexit__.return_value = None
-
-            with patch("httpx.AsyncClient", return_value=mock_client_404):
-                res_404 = await daddylive_api._verify_wideiptv_stream("https://cdn.wideiptv.top/dead/index.m3u8")
-                self.assertFalse(res_404)
-
-            # Case B: Segment returns HTML error / cartel without 0x47 sync byte
-            mock_client_cartel = AsyncMock(spec=httpx.AsyncClient)
-            
-            async def _fake_get_cartel(url, **kwargs):
-                resp = MagicMock()
-                if "index.m3u8" in url:
-                    resp.status_code = 200
-                    resp.text = "#EXTM3U\nseg.ts\n"
-                elif "seg.ts" in url:
-                    resp.status_code = 200
-                    resp.content = b"<html>Cartel / Offline</html>"
-                return resp
-
-            mock_client_cartel.get = AsyncMock(side_effect=_fake_get_cartel)
-            mock_client_cartel.__aenter__.return_value = mock_client_cartel
-            mock_client_cartel.__aexit__.return_value = None
-
-            with patch("httpx.AsyncClient", return_value=mock_client_cartel):
-                res_cartel = await daddylive_api._verify_wideiptv_stream("https://cdn.wideiptv.top/cartel/index.m3u8")
-                self.assertFalse(res_cartel)
-
-        asyncio.run(_run())
-
-    def test_resolve_player6_direct_drops_unverified_stream(self):
-        """Verifies resolve_player6_direct returns None when the deep probe fails."""
-        async def _run():
-            daddylive_api._player6_cache.clear()
-            p1_html = b'<iframe src="https://wideiptv.top/player/SkySportMaxIT"></iframe>'
-            p6_html = b'streamUrl: "https:\\/\\/cdn.wideiptv.top\\/SkySportMaxIT\\/index.m3u8?token=xyz"'
-
-            with patch.object(daddylive_api, "get_active_domain", return_value="thedaddy.pk"), \
-                 patch("app.services.doh_client.doh_client.get_raw", side_effect=[(p1_html, "text/html"), (p6_html, "text/html")]), \
-                 patch.object(daddylive_api, "_verify_wideiptv_stream", return_value=False):
-                res = await daddylive_api.resolve_player6_direct("460")
-                self.assertIsNone(res)
-
-        asyncio.run(_run())
 
 
 if __name__ == "__main__":

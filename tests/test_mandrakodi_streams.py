@@ -386,7 +386,7 @@ class TestMandrakodiStreams(unittest.IsolatedAsyncioTestCase):
     def test_canonical_channel_key_cbs_paramount_prime_nbc(self):
         """Verifies that new target sports channels map to canonical keys correctly."""
         self.assertEqual(mandrakodi_service.get_canonical_channel_key("CBS Sports Network"), "cbs sports")
-        self.assertEqual(mandrakodi_service.get_canonical_channel_key("Paramount+ Live"), "paramount+")
+        self.assertIsNone(mandrakodi_service.get_canonical_channel_key("Paramount+ Live"))
         self.assertEqual(mandrakodi_service.get_canonical_channel_key("Prime Video Sport"), "prime video it")
         self.assertEqual(mandrakodi_service.get_canonical_channel_key("NBC Sports Channel"), "nbc sports")
 
@@ -394,7 +394,7 @@ class TestMandrakodiStreams(unittest.IsolatedAsyncioTestCase):
         """Verifies that Mandrakodi channels without defined country or recognized keyword do NOT fall back to 🇮🇹."""
         now_ts = int(time.time() * 1000)
         fake_match = {
-            "id": "mandrakodi:test:paramount",
+            "id": "mandrakodi:test:unclassified",
             "title": "Sassuolo vs Fiorentina",
             "category": "football",
             "_silo": "football",
@@ -404,7 +404,7 @@ class TestMandrakodiStreams(unittest.IsolatedAsyncioTestCase):
                     "source": "amstaff",
                     "provider": "mandrakodi",
                     "id": "https://example.com/cenc.mpd",
-                    "name": "PARAMOUNT+ (ENG - MPD)",
+                    "name": "SUPERSPORT 1 (ENG - MPD)",
                     "stream_data": {
                         "mpd_url": "https://example.com/cenc.mpd",
                         "kid": "abc",
@@ -418,7 +418,7 @@ class TestMandrakodiStreams(unittest.IsolatedAsyncioTestCase):
         catalog_service._cached_matches.append(fake_match)
 
         streams = await stream_service.get_streams_for_event(
-            "mandrakodi:test:paramount",
+            "mandrakodi:test:unclassified",
             ep_url="https://ep.bluccoj.com",
             ep_pass="Z3r0EP"
         )
@@ -426,7 +426,7 @@ class TestMandrakodiStreams(unittest.IsolatedAsyncioTestCase):
         st = streams[0]
         self.assertNotIn("🇮🇹", st["name"])
         self.assertNotIn("🇮🇹", st["title"])
-        self.assertTrue(st["name"].startswith("PARAMOUNT+"))
+        self.assertTrue(st["name"].startswith("SUPERSPORT 1"))
 
     async def test_fctv33_and_sportzonline_no_lightning_emoji(self):
         """Verifies that FCTV33 and Sportzonline stream names do NOT contain the lightning bolt emoji ⚡."""

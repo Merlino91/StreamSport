@@ -240,6 +240,9 @@ class MandrakodiService:
         cleaned = re.sub(r"\[.*?\]|\(.*?\)", "", channel_name).strip()
         cleaned_lower = cleaned.lower()
 
+        if "paramount" in cleaned_lower:
+            return None
+
         # Check explicit Sky channel IDs
         for chid, can in SKY_CHID_TO_CANONICAL.items():
             if chid in cleaned_lower or can in cleaned_lower:
@@ -329,8 +332,6 @@ class MandrakodiService:
             return "rsi la2"
         if "cbs sport" in norm or "cbs golazo" in norm or "cbsgolazo" in norm:
             return "cbs sports"
-        if "paramount" in norm:
-            return "paramount+"
         if "prime video" in norm or "amazon prime" in norm:
             return "prime video it"
         if "nbc sport" in norm or "nbc" in norm:
@@ -542,7 +543,6 @@ class MandrakodiService:
                     "NBA TV",
                     "CBS SPORT",
                     "CBSGOLAZO",
-                    "PARAMOUNT",
                     "PRIME VIDEO",
                     "AMAZON PRIME",
                     "NBC",

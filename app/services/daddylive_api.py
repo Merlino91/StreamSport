@@ -104,18 +104,11 @@ class DaddyLiveAPI:
         self._last_domain_check: float = 0.0
         self._active_player_cache: Dict[str, Tuple[str, float]] = {}
         self._fallback_lock: Optional[asyncio.Lock] = None
-        self._player6_cache: Dict[str, Tuple[Optional[str], float]] = {}
-        self._player6_lock: Optional[asyncio.Lock] = None
 
     def _get_fallback_lock(self) -> asyncio.Lock:
         if self._fallback_lock is None:
             self._fallback_lock = asyncio.Lock()
         return self._fallback_lock
-
-    def _get_player6_lock(self) -> asyncio.Lock:
-        if self._player6_lock is None:
-            self._player6_lock = asyncio.Lock()
-        return self._player6_lock
 
     async def get_active_domain(self) -> str:
         """
@@ -254,138 +247,6 @@ class DaddyLiveAPI:
             finally:
                 if close_client:
                     await client.aclose()
-
-    async def _verify_wideiptv_stream(self, stream_url: str, user_agent: str = "Mozilla/5.0") -> bool:
-        """
-        Deep HLS and MPEG-TS segment probe (modeled after SuperTennis OTT verification).
-        Verifies that:
-        1. Master playlist returns HTTP 200.
-        2. Media playlist returns HTTP 200.
-        3. First .ts segment returns HTTP 200/206 with size >= 188 bytes and MPEG-TS sync byte 0x47.
-        Filters out offline channels, HTTP 404s, static error pages, and empty streams.
-        """
-        try:
-            headers = {"User-Agent": user_agent}
-            async with httpx.AsyncClient(timeout=3.0, verify=False, follow_redirects=True) as probe_client:
-                # 1. Master playlist probe
-                r_master = await probe_client.get(stream_url, headers=headers)
-                if r_master.status_code != 200:
-                    return False
-
-                lines = [l.strip() for l in r_master.text.splitlines() if l.strip() and not l.startswith("#")]
-                if not lines:
-                    return False
-
-                sub = lines[0]
-                sub_url = urllib.parse.urljoin(stream_url, sub)
-
-                # 2. Media playlist probe (if nested)
-                if ".m3u8" in sub:
-                    r_sub = await probe_client.get(sub_url, headers=headers)
-                    if r_sub.status_code != 200:
-                        return False
-                    seg_lines = [l.strip() for l in r_sub.text.splitlines() if l.strip() and not l.startswith("#")]
-                    if not seg_lines:
-                        return False
-                    seg_url = urllib.parse.urljoin(sub_url, seg_lines[0])
-                else:
-                    seg_url = sub_url
-
-                # 3. First TS segment probe via Range request (first 16 KB)
-                r_seg = await probe_client.get(seg_url, headers={**headers, "Range": "bytes=0-16384"})
-                if r_seg.status_code in (200, 206) and len(r_seg.content) >= 188:
-                    # ISO/IEC 13818-1 MPEG-2 TS packets must begin with sync byte 0x47
-                    if r_seg.content[0] == 0x47:
-                        return True
-        except Exception as e:
-            logger.debug("DaddyLive: WideIPTV stream verification probe error: %s", e)
-            return False
-        return False
-
-    async def check_player6_direct_active(self, ch_id: str) -> bool:
-        """
-        Deep check to verify whether Player 6 (WideIPTV Direct CDN) is active
-        and playable for the given DaddyLive channel, performing a real MPEG-TS segment probe.
-        """
-        stream_url = await self.resolve_player6_direct(ch_id)
-        return bool(stream_url)
-
-    async def resolve_player6_direct(self, ch_id: str) -> Optional[str]:
-        """
-        Extracts and resolves unencrypted WideIPTV HLS stream URL from Player 6
-        (https://thedaddy.pk/player/stream-{id}.php).
-        Returns the direct playable M3U8 URL (e.g. https://cdn.wideiptv.top/.../index.m3u8?token=...)
-        which uses refererMode 'omit' and token with 'no_check_ip' parameter (0% VPS video bandwidth).
-        Results are cached in RAM for 240 seconds.
-        """
-        if not ch_id or not str(ch_id).isalnum():
-            return None
-
-        now = time.time()
-        cached = self._player6_cache.get(ch_id)
-        if cached and cached[1] > now:
-            return cached[0]
-
-        lock = self._get_player6_lock()
-        async with lock:
-            cached = self._player6_cache.get(ch_id)
-            if cached and cached[1] > now:
-                return cached[0]
-
-            dl_domain = await self.get_active_domain()
-            page_url = f"https://{dl_domain}/player/stream-{ch_id}.php"
-
-            try:
-                headers = {
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                    "Referer": f"https://{dl_domain}/",
-                }
-                content, _ = await doh_client.get_raw(page_url, headers=headers, timeout=5.0)
-                if not content:
-                    self._player6_cache[ch_id] = (None, now + 15)
-                    return None
-
-                html_text = content.decode("utf-8", errors="ignore")
-                m = re.search(r'wideiptv\.top/daddy\.php\?stream=([a-zA-Z0-9_-]+)', html_text)
-                if not m:
-                    m = re.search(r'wideiptv\.top/player/([a-zA-Z0-9_-]+)', html_text)
-                if not m:
-                    self._player6_cache[ch_id] = (None, now + 15)
-                    return None
-
-                slug = m.group(1)
-                player_url = f"https://wideiptv.top/player/{slug}"
-                p_headers = {
-                    "User-Agent": headers["User-Agent"],
-                    "Referer": f"https://wideiptv.top/daddy.php?stream={slug}",
-                }
-                p_content, _ = await doh_client.get_raw(player_url, headers=p_headers, timeout=5.0)
-                if not p_content:
-                    self._player6_cache[ch_id] = (None, now + 15)
-                    return None
-
-                p_html = p_content.decode("utf-8", errors="ignore")
-                s_match = re.search(r'streamUrl:\s*"((?:\\/|[^"])+)"', p_html)
-                if not s_match:
-                    self._player6_cache[ch_id] = (None, now + 15)
-                    return None
-
-                stream_url = s_match.group(1).replace(r"\/", "/")
-
-                # Deep HLS & MPEG-TS segment probe (SuperTennis-style verification)
-                is_live = await self._verify_wideiptv_stream(stream_url, user_agent=headers["User-Agent"])
-                if not is_live:
-                    logger.warning("DaddyLive: Channel %s Player 6 failed deep segment probe (offline/cartel/404)", ch_id)
-                    self._player6_cache[ch_id] = (None, now + 15)
-                    return None
-
-                logger.info("DaddyLive: Channel %s verified active Player 6 WideIPTV Direct (MPEG-TS sync byte 0x47 OK): %s", ch_id, stream_url[:70])
-                self._player6_cache[ch_id] = (stream_url, now + 240)
-                return stream_url
-            except Exception as e:
-                logger.debug("DaddyLive: Player 6 resolution failed for %s: %s", ch_id, e)
-                self._player6_cache[ch_id] = (None, now + 15)
-                return None
 
     def _extract_channel_id(self, href: str) -> Optional[str]:
         """Extracts channel id from URL patterns."""

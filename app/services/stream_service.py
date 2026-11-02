@@ -966,43 +966,12 @@ class StreamService:
                     seen_dl_ids.add(cid)
                     unique_dl_sources.append(s)
 
-            # Probe Player 6 WideIPTV Direct in parallel across candidates
-            p6_coros = []
-            for s in unique_dl_sources:
-                res = daddylive_api.check_player6_direct_active(s.get("id", ""))
-                if inspect.isawaitable(res):
-                    p6_coros.append(res)
-                else:
-                    async def _mock_val(v):
-                        is_mock = "mock" in type(v).__name__.lower()
-                        return bool(v) if not is_mock else False
-                    p6_coros.append(_mock_val(res))
-
-            p6_checks = await asyncio.gather(*p6_coros, return_exceptions=True)
-
             for idx, s in enumerate(unique_dl_sources, 1):
                 ch_id = s.get("id")
                 raw_name = s.get("name") or f"Canale {idx}"
                 clean_name = re.sub(r"\s*\[Player\s*\d+[^\]]*\]", "", raw_name, flags=re.IGNORECASE).strip()
                 flag = self.get_channel_flag(clean_name)
                 flag_prefix = f"{flag} " if flag else ""
-
-                # Direct Player 6 (WideIPTV - 0% VPS bandwidth) if available
-                has_p6 = (idx - 1 < len(p6_checks)) and (p6_checks[idx - 1] is True)
-                if has_p6:
-                    if base_url:
-                        direct_path = f"/{config}/daddylive/direct/{ch_id}.m3u8" if config else f"/daddylive/direct/{ch_id}.m3u8"
-                        direct_url = f"{base_url.rstrip('/')}{direct_path}"
-                    else:
-                        direct_url = await daddylive_api.resolve_player6_direct(ch_id)
-
-                    if direct_url:
-                        dlhd_streams.append({
-                            "name": f"{flag_prefix}{clean_name}",
-                            "title": "⚡ Fonte: DaddyLive (Direct) • Qualità: Live TV",
-                            "url": direct_url,
-                            "behaviorHints": {"notWebReady": False},
-                        })
 
                 # EasyProxy Auto-Fallback stream across 7 players
                 if ep_url:
@@ -1021,10 +990,7 @@ class StreamService:
                     })
 
             # Sort DaddyLive streams: Italian channels first, Direct (⚡) first, then cap to maximum 30 streams
-            dlhd_streams.sort(key=lambda s: (
-                0 if "🇮🇹" in s.get("name", "") else 1,
-                0 if "(Direct)" in s.get("title", "") else 1
-            ))
+            dlhd_streams.sort(key=lambda s: 0 if "🇮🇹" in s.get("name", "") else 1)
             dlhd_streams = dlhd_streams[:30]
 
         # 3. Process FCTV33 streams with TencentEdgeOne CDN format

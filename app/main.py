@@ -564,25 +564,6 @@ async def daddylive_stream_fallback(channel_id: str, config: Optional[str] = Non
     raise HTTPException(status_code=502, detail="Nessun player DaddyLive funzionante al momento per questo canale")
 
 
-@app.get("/daddylive/direct/{channel_id}.m3u8")
-@app.get("/{config}/daddylive/direct/{channel_id}.m3u8")
-async def daddylive_direct_stream(channel_id: str, config: Optional[str] = None):
-    """
-    On-demand resolver for DaddyLive Player 6 (WideIPTV) unencrypted Direct CDN streams.
-    Requires 0% video bandwidth on StreamSport or VPS proxy: redirects player (HTTP 307)
-    directly to cdn.wideiptv.top HLS stream with pre-authenticated no_check_ip token.
-    """
-    if not re.match(r"^[0-9a-zA-Z_-]{1,32}$", channel_id):
-        raise HTTPException(status_code=400, detail="ID canale DaddyLive non valido")
-
-    from app.services.daddylive_api import daddylive_api
-    direct_url = await daddylive_api.resolve_player6_direct(channel_id)
-    if direct_url:
-        return RedirectResponse(url=direct_url, status_code=307)
-
-    raise HTTPException(status_code=502, detail="Player 6 Direct non disponibile per questo canale")
-
-
 def is_trusted_stream_redirect(url: str, allowed_suffixes: Tuple[str, ...]) -> bool:
     """Validates that a resolved stream redirect points strictly to trusted CDN domains."""
     try:
