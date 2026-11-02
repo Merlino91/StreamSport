@@ -255,10 +255,57 @@ class DaddyLiveAPI:
                 if close_client:
                     await client.aclose()
 
+    async def _verify_wideiptv_stream(self, stream_url: str, user_agent: str = "Mozilla/5.0") -> bool:
+        """
+        Deep HLS and MPEG-TS segment probe (modeled after SuperTennis OTT verification).
+        Verifies that:
+        1. Master playlist returns HTTP 200.
+        2. Media playlist returns HTTP 200.
+        3. First .ts segment returns HTTP 200/206 with size >= 188 bytes and MPEG-TS sync byte 0x47.
+        Filters out offline channels, HTTP 404s, static error pages, and empty streams.
+        """
+        try:
+            headers = {"User-Agent": user_agent}
+            async with httpx.AsyncClient(timeout=3.0, verify=False, follow_redirects=True) as probe_client:
+                # 1. Master playlist probe
+                r_master = await probe_client.get(stream_url, headers=headers)
+                if r_master.status_code != 200:
+                    return False
+
+                lines = [l.strip() for l in r_master.text.splitlines() if l.strip() and not l.startswith("#")]
+                if not lines:
+                    return False
+
+                sub = lines[0]
+                sub_url = urllib.parse.urljoin(stream_url, sub)
+
+                # 2. Media playlist probe (if nested)
+                if ".m3u8" in sub:
+                    r_sub = await probe_client.get(sub_url, headers=headers)
+                    if r_sub.status_code != 200:
+                        return False
+                    seg_lines = [l.strip() for l in r_sub.text.splitlines() if l.strip() and not l.startswith("#")]
+                    if not seg_lines:
+                        return False
+                    seg_url = urllib.parse.urljoin(sub_url, seg_lines[0])
+                else:
+                    seg_url = sub_url
+
+                # 3. First TS segment probe via Range request (first 16 KB)
+                r_seg = await probe_client.get(seg_url, headers={**headers, "Range": "bytes=0-16384"})
+                if r_seg.status_code in (200, 206) and len(r_seg.content) >= 188:
+                    # ISO/IEC 13818-1 MPEG-2 TS packets must begin with sync byte 0x47
+                    if r_seg.content[0] == 0x47:
+                        return True
+        except Exception as e:
+            logger.debug("DaddyLive: WideIPTV stream verification probe error: %s", e)
+            return False
+        return False
+
     async def check_player6_direct_active(self, ch_id: str) -> bool:
         """
-        Lightweight check to verify whether Player 6 (WideIPTV Direct CDN) is active
-        and playable for the given DaddyLive channel.
+        Deep check to verify whether Player 6 (WideIPTV Direct CDN) is active
+        and playable for the given DaddyLive channel, performing a real MPEG-TS segment probe.
         """
         stream_url = await self.resolve_player6_direct(ch_id)
         return bool(stream_url)
@@ -324,7 +371,15 @@ class DaddyLiveAPI:
                     return None
 
                 stream_url = s_match.group(1).replace(r"\/", "/")
-                logger.info("DaddyLive: Channel %s resolved via Player 6 WideIPTV Direct: %s", ch_id, stream_url[:70])
+
+                # Deep HLS & MPEG-TS segment probe (SuperTennis-style verification)
+                is_live = await self._verify_wideiptv_stream(stream_url, user_agent=headers["User-Agent"])
+                if not is_live:
+                    logger.warning("DaddyLive: Channel %s Player 6 failed deep segment probe (offline/cartel/404)", ch_id)
+                    self._player6_cache[ch_id] = (None, now + 15)
+                    return None
+
+                logger.info("DaddyLive: Channel %s verified active Player 6 WideIPTV Direct (MPEG-TS sync byte 0x47 OK): %s", ch_id, stream_url[:70])
                 self._player6_cache[ch_id] = (stream_url, now + 240)
                 return stream_url
             except Exception as e:
