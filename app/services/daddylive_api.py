@@ -50,7 +50,7 @@ class DaddyLiveAPI:
     DEFAULT_DOMAIN: str = "thedaddy.pk"
 
     DADDYLIVE_EXCLUDED_CATEGORIES = (
-        "big brother", "tv show", "tv shows", "reality", "movies", "upcoming events", "upcoming event"
+        "tv show", "tv shows", "upcoming events", "upcoming event"
     )
 
     DADDYLIVE_CANONICAL_CHANNELS: Dict[str, Dict[str, str]] = {

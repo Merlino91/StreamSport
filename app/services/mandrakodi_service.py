@@ -1260,16 +1260,16 @@ class MandrakodiService:
         Probes SuperTennis interactive OTT feeds (channels 1..4) in parallel using lightweight HTTP Range requests.
         Only returns feeds actively broadcasting live video (> 250 KB segment size),
         filtering out inactive feeds, offline states, or static cartels.
-        Results are cached in memory for 25 minutes (TTL) to avoid unnecessary requests.
+        Results are cached in memory for 60 seconds (TTL) to avoid flooding requests during rapid clicks.
         """
         now = time.time()
-        if self._st_ott_cache and (now - self._st_ott_cache_time < 1500):
+        if self._st_ott_cache and (now - self._st_ott_cache_time < 60):
             return list(self._st_ott_cache)
 
         lock = self._get_st_ott_lock()
         async with lock:
             now = time.time()
-            if self._st_ott_cache and (now - self._st_ott_cache_time < 1500):
+            if self._st_ott_cache and (now - self._st_ott_cache_time < 60):
                 return list(self._st_ott_cache)
 
             client = await self._get_client()
@@ -1341,7 +1341,7 @@ class MandrakodiService:
             self._st_ott_cache = active_streams
             self._st_ott_cache_time = time.time()
             logger.info(
-                "SuperTennis OTT probe completed: %d/%d channels active (cached for 25 min)",
+                "SuperTennis OTT probe completed: %d/%d channels active (cached for 60 sec)",
                 len(active_streams),
                 4,
             )

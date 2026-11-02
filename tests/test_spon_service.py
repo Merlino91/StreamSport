@@ -50,25 +50,22 @@ class SPONServiceTestCase(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.service = SPONService()
 
-    def test_parse_prog_italian_only(self):
-        """Verifies that only matches on channels with Italian commentary are ingested."""
+    def test_parse_prog_all_events(self):
+        """Verifies that all events across all channels/languages are ingested without discard."""
         events = self.service.parse_prog(SAMPLE_PROG_TXT)
 
-        # Expected Italian events:
-        # Thursday: Juventus x Rennes (HD7), AFC Bournemouth x Milan (HD7)
-        # Friday: Torino x Monza (HD7), Brest x Nice (HD8 - ITALIAN & SPANISH)
-        self.assertEqual(len(events), 4)
+        # Ingests all 8 events from the sample
+        self.assertEqual(len(events), 8)
 
         titles = [e["title"] for e in events]
         self.assertIn("Juventus vs Rennes", titles)
+        self.assertIn("OFI vs Bayer Leverkusen", titles)
         self.assertIn("AFC Bournemouth vs Milan", titles)
+        self.assertIn("Ajax vs Atalanta", titles)
+        self.assertIn("MotoGP: Australia FP", titles)
         self.assertIn("Torino vs Monza", titles)
         self.assertIn("Brest vs Nice", titles)
-
-        # Foreign-only events must NOT be present
-        self.assertNotIn("OFI vs Bayer Leverkusen", titles)
-        self.assertNotIn("Ajax vs Atalanta", titles)
-        self.assertNotIn("Ipswich Town vs Nottingham Forest", titles)
+        self.assertIn("Ipswich Town vs Nottingham Forest", titles)
 
         # Verify structured teams
         juve_event = next(e for e in events if "Juventus" in e["title"])
@@ -76,12 +73,20 @@ class SPONServiceTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(juve_event["category"], "football")
         self.assertEqual(juve_event["_provider"], "sportsonline")
 
-        # Verify source metadata
-        source = juve_event["sources"][0]
-        self.assertEqual(source["source"], "sportsonline")
-        self.assertEqual(source["channel"], "HD7")
-        self.assertEqual(source["lang"], "Italiano")
-        self.assertEqual(source["flag"], "🇮🇹")
+        # Verify Italian source metadata
+        juve_source = juve_event["sources"][0]
+        self.assertEqual(juve_source["source"], "sportsonline")
+        self.assertEqual(juve_source["channel"], "HD7")
+        self.assertEqual(juve_source["lang"], "Italiano")
+        self.assertEqual(juve_source["flag"], "🇮🇹")
+
+        # Verify foreign source metadata
+        ofi_event = next(e for e in events if "OFI" in e["title"])
+        ofi_source = ofi_event["sources"][0]
+        self.assertEqual(ofi_source["source"], "sportsonline")
+        self.assertEqual(ofi_source["channel"], "HD3")
+        self.assertEqual(ofi_source["lang"], "German")
+        self.assertEqual(ofi_source["flag"], "🌍")
 
     def test_timezone_conversion(self):
         """Verifies that 17:45 London time (BST, UTC+1 in late October) converts to 16:45 UTC."""

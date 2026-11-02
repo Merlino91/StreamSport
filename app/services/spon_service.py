@@ -12,7 +12,6 @@ from app.config import (
     SPON_PRIMARY_URL,
     SPON_FALLBACK_URL,
     SPON_CACHE_TTL,
-    SPON_ITALIAN_ONLY,
 )
 
 logger = logging.getLogger("streamsport.spon")
@@ -60,7 +59,7 @@ class SPONService:
                 matches = self.parse_prog(raw_text)
                 self._cache = matches
                 self._cache_time = time.time()
-                logger.info("Sportzonline: Ingested %d matches from prog.txt (Italian only: %s)", len(matches), SPON_ITALIAN_ONLY)
+                logger.info("Sportzonline: Ingested %d matches from prog.txt", len(matches))
                 return self._cache
             except Exception as e:
                 logger.error("Failed to parse Sportzonline prog.txt: %s", e, exc_info=True)
@@ -146,12 +145,6 @@ class SPONService:
 
                 lang_for_ch = day_lang_maps.get(current_day, {}).get(ch_id, "")
 
-                # If SPON_ITALIAN_ONLY is active, skip streams that do not include Italian commentary
-                if SPON_ITALIAN_ONLY:
-                    is_italian = "ITALIAN" in lang_for_ch.upper() or ch_id == "HD7"
-                    if not is_italian:
-                        continue
-
                 event_date = day_date_map.get(current_day, base_date)
                 hour_part, min_part = [int(p) for p in time_str.split(":")]
                 dt_london = datetime.datetime(
@@ -164,7 +157,7 @@ class SPONService:
                 # Parse sport and silo from title
                 silo, clean_title, teams = self._parse_silo_and_teams(raw_title)
 
-                lang_label = "Italiano" if "ITALIAN" in lang_for_ch.upper() or ch_id == "HD7" else lang_for_ch.title()
+                lang_label = "Italiano" if "ITALIAN" in lang_for_ch.upper() or ch_id == "HD7" else (lang_for_ch.title() if lang_for_ch else "Internazionale")
                 flag = "🇮🇹" if "ITALIAN" in lang_for_ch.upper() or ch_id == "HD7" else "🌍"
 
                 source_item = {
