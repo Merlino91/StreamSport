@@ -553,9 +553,7 @@ class TestItalianEPGService(unittest.IsolatedAsyncioTestCase):
         mock_mandra.get_channel_streams.return_value = []
         mock_tvvoo.get_canonical_from_sky_id.return_value = "sky sport uno"
         mock_dl.get_channel_streams.return_value = [
-            {"source": "dlhd", "id": "461", "name": "Sky Sport UNO [Player 1]", "player": 1},
-            {"source": "dlhd", "id": "461", "name": "Sky Sport UNO [Player 2]", "player": 2},
-            {"source": "dlhd", "id": "461", "name": "Sky Sport UNO [Player 5]", "player": 5},
+            {"source": "dlhd", "id": "461", "name": "Sky Sport UNO"},
         ]
 
         service = ItalianEPGService()
@@ -581,11 +579,9 @@ class TestItalianEPGService(unittest.IsolatedAsyncioTestCase):
         parsed = await service._fetch_sky_events(mock_client, "2026-10-21T00:00:00Z", "2026-10-21T23:59:59Z")
         self.assertGreater(len(parsed), 0)
         matched_ev = parsed[0]
-        self.assertEqual(len(matched_ev["sources"]), 3)
+        self.assertEqual(len(matched_ev["sources"]), 1)
         self.assertEqual(matched_ev["sources"][0]["source"], "dlhd")
-        self.assertEqual(matched_ev["sources"][0]["player"], 1)
-        self.assertEqual(matched_ev["sources"][1]["player"], 2)
-        self.assertEqual(matched_ev["sources"][2]["player"], 5)
+        self.assertEqual(matched_ev["sources"][0]["name"], "Sky Sport UNO")
 
 
     def test_replay_event_detection(self):

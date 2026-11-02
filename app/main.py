@@ -536,6 +536,34 @@ async def live_manifest_proxy(request: Request, url: str, config: Optional[str] 
     )
 
 
+@app.get("/daddylive/stream/{channel_id}.m3u8")
+@app.get("/{config}/daddylive/stream/{channel_id}.m3u8")
+async def daddylive_stream_fallback(channel_id: str, config: Optional[str] = None):
+    """
+    On-demand smart multi-player resolver for DaddyLive streams.
+    Transparently probes and fails over across all 7 DaddyLive players on EasyProxy:
+    Player 1 (watch.php), Player 1 Alt (stream-id), Player 2 (cast), Player 3 (watch),
+    Player 4 (plus), Player 5 (casting), and Player 6 (player).
+    Seamlessly redirects video player (HTTP 307) to the first working stream.
+    """
+    if not re.match(r"^[0-9a-zA-Z_-]{1,32}$", channel_id):
+        raise HTTPException(status_code=400, detail="ID canale DaddyLive non valido")
+
+    ep_url, ep_pass = None, None
+    if config:
+        ep_url, ep_pass, _, _ = decode_config(config)
+
+    if not ep_url:
+        raise HTTPException(status_code=400, detail="EasyProxy non configurato per DaddyLive")
+
+    from app.services.daddylive_api import daddylive_api
+    resolved_url = await daddylive_api.resolve_active_stream_url(channel_id, ep_url, ep_pass)
+    if resolved_url:
+        return RedirectResponse(url=resolved_url, status_code=307)
+
+    raise HTTPException(status_code=502, detail="Nessun player DaddyLive funzionante al momento per questo canale")
+
+
 def is_trusted_stream_redirect(url: str, allowed_suffixes: Tuple[str, ...]) -> bool:
     """Validates that a resolved stream redirect points strictly to trusted CDN domains."""
     try:

@@ -1,7 +1,7 @@
 import asyncio
 import time
 import unittest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.services.daddylive_api import daddylive_api, DaddyLiveAPI
 from app.services.stream_service import stream_service
@@ -135,34 +135,32 @@ class TestDaddyLiveNative(unittest.IsolatedAsyncioTestCase):
         """Verifies DaddyLive 24/7 channels mapping for Italian sports networks."""
         # Sky Sport Uno
         uno = daddylive_api.get_channel_streams("sky sport uno")
-        self.assertEqual(len(uno), 3)  # Player 1, Player 2, Player 5
+        self.assertEqual(len(uno), 1)
         self.assertEqual(uno[0]["id"], "461")
-        self.assertEqual(uno[0]["player"], 1)
-        self.assertEqual(uno[1]["player"], 2)
-        self.assertEqual(uno[2]["player"], 5)
+        self.assertEqual(uno[0]["name"], "Sky Sport UNO Italy")
 
         # DAZN 1
         dazn = daddylive_api.get_channel_streams("dazn 1")
-        self.assertEqual(len(dazn), 3)
+        self.assertEqual(len(dazn), 1)
         self.assertEqual(dazn[0]["id"], "877")
 
         # Sky Calcio 4 (LCN 254)
         c4 = daddylive_api.get_channel_streams("sky sport 254")
-        self.assertEqual(len(c4), 3)
+        self.assertEqual(len(c4), 1)
         self.assertEqual(c4[0]["id"], "874")
 
         # Rai Sport
         raisport = daddylive_api.get_channel_streams("rai sport")
-        self.assertEqual(len(raisport), 3)
+        self.assertEqual(len(raisport), 1)
         self.assertEqual(raisport[0]["id"], "882")
 
         # Italia 1
         it1 = daddylive_api.get_channel_streams("italia 1")
-        self.assertEqual(len(it1), 3)
+        self.assertEqual(len(it1), 1)
         self.assertEqual(it1[0]["id"], "854")
 
-    async def test_stream_service_multi_player_routing(self):
-        """Verifies StreamService constructs separate player URLs for Player 1, 2, and 5 via EasyProxy."""
+    async def test_stream_service_auto_fallback_stream(self):
+        """Verifies StreamService constructs 1 clean auto-fallback stream instead of exposing multiple player entries."""
         fake_match = {
             "id": "dlhd:test:multi",
             "title": "Inter vs Milan",
@@ -170,9 +168,9 @@ class TestDaddyLiveNative(unittest.IsolatedAsyncioTestCase):
             "_silo": "football",
             "date": int(time.time() * 1000),
             "sources": [
-                {"source": "dlhd", "id": "877", "name": "DAZN 1 [Player 1]", "player": 1},
-                {"source": "dlhd", "id": "877", "name": "DAZN 1 [Player 2]", "player": 2},
-                {"source": "dlhd", "id": "877", "name": "DAZN 1 [Player 5]", "player": 5},
+                {"source": "dlhd", "id": "877", "name": "DAZN 1 [Player 1]"},
+                {"source": "dlhd", "id": "877", "name": "DAZN 1 [Player 2]"},
+                {"source": "dlhd", "id": "877", "name": "DAZN 1 [Player 5]"},
             ],
             "_provider": "dlhd",
         }
@@ -184,24 +182,51 @@ class TestDaddyLiveNative(unittest.IsolatedAsyncioTestCase):
             "dlhd:test:multi",
             ep_url="https://ep.bluccoj.com",
             ep_pass="Z3r0EP",
+            base_url="https://streamsport.example.com",
+            config="myconfig",
         )
 
-        self.assertEqual(len(streams), 3)
+        # Must be deduplicated into 1 single clean stream
+        self.assertEqual(len(streams), 1)
+        s = streams[0]
+        self.assertEqual(s["name"], "DAZN 1")
+        self.assertIn("Fonte: DaddyLive", s["title"])
+        self.assertEqual(s["url"], "https://streamsport.example.com/myconfig/daddylive/stream/877.m3u8")
 
-        # Player 1: watch.php
-        p1 = streams[0]
-        self.assertIn("watch.php%3Fid%3D877", p1["url"])
-        self.assertIn("Fonte: DaddyLive", p1["title"])
+    async def test_daddylive_cascade_resolution(self):
+        """Verifies resolve_active_stream_url cascades across players on failure."""
+        mock_client = AsyncMock()
+        # Simulate Player 1 failing (502), Player 1 Alt failing (404), Player 2 succeeding (200)
+        resp_502 = MagicMock(status_code=502)
+        resp_404 = MagicMock(status_code=404)
+        resp_200 = MagicMock(status_code=200)
+        mock_client.get.side_effect = [resp_502, resp_404, resp_200]
 
-        # Player 2: /cast/stream-877.php
-        p2 = streams[1]
-        self.assertIn("cast%2Fstream-877.php", p2["url"])
-        self.assertIn("Player 2 - Backup", p2["title"])
+        daddylive_api._active_player_cache.clear()
+        res_url = await daddylive_api.resolve_active_stream_url(
+            "877",
+            ep_url="https://ep.bluccoj.com",
+            ep_pass="Z3r0EP",
+            client=mock_client,
+        )
 
-        # Player 5: /casting/stream-877.php
-        p5 = streams[2]
-        self.assertIn("casting%2Fstream-877.php", p5["url"])
-        self.assertIn("Player 5 - Backup", p5["title"])
+        self.assertIsNotNone(res_url)
+        # Should have selected Player 2 (cast/stream-877.php)
+        self.assertIn("cast%2Fstream-877.php", res_url)
+        self.assertIn("api_password=Z3r0EP", res_url)
+
+    def test_fastapi_daddylive_stream_endpoint(self):
+        """Verifies /{config}/daddylive/stream/{channel_id}.m3u8 endpoint returns 307 redirect."""
+        from fastapi.testclient import TestClient
+        from app.main import app
+
+        with patch.object(daddylive_api, "resolve_active_stream_url", return_value="https://ep.bluccoj.com/resolved.m3u8"):
+            client = TestClient(app)
+            # config: base64 of 'https://ep.bluccoj.com|Z3r0EP|nuvio'
+            cfg = "aHR0cHM6Ly9lcC5ibHVjY29qLmNvbXxaM3IwRVB8bnV2aW8="
+            resp = client.get(f"/{cfg}/daddylive/stream/877.m3u8", follow_redirects=False)
+            self.assertEqual(resp.status_code, 307)
+            self.assertEqual(resp.headers["location"], "https://ep.bluccoj.com/resolved.m3u8")
 
 
 if __name__ == "__main__":

@@ -951,34 +951,37 @@ class StreamService:
         # Keep Italian TvVoo streams at index 0, followed by international TvVoo streams
         tvvoo_streams.sort(key=lambda s: 0 if "🇮🇹" in s.get("name", "") else 1)
 
-        # 2. Process DaddyLive (dlhd) streams with StreamViX / MediaFlow Proxy format
+        # 2. Process DaddyLive (dlhd) streams with auto-fallback
         dlhd_streams: List[Dict[str, Any]] = []
         if ep_url:
-            dlhd_sources = [s for s in sources if s.get("source") == "dlhd"]
+            dlhd_sources = [s for s in sources if isinstance(s, dict) and s.get("source") == "dlhd"]
             dl_domain = await daddylive_api.get_active_domain() if dlhd_sources else daddylive_api.DEFAULT_DOMAIN
-            for idx, s in enumerate(dlhd_sources, 1):
+
+            seen_dl_ids = set()
+            unique_dl_sources = []
+            for s in dlhd_sources:
+                cid = s.get("id")
+                if cid and cid not in seen_dl_ids:
+                    seen_dl_ids.add(cid)
+                    unique_dl_sources.append(s)
+
+            for idx, s in enumerate(unique_dl_sources, 1):
                 ch_id = s.get("id")
-                ch_name = s.get("name") or f"Canale {idx}"
-                flag = self.get_channel_flag(ch_name)
+                raw_name = s.get("name") or f"Canale {idx}"
+                clean_name = re.sub(r"\s*\[Player\s*\d+[^\]]*\]", "", raw_name, flags=re.IGNORECASE).strip()
+                flag = self.get_channel_flag(clean_name)
                 flag_prefix = f"{flag} " if flag else ""
 
-                # Multi-Player routing (Player 1, Player 2 Backup CDN, Player 5 Backup CDN)
-                player_num = s.get("player") or 1
-                if player_num == 2:
-                    d_url = f"https://{dl_domain}/cast/stream-{ch_id}.php"
-                    title_label = "📡 Fonte: DaddyLive (Player 2 - Backup) • Qualità: Live TV"
-                elif player_num == 5:
-                    d_url = f"https://{dl_domain}/casting/stream-{ch_id}.php"
-                    title_label = "📡 Fonte: DaddyLive (Player 5 - Backup) • Qualità: Live TV"
+                if base_url:
+                    manifest_path = f"/{config}/daddylive/stream/{ch_id}.m3u8" if config else f"/daddylive/stream/{ch_id}.m3u8"
+                    stream_url = f"{base_url.rstrip('/')}{manifest_path}"
                 else:
                     d_url = f"https://{dl_domain}/watch.php?id={ch_id}"
-                    title_label = "📡 Fonte: DaddyLive • Qualità: Live TV"
-
-                stream_url = self.build_easyproxy_url(ep_url, ep_pass, "DLHD", d_url)
+                    stream_url = self.build_easyproxy_url(ep_url, ep_pass, "DLHD", d_url)
 
                 dlhd_streams.append({
-                    "name": f"{flag_prefix}{ch_name}",
-                    "title": title_label,
+                    "name": f"{flag_prefix}{clean_name}",
+                    "title": "📡 Fonte: DaddyLive • Qualità: Live TV",
                     "url": stream_url,
                     "behaviorHints": {"notWebReady": False},
                 })

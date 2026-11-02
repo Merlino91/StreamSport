@@ -5,6 +5,7 @@ import json
 import logging
 import re
 import time
+import urllib.parse
 from typing import Any, Dict, List, Optional, Tuple
 from zoneinfo import ZoneInfo
 import hashlib
@@ -84,6 +85,16 @@ class DaddyLiveAPI:
         "20 mediaset": {"id": "857", "name": "20 Mediaset Italy"},
     }
 
+    PLAYER_FALLBACK_ORDER: List[Tuple[str, str]] = [
+        ("Player 1", "watch.php?id={id}"),
+        ("Player 1 Alt", "stream/stream-{id}.php"),
+        ("Player 2", "cast/stream-{id}.php"),
+        ("Player 3", "watch/stream-{id}.php"),
+        ("Player 4", "plus/stream-{id}.php"),
+        ("Player 5", "casting/stream-{id}.php"),
+        ("Player 6", "player/stream-{id}.php"),
+    ]
+
     def __init__(self):
         self._cache: List[Dict[str, Any]] = []
         self._cache_time: float = 0.0
@@ -91,6 +102,13 @@ class DaddyLiveAPI:
         self._last_content_hash: str = ""
         self._active_domain: str = self.DEFAULT_DOMAIN
         self._last_domain_check: float = 0.0
+        self._active_player_cache: Dict[str, Tuple[str, float]] = {}
+        self._fallback_lock: Optional[asyncio.Lock] = None
+
+    def _get_fallback_lock(self) -> asyncio.Lock:
+        if self._fallback_lock is None:
+            self._fallback_lock = asyncio.Lock()
+        return self._fallback_lock
 
     async def get_active_domain(self) -> str:
         """
@@ -144,7 +162,8 @@ class DaddyLiveAPI:
     def get_channel_streams(self, canonical_key: str) -> List[Dict[str, Any]]:
         """
         Returns registered DaddyLive 24/7 stream sources for a canonical channel key.
-        Provides multi-player fallbacks: Player 1 (Main), Player 2 (Backup CDN), Player 5 (Backup CDN).
+        Provides a single clean channel source; player fallback (Player 1..6) is handled
+        automatically on demand.
         """
         if not canonical_key:
             return []
@@ -158,25 +177,76 @@ class DaddyLiveAPI:
             {
                 "source": "dlhd",
                 "id": ch_id,
-                "name": f"{ch_name} [Player 1]",
-                "player": 1,
+                "name": ch_name,
                 "country": "Italy",
-            },
-            {
-                "source": "dlhd",
-                "id": ch_id,
-                "name": f"{ch_name} [Player 2 - Backup]",
-                "player": 2,
-                "country": "Italy",
-            },
-            {
-                "source": "dlhd",
-                "id": ch_id,
-                "name": f"{ch_name} [Player 5 - Backup]",
-                "player": 5,
-                "country": "Italy",
-            },
+            }
         ]
+
+    async def resolve_active_stream_url(
+        self,
+        ch_id: str,
+        ep_url: str,
+        ep_pass: Optional[str] = None,
+        client: Optional[httpx.AsyncClient] = None,
+    ) -> Optional[str]:
+        """
+        Tests DaddyLive player endpoints in cascade through EasyProxy:
+        1. Player 1 (watch.php?id=...)
+        2. Player 1 Alt (stream/stream-{id}.php)
+        3. Player 2 (cast/stream-{id}.php)
+        4. Player 3 (watch/stream-{id}.php)
+        5. Player 4 (plus/stream-{id}.php)
+        6. Player 5 (casting/stream-{id}.php)
+        7. Player 6 (player/stream-{id}.php)
+        Returns the first working EasyProxy URL and caches it for 300 seconds.
+        """
+        now = time.time()
+        cached = self._active_player_cache.get(ch_id)
+        if cached and cached[1] > now:
+            return cached[0]
+
+        lock = self._get_fallback_lock()
+        async with lock:
+            cached = self._active_player_cache.get(ch_id)
+            if cached and cached[1] > now:
+                return cached[0]
+
+            dl_domain = await self.get_active_domain()
+            base_ep = ep_url.rstrip("/")
+            close_client = False
+            if client is None:
+                client = httpx.AsyncClient(timeout=3.5, verify=False)
+                close_client = True
+
+            try:
+                for player_label, path_template in self.PLAYER_FALLBACK_ORDER:
+                    rel_path = path_template.format(id=ch_id)
+                    d_url = f"https://{dl_domain}/{rel_path}"
+                    encoded_d = urllib.parse.quote(d_url, safe="")
+                    probe_url = f"{base_ep}/extractor/video.m3u8?host=dlstreams&d={encoded_d}&redirect_stream=true"
+                    if ep_pass:
+                        probe_url += f"&api_password={urllib.parse.quote(ep_pass, safe='')}"
+
+                    try:
+                        r = await client.get(probe_url, follow_redirects=False, timeout=2.5)
+                        if r.status_code in (200, 302, 307):
+                            logger.info(
+                                "DaddyLive: Channel %s active on %s (EasyProxy returned %d)",
+                                ch_id, player_label, r.status_code
+                            )
+                            self._active_player_cache[ch_id] = (probe_url, now + 300)
+                            return probe_url
+                    except Exception as probe_err:
+                        logger.debug("DaddyLive: Probe for %s on %s failed: %s", ch_id, player_label, probe_err)
+
+                logger.warning("DaddyLive: All 7 players failed probe for channel %s on EasyProxy; using Player 1 default", ch_id)
+                default_url = f"{base_ep}/extractor/video.m3u8?host=dlstreams&d={urllib.parse.quote(f'https://{dl_domain}/watch.php?id={ch_id}', safe='')}&redirect_stream=true"
+                if ep_pass:
+                    default_url += f"&api_password={urllib.parse.quote(ep_pass, safe='')}"
+                return default_url
+            finally:
+                if close_client:
+                    await client.aclose()
 
     def _extract_channel_id(self, href: str) -> Optional[str]:
         """Extracts channel id from URL patterns."""
