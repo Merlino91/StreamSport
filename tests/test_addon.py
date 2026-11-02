@@ -254,9 +254,9 @@ class StreamSportTestCase(unittest.TestCase):
         """Verifies that DaddyLive allows NCAA FBS College Football while excluding lower divisions and non-football college sports."""
         from app.services.daddylive_api import DaddyLiveAPI
         # Excluded non-football college sports
-        self.assertIsNone(DaddyLiveAPI.map_daddylive_category_to_silo("College Soccer", "Texas vs Alabama"))
-        self.assertIsNone(DaddyLiveAPI.map_daddylive_category_to_silo("College Volleyball", "Michigan vs Ohio State"))
-        self.assertIsNone(DaddyLiveAPI.map_daddylive_category_to_silo("Minor League Baseball", "Durham Bulls vs Gwinnett Stripers"))
+        self.assertEqual(DaddyLiveAPI.map_daddylive_category_to_silo("College Soccer", "Texas vs Alabama"), ("football", "football"))
+        self.assertEqual(DaddyLiveAPI.map_daddylive_category_to_silo("College Volleyball", "Michigan vs Ohio State"), ("volley", "volleyball"))
+        self.assertEqual(DaddyLiveAPI.map_daddylive_category_to_silo("Minor League Baseball", "Durham Bulls vs Gwinnett Stripers"), ("baseball", "baseball"))
         # Allowed NCAA FBS & NFL
         cfb_res = DaddyLiveAPI.map_daddylive_category_to_silo("College Football", "Texas vs Alabama")
         self.assertEqual(cfb_res, ("american-football", "american-football"))

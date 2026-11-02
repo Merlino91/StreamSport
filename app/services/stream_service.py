@@ -962,13 +962,23 @@ class StreamService:
                 flag = self.get_channel_flag(ch_name)
                 flag_prefix = f"{flag} " if flag else ""
 
-                # Exact StreamViX destination URL and EasyProxy parameters: host=DLHD, redirect_stream=true
-                d_url = f"https://{dl_domain}/watch.php?id={ch_id}"
+                # Multi-Player routing (Player 1, Player 2 Backup CDN, Player 5 Backup CDN)
+                player_num = s.get("player") or 1
+                if player_num == 2:
+                    d_url = f"https://{dl_domain}/cast/stream-{ch_id}.php"
+                    title_label = "📡 Fonte: DaddyLive (Player 2 - Backup) • Qualità: Live TV"
+                elif player_num == 5:
+                    d_url = f"https://{dl_domain}/casting/stream-{ch_id}.php"
+                    title_label = "📡 Fonte: DaddyLive (Player 5 - Backup) • Qualità: Live TV"
+                else:
+                    d_url = f"https://{dl_domain}/watch.php?id={ch_id}"
+                    title_label = "📡 Fonte: DaddyLive • Qualità: Live TV"
+
                 stream_url = self.build_easyproxy_url(ep_url, ep_pass, "DLHD", d_url)
 
                 dlhd_streams.append({
                     "name": f"{flag_prefix}{ch_name}",
-                    "title": "📡 Fonte: DaddyLive • Qualità: Live TV",
+                    "title": title_label,
                     "url": stream_url,
                     "behaviorHints": {"notWebReady": False},
                 })

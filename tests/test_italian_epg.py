@@ -490,12 +490,14 @@ class TestItalianEPGService(unittest.IsolatedAsyncioTestCase):
         }
         self.assertEqual(catalog_service.get_live_window_minutes(session_match), 360)
 
+    @patch("app.services.italian_epg_service.daddylive_api")
     @patch("app.services.italian_epg_service.tvvoo_service")
     @patch("app.services.italian_epg_service.mandrakodi_service")
     async def test_sky_channel_resolved_via_mandrakodi_when_tvvoo_missing(
-        self, mock_mandra, mock_tvvoo
+        self, mock_mandra, mock_tvvoo, mock_dl
     ):
         """Verifies that if TvVoo has 0 streams for a Sky channel, Mandrakodi streams are used and event is not ghosted."""
+        mock_dl.get_channel_streams.return_value = []
         # TvVoo returns empty (e.g. offline or missing)
         mock_tvvoo.get_channel_streams.return_value = []
         mock_tvvoo.get_canonical_from_sky_id.return_value = "sky sport 251"
@@ -539,6 +541,52 @@ class TestItalianEPGService(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(matched_ev["sources"]), 1)
         self.assertEqual(matched_ev["sources"][0]["provider"], "mandrakodi")
         self.assertEqual(matched_ev["sources"][0]["id"], "mandra_sky_251")
+
+    @patch("app.services.italian_epg_service.daddylive_api")
+    @patch("app.services.italian_epg_service.tvvoo_service")
+    @patch("app.services.italian_epg_service.mandrakodi_service")
+    async def test_sky_channel_resolved_via_daddylive_when_others_missing(
+        self, mock_mandra, mock_tvvoo, mock_dl
+    ):
+        """Verifies that if TvVoo and Mandrakodi have 0 streams, DaddyLive streams prevent event ghosting."""
+        mock_tvvoo.get_channel_streams.return_value = []
+        mock_mandra.get_channel_streams.return_value = []
+        mock_tvvoo.get_canonical_from_sky_id.return_value = "sky sport uno"
+        mock_dl.get_channel_streams.return_value = [
+            {"source": "dlhd", "id": "461", "name": "Sky Sport UNO [Player 1]", "player": 1},
+            {"source": "dlhd", "id": "461", "name": "Sky Sport UNO [Player 2]", "player": 2},
+            {"source": "dlhd", "id": "461", "name": "Sky Sport UNO [Player 5]", "player": 5},
+        ]
+
+        service = ItalianEPGService()
+        mock_client = AsyncMock()
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "events": [
+                {
+                    "eventTitle": "Tennis: ATP Masters 1000 Parigi (Diretta)",
+                    "eventSynopsis": "Finale ATP Parigi-Bercy",
+                    "starttime": "2026-10-21T14:00:00Z",
+                    "endtime": "2026-10-21T16:30:00Z",
+                    "content": {
+                        "genre": {"id": 6, "name": "Sport"},
+                        "subgenre": {"id": 40, "name": "Tennis"},
+                    },
+                }
+            ]
+        }
+        mock_client.get.return_value = mock_resp
+
+        parsed = await service._fetch_sky_events(mock_client, "2026-10-21T00:00:00Z", "2026-10-21T23:59:59Z")
+        self.assertGreater(len(parsed), 0)
+        matched_ev = parsed[0]
+        self.assertEqual(len(matched_ev["sources"]), 3)
+        self.assertEqual(matched_ev["sources"][0]["source"], "dlhd")
+        self.assertEqual(matched_ev["sources"][0]["player"], 1)
+        self.assertEqual(matched_ev["sources"][1]["player"], 2)
+        self.assertEqual(matched_ev["sources"][2]["player"], 5)
+
 
     def test_replay_event_detection(self):
         # Titles with explicit replay markers

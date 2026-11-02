@@ -5,11 +5,13 @@ import json
 import logging
 import re
 import time
-import httpx
 from typing import Any, Dict, List, Optional, Tuple
 from zoneinfo import ZoneInfo
-
 import hashlib
+from bs4 import BeautifulSoup
+import httpx
+
+from app.services.doh_client import doh_client
 from app.services.canonical_competition_service import (
     detect_canonical_competition,
     get_canonical_display_name,
@@ -21,13 +23,6 @@ from app.services.canonical_competition_service import (
 
 logger = logging.getLogger("streamsport.daddylive")
 
-REMOTE_SCHEDULE_URLS = [
-    "https://raw.githubusercontent.com/qwertyuiop8899/logo/main/daddyliveSchedule.json",
-    "https://cdn.jsdelivr.net/gh/qwertyuiop8899/logo@main/daddyliveSchedule.json",
-]
-REMOTE_SCHEDULE_URL = REMOTE_SCHEDULE_URLS[0]
-LOGO_BASE = "https://raw.githubusercontent.com/qwertyuiop8899/logo/main"
-
 _MONTHS = {
     "January": 1, "February": 2, "March": 3, "April": 4, "May": 5, "June": 6,
     "July": 7, "August": 8, "September": 9, "October": 10, "November": 11, "December": 12,
@@ -37,22 +32,61 @@ _MONTHS = {
 
 _ORDINAL_RX = re.compile(r"(\d{1,2})\s*(?:st|nd|rd|th)\b", re.IGNORECASE)
 
+
 class DaddyLiveAPI:
     """
-    Scrapes events from DaddyLive schedule (same upstream source as StreamViX).
-    Converts events to the standard StreamSport format and extracts exact stream channels.
+    Scrapes events natively from DaddyLive schedule (index.php) using DoHClient.
+    Bypasses ISP DNS blocking (AGCOM 172.16.0.2 in Italy) via Cloudflare DoH (1.1.1.1).
+    Provides 24/7 linear channel mapping and multi-player fallback (Player 1, 2, 5).
     """
 
     MIRROR_DOMAINS: List[str] = [
         "thedaddy.pk",
-        "daddylive.pk",
+        "thedaddy.to",
+        "dlhd.dad",
         "dlhd.so",
+        "daddylive.pk",
     ]
     DEFAULT_DOMAIN: str = "thedaddy.pk"
 
+    DADDYLIVE_EXCLUDED_CATEGORIES = (
+        "big brother", "tv show", "tv shows", "reality", "movies", "upcoming events", "upcoming event"
+    )
+
+    DADDYLIVE_CANONICAL_CHANNELS: Dict[str, Dict[str, str]] = {
+        # Linear Sky Sport IT
+        "sky sport uno": {"id": "461", "name": "Sky Sport UNO Italy"},
+        "sky sport calcio": {"id": "870", "name": "Sky Sport Calcio Italy"},
+        "sky sport tennis": {"id": "576", "name": "Sky Sport Tennis Italy"},
+        "sky sport arena": {"id": "462", "name": "Sky Sport Arena Italy"},
+        "sky sport basket": {"id": "875", "name": "Sky Sport Basket Italy"},
+        "sky sport max": {"id": "460", "name": "Sky Sport MAX Italy"},
+        "sky sport f1": {"id": "577", "name": "Sky Sport F1 Italy"},
+        "sky sport motogp": {"id": "575", "name": "Sky Sport MotoGP Italy"},
+        "sky sport golf": {"id": "574", "name": "Sky Sports Golf Italy"},
+        "sky sport 24": {"id": "869", "name": "Sky Sport 24 Italy"},
+        # Sky Calcio Contemporanea (LCN 251-254)
+        "sky sport 251": {"id": "871", "name": "Sky Calcio 1 (251) Italy"},
+        "sky sport 252": {"id": "872", "name": "Sky Calcio 2 (252) Italy"},
+        "sky sport 253": {"id": "873", "name": "Sky Calcio 3 (253) Italy"},
+        "sky sport 254": {"id": "874", "name": "Sky Calcio 4 (254) Italy"},
+        # DAZN & Eurosport
+        "dazn 1": {"id": "877", "name": "DAZN ZONA Italy"},
+        "eurosport 1": {"id": "878", "name": "EuroSport 1 Italy"},
+        "eurosport 2": {"id": "879", "name": "EuroSport 2 Italy"},
+        # Rai & Mediaset FTA
+        "rai sport": {"id": "882", "name": "Rai Sport Italy"},
+        "rai 1": {"id": "850", "name": "Rai 1 Italy"},
+        "rai 2": {"id": "851", "name": "Rai 2 Italy"},
+        "rai 3": {"id": "852", "name": "Rai 3 Italy"},
+        "rai 4": {"id": "853", "name": "Rai 4 Italy"},
+        "italia 1": {"id": "854", "name": "Italia 1 Italy"},
+        "20 mediaset": {"id": "857", "name": "20 Mediaset Italy"},
+    }
+
     def __init__(self):
         self._cache: List[Dict[str, Any]] = []
-        self._cache_time: float = 0
+        self._cache_time: float = 0.0
         self._cache_ttl: int = 3600  # 1 hour default
         self._last_content_hash: str = ""
         self._active_domain: str = self.DEFAULT_DOMAIN
@@ -107,6 +141,61 @@ class DaddyLiveAPI:
         self._last_domain_check = now
         return self._active_domain
 
+    def get_channel_streams(self, canonical_key: str) -> List[Dict[str, Any]]:
+        """
+        Returns registered DaddyLive 24/7 stream sources for a canonical channel key.
+        Provides multi-player fallbacks: Player 1 (Main), Player 2 (Backup CDN), Player 5 (Backup CDN).
+        """
+        if not canonical_key:
+            return []
+        key = canonical_key.strip().lower()
+        info = self.DADDYLIVE_CANONICAL_CHANNELS.get(key)
+        if not info:
+            return []
+        ch_id = info["id"]
+        ch_name = info["name"]
+        return [
+            {
+                "source": "dlhd",
+                "id": ch_id,
+                "name": f"{ch_name} [Player 1]",
+                "player": 1,
+                "country": "Italy",
+            },
+            {
+                "source": "dlhd",
+                "id": ch_id,
+                "name": f"{ch_name} [Player 2 - Backup]",
+                "player": 2,
+                "country": "Italy",
+            },
+            {
+                "source": "dlhd",
+                "id": ch_id,
+                "name": f"{ch_name} [Player 5 - Backup]",
+                "player": 5,
+                "country": "Italy",
+            },
+        ]
+
+    def _extract_channel_id(self, href: str) -> Optional[str]:
+        """Extracts channel id from URL patterns."""
+        if not href:
+            return None
+        m = re.search(r"[?&]id=(\d+)", href)
+        if m:
+            return m.group(1)
+        m = re.search(r"stream-(\d+)\.php", href)
+        if m:
+            return m.group(1)
+        m = re.search(r"watchextra\.php\?id=(\d+)", href)
+        if m:
+            return f"extra_{m.group(1)}"
+        m = re.search(r"watchstreamed\.php\?id=(\d+)", href)
+        if m:
+            return f"streamed_{m.group(1)}"
+        return None
+
     def _clean_day(self, day: str) -> str:
         s = re.sub(r"\s*-\s*Schedule Time UK GMT\s*$", "", day, flags=re.IGNORECASE)
         s = s.replace("\u00a0", " ").replace("\u202f", " ").replace("\u2009", " ").replace("\u200b", "")
@@ -114,7 +203,7 @@ class DaddyLiveAPI:
         return re.sub(r"\s+", " ", s).strip()
 
     def _parse_datetime(self, day_str: str, time_str: str) -> int:
-        """Parses day string and time string into epoch ms."""
+        """Parses day string and time string into UTC epoch ms."""
         clean = self._clean_day(day_str)
         parts = clean.split()
         month = daynum = year = None
@@ -154,18 +243,6 @@ class DaddyLiveAPI:
         dt = datetime.datetime(base_date.year, base_date.month, base_date.day, h, m, tzinfo=datetime.timezone.utc)
         return int(dt.timestamp() * 1000)
 
-    def _parse_upcoming_date(self, event_title: str) -> int:
-        """Attempts to parse full date from upcoming title like '... | 26 September 2026'."""
-        m = re.search(r"\|\s*(\d{1,2})\s*([A-Za-z]+)\s*(\d{4})", event_title)
-        if m:
-            daynum = int(m.group(1))
-            month_str = m.group(2)
-            year = int(m.group(3))
-            month = _MONTHS.get(month_str, 9)
-            dt = datetime.datetime(year, month, daynum, 15, 0, tzinfo=datetime.timezone.utc)
-            return int(dt.timestamp() * 1000)
-        return 0
-
     def _clean_title(self, raw_title: str) -> str:
         # Unescape HTML entities (&amp; -> &)
         t = html.unescape(raw_title or "")
@@ -202,21 +279,11 @@ class DaddyLiveAPI:
         t = re.sub(r"^[\s\U0001F300-\U0001F5FF\U0001F680-\U0001F6FF\U00002600-\U000027BF]+", "", t).strip()
         return re.sub(r"\s+", " ", t).strip()
 
-    DADDYLIVE_EXCLUDED_CATEGORIES = (
-        "big brother", "tv show", "reality", "movies", "horse racing", "upcoming events",
-        "college soccer", "men's college soccer", "women's college soccer",
-        "college volleyball", "women's college volleyball",
-        "college ice hockey", "women's college ice hockey",
-        "minor league baseball",
-        "usl championship", "usl league one", "usl",
-        "ahl ice hockey", "ahl",
-    )
-
     @classmethod
     def map_daddylive_category_to_silo(cls, cat_raw: str, clean_title: str) -> Optional[Tuple[str, str]]:
         """
         Maps a DaddyLive raw category string and title to (silo_id, sport_category).
-        Returns None if the category is excluded.
+        Keeps all sports categories in memory; only non-sports are excluded.
         """
         cat_lower = (cat_raw or "").lower()
         if any(k in cat_lower for k in cls.DADDYLIVE_EXCLUDED_CATEGORIES):
@@ -232,7 +299,7 @@ class DaddyLiveAPI:
             "eredivisie", "coppa italia", "fa cup", "copa del rey", "copa libertadores", "copa sudamericana"
         )):
             return "football", "football"
-        if "football" in cat_lower and "american" not in cat_lower and "am." not in cat_lower and "cfl" not in cat_lower and "college" not in cat_lower:
+        if "football" in cat_lower and "american" not in cat_lower and "am." not in cat_lower and "cfl" not in cat_lower and "college football" not in cat_lower:
             return "football", "football"
 
         # 2. Tennis
@@ -240,7 +307,7 @@ class DaddyLiveAPI:
             return "tennis", "tennis"
 
         # 3. Motorsport
-        if "motor" in cat_lower or "formula" in cat_lower:
+        if "motor" in cat_lower or "formula" in cat_lower or "motogp" in cat_lower:
             return "motor-sports", "motor-sports"
 
         # 4. Basketball
@@ -255,16 +322,16 @@ class DaddyLiveAPI:
         if "baseball" in cat_lower or "mlb" in cat_lower:
             return "baseball", "baseball"
 
-        # 7. American Football (NFL, NCAA FBS, CFL, UFL)
+        # 7. American Football (NFL, NCAA FBS, CFL, UFL, College Football)
         if any(k in cat_lower for k in ("am. football", "american football", "cfl", "nfl", "ufl", "college football", "ncaaf", "ncaa")):
             return "american-football", "american-football"
 
-        # 8. Hockey (NHL, European Leagues, Roller Hockey, Field Hockey)
-        if "hockey" in cat_lower or "hockey" in title_lower or any(k in cat_lower for k in ("nhl", "shl", "ohl", "ushl")):
+        # 8. Hockey (NHL, KHL, ECHL, European Leagues, Field Hockey)
+        if "hockey" in cat_lower or "hockey" in title_lower or any(k in cat_lower for k in ("nhl", "khl", "echl", "shl", "ohl", "ushl")):
             return "hockey", "hockey"
 
         # 9. Volleyball
-        if "volleyball" in cat_lower:
+        if "volleyball" in cat_lower or "volley" in cat_lower:
             return "volley", "volleyball"
 
         # 10. Altri Sport
@@ -282,174 +349,82 @@ class DaddyLiveAPI:
             return "altri_sport", "handball"
         if "futsal" in cat_lower:
             return "altri_sport", "futsal"
+        if "floorball" in cat_lower:
+            return "altri_sport", "floorball"
+        if "water polo" in cat_lower or "pallanuoto" in title_lower:
+            return "altri_sport", "water polo"
+        if "squash" in cat_lower:
+            return "altri_sport", "squash"
         if "afl" in cat_lower or "aussie" in cat_lower:
             return "altri_sport", "afl"
-        if "billiards" in cat_lower or "snooker" in title_lower:
+        if "billiards" in cat_lower or "snooker" in cat_lower or "snooker" in title_lower:
             return "altri_sport", "billiards"
 
         return "altri_sport", "other"
 
-    async def get_matches(self, force: bool = False) -> List[Dict[str, Any]]:
-        now = time.time()
-        if not force and self._cache and (now - self._cache_time < self._cache_ttl):
-            return self._cache
-
-        schedule_data = None
-        new_content_hash = ""
-        headers = {"User-Agent": "Mozilla/5.0"}
-        try:
-            async with httpx.AsyncClient(timeout=15.0, headers=headers, follow_redirects=True) as client:
-                for url in REMOTE_SCHEDULE_URLS:
-                    for attempt in range(2):
-                        try:
-                            res = await client.get(url)
-                            if res.status_code == 200:
-                                new_content_hash = hashlib.md5(res.content).hexdigest()
-                                # Fast return if content hasn't changed since last full parse
-                                if not force and new_content_hash == self._last_content_hash and self._cache:
-                                    self._cache_time = now
-                                    logger.debug("DaddyLive schedule unchanged (hash %s)", new_content_hash[:8])
-                                    return self._cache
-                                schedule_data = res.json()
-                                break
-                        except Exception as e:
-                            if attempt == 0:
-                                await asyncio.sleep(1.0)
-                            else:
-                                logger.debug("DaddyLive schedule attempt failed for %s: %s", url, e)
-                    if schedule_data:
-                        break
-        except Exception as e:
-            logger.warning("Failed to fetch DaddyLive schedule: %s", e)
-
-        if not schedule_data:
-            logger.warning("Failed to fetch DaddyLive schedule from all mirror endpoints")
-            return self._cache
-
-        matches: List[Dict[str, Any]] = []
-
-        for day_str, categories in schedule_data.items():
-            if not isinstance(categories, dict):
+    async def _fetch_native_html(self) -> Optional[str]:
+        """
+        Fetches raw schedule HTML from DaddyLive with automatic mirror failover via DoHClient.
+        Bypasses ISP DNS blocking (AGCOM 172.16.0.2 in Italy) using Cloudflare DoH (1.1.1.1).
+        """
+        for mirror in self.MIRROR_DOMAINS:
+            url = f"https://{mirror}/index.php"
+            try:
+                raw_bytes, ct = await doh_client.get_raw(url, timeout=8.0)
+                if raw_bytes and len(raw_bytes) > 5000:
+                    html_str = raw_bytes.decode("utf-8", errors="ignore")
+                    if "schedule__category" in html_str or "schedule__dayTitle" in html_str:
+                        self._active_domain = mirror
+                        logger.debug("Successfully fetched DaddyLive schedule from %s (%d bytes)", mirror, len(raw_bytes))
+                        return html_str
+            except Exception as e:
+                logger.debug("DaddyLive schedule fetch failed for %s: %s", mirror, e)
                 continue
+        logger.warning("DaddyLive schedule fetch failed across all %d mirrors", len(self.MIRROR_DOMAINS))
+        return None
 
-            for cat_raw, event_list in categories.items():
-                if not isinstance(event_list, list):
-                    continue
+    def parse_html_schedule(self, html_str: str) -> List[Dict[str, Any]]:
+        """Parses DaddyLive index.php HTML into standard match dictionaries."""
+        soup = BeautifulSoup(html_str, "html.parser")
+        sections = soup.find_all("section")
+        matches: List[Dict[str, Any]] = []
+        now_ms = int(time.time() * 1000)
 
+        for sec in sections:
+            day_title_el = sec.find(class_=lambda c: c and "dayTitle" in c)
+            if not day_title_el:
+                continue
+            day_str = day_title_el.get_text(strip=True)
+
+            categories = sec.find_all(class_=lambda c: c and "schedule__category" in c)
+            for cat in categories:
+                cat_meta_el = cat.find(class_=lambda c: c and "meta" in c)
+                cat_raw = cat_meta_el.get_text(strip=True) if cat_meta_el else ""
                 cat_lower = cat_raw.lower()
+
+                # Skip non-sports categories & duplicate live section
                 if any(k in cat_lower for k in self.DADDYLIVE_EXCLUDED_CATEGORIES):
                     continue
 
-                is_upcoming = "upcoming" in cat_lower
-
-                for ev in event_list:
-                    raw_title = ev.get("event") or ""
+                events = cat.find_all(class_=lambda c: c and "schedule__event" in c)
+                for ev in events:
+                    title_el = ev.find(class_=lambda c: c and "eventTitle" in c)
+                    raw_title = title_el.get_text(strip=True) if title_el else ""
                     if not raw_title:
                         continue
 
-                    # Exclude non-football college sports (soccer, volleyball, hockey, baseball)
-                    if re.search(r"\b(college\s*(?:soccer|volleyball|ice\s*hockey|baseball))\b", raw_title.lower()):
-                        continue
+                    time_el = ev.find(class_=lambda c: c and "time" in c)
+                    time_str = "00:00"
+                    if time_el:
+                        time_str = time_el.get("data-time") or time_el.get_text(strip=True) or "00:00"
 
-                    # Exclude lower-division college football (FCS, Division II, Division III, NAIA, JuCo)
-                    # Keeping strictly Division I FBS (Football Bowl Subdivision)
-                    if re.search(r"\b(fcs|ncaa\s*fcs|division\s*(?:ii|iii|1-aa|i-aa)|d-?[23]|naia|juco)\b", raw_title.lower()):
-                        continue
-
-                    # Soccer Youth & Women: accept Italian teams/competitions, filter foreign youth & women
-                    is_soccer = "soccer" in cat_lower or "football" in cat_lower
-                    if is_soccer:
-                        title_low = raw_title.lower()
-                        # 1. Native Italian markers guaranteed to pass without restriction
-                        is_italian_native = bool(re.search(r"\b(primavera|allievi|giovanissimi|femminile)\b", title_low))
-                        if not is_italian_native:
-                            # 2. Foreign sentinels for youth and women tournaments
-                            is_foreign_youth = bool(re.search(r"\b(u-?1[5-9]|under\s*1[5-9]|u-?2[0-3]|under\s*2[0-3]|youth(?:\s*league)?|junior)\b", title_low))
-                            is_foreign_women = bool(re.search(r"\b(women(?:[’']s)?|ladies|frauen|f[ée]minine|femenino|uwcl)\b", title_low)) or bool(re.search(r"\b[A-Za-z0-9]+\s+[WD]\b", raw_title))
-                            if is_foreign_youth or is_foreign_women:
-                                is_italian = (
-                                    "🇮🇹" in raw_title
-                                    or bool(re.search(r"\b(italy|italia|milan|inter|juventus|roma|atalanta|bologna|lazio|fiorentina|torino|empoli|lecce|napoli|verona|sassuolo|genoa|monza|cagliari|sampdoria|parma|udinese|venezia|palermo|bari|brescia|cremonese|cesena|salernitana|spezia|frosinone|catanzaro|cosenza|reggiana|modena|carrarese|mantova|sudtirol|cittadella|pisa|juve\s*stabia)\b", title_low))
-                                )
-                                if not is_italian:
-                                    continue
-
-                    # Basketball: filter Asian club leagues, foreign minor women, youth & lower divisions
-                    is_basketball = any(k in cat_lower for k in ("basket", "nba", "wnba", "eurocup", "euroleague", "aba")) or \
-                                    any(k in raw_title.lower() for k in ("(nba)", "(eurocup)", "(euroleague)", "basketball", "cba", "kbl"))
-                    if is_basketball:
-                        title_low = raw_title.lower()
-                        full_basket_text = f"{cat_lower} {title_low}"
-
-                        # 1. Youth
-                        if re.search(r"\b(u-?1[0-9]|u-?2[01]|under\s*1[0-9]|under\s*2[01]|sub-?1[0-9]|sub-?20|junior|high\s*school)\b", full_basket_text):
-                            if not ("🇮🇹" in raw_title or re.search(r"\b(italia|italy|lba|serie\s*a)\b", full_basket_text)):
-                                continue
-
-                        # 2. Lower college divisions & amateur circuits (Keep Division I Men's and March Madness)
-                        if re.search(r"\b(division\s*(?:ii|iii|1-aa|i-aa)|d-?[23]|naia|juco|mpbl|zone\s*5|amateur|development\s*league)\b", full_basket_text):
-                            continue
-
-                        # 3. Foreign Women's Basketball (Keep WNBA, Italian women, FIBA World/Euro)
-                        is_women = bool(re.search(r"\b(women(?:['’]s)?|femminile|femenil|damen|ladies|wnbl|wbla)\b", full_basket_text)) or bool(re.search(r"\b[A-Za-z0-9]+\s+[WD]\b", raw_title))
-                        if is_women:
-                            is_wnba = bool(re.search(r"\bwnba\b", full_basket_text))
-                            is_it_women = "🇮🇹" in raw_title or bool(re.search(r"\b(serie\s*a[12]?|coppa\s*italia|lba|italia|italy)\b", full_basket_text))
-                            is_top_fiba_women = bool(re.search(r"\b(fiba\s*world\s*cup|eurobasket|olympic)\b", full_basket_text)) and "asia" not in full_basket_text
-                            if not (is_wnba or is_it_women or is_top_fiba_women):
-                                continue
-
-                        # 4. Asian & Minor Exotic Domestic Competitions
-                        ASIAN_FLAGS = ("🇨🇳", "🇰🇷", "🇵🇭", "🇹🇼", "🇯🇵", "🇻🇳", "🇹🇭", "🇮🇩", "🇲🇾", "🇮🇳")
-                        has_asian_flag = any(f in raw_title for f in ASIAN_FLAGS)
-                        is_asian_exotic_comp = bool(re.search(
-                            r"\b(cba|chinese\s*basketball|kbl|korean\s*basketball|pba|philippine\s*basketball|governors\s*cup|commissioner\s*s\s*cup|t1\s*league|tpbl|plg|b\.league|road\s*to\s*b\.?a\.?l\.?|champions\s*clubs|basketball\s*africa\s*league|bal)\b",
-                            full_basket_text
-                        ))
-                        if has_asian_flag or is_asian_exotic_comp:
-                            is_top_world_fiba = bool(re.search(r"\b(fiba\s*(?:world\s*cup|qualifier)|olympic)\b", full_basket_text)) and not bool(re.search(r"\b(club|asia|bal|league)\b", full_basket_text))
-                            if not is_top_world_fiba:
-                                continue
-
-                        # 5. Minor foreign 2nd divisions
-                        if re.search(r"\b(aba\s*league\s*2|israeli\s*national\s*league)\b", full_basket_text):
-                            continue
-
-                    # Volleyball: filter college volleyball and minor Asian/exotic club leagues
-                    is_volley = "volley" in cat_lower or "volley" in raw_title.lower()
-                    if is_volley:
-                        title_low = raw_title.lower()
-                        full_volley_text = f"{cat_lower} {title_low}"
-                        is_it_volley = "🇮🇹" in raw_title or bool(re.search(r"\b(superlega|serie\s*a[123]?|coppa\s*italia|italia|italy)\b", full_volley_text))
-                        if not is_it_volley:
-                            if re.search(r"\b(college\s*volleyball|ncaa|district|universiade|amateur)\b", full_volley_text):
-                                continue
-                            ASIAN_FLAGS = ("🇨🇳", "🇰🇷", "🇵🇭", "🇹🇼", "🇯🇵", "🇻🇳", "🇹🇭", "🇮🇩", "🇲🇾", "🇮🇳")
-                            has_asian_flag = any(f in raw_title for f in ASIAN_FLAGS)
-                            is_asian_exotic = has_asian_flag or bool(re.search(r"\b(kovo|pvl|pro\s*challenge|v-league|thailand\s*league)\b", full_volley_text))
-                            if is_asian_exotic:
-                                is_top_world_fivb = bool(re.search(r"\b(vnl|nations\s*league|world\s*championship|olympic|cev|champions\s*league)\b", full_volley_text))
-                                if not is_top_world_fivb:
-                                    continue
-
-                    # Tennis: filter table tennis / ping pong leaks
-                    is_tennis = "tennis" in cat_lower or "tennis" in raw_title.lower()
-                    if is_tennis:
-                        title_low = raw_title.lower()
-                        if re.search(r"\b(table\s*tennis|ping\s*pong|tt\s*cup|setka\s*cup)\b", title_low):
-                            continue
-
-                    # Clean event title
-                    clean_title = self._clean_title(raw_title)
-
-                    # Extract channels
-                    channels = ev.get("channels") or []
+                    channels_el = ev.find(class_=lambda c: c and "channels" in c)
                     sources = []
-                    for ch in channels:
-                        if isinstance(ch, dict):
-                            ch_id = str(ch.get("channel_id") or "").strip()
-                            ch_name = (ch.get("channel_name") or f"CH-{ch_id}").strip()
-                            # Filter out placeholder channels with no stream
+                    if channels_el:
+                        for a in channels_el.find_all("a", href=True):
+                            ch_name = a.get_text(strip=True)
+                            href = a.get("href", "").strip()
+                            ch_id = self._extract_channel_id(href)
                             if (
                                 ch_id
                                 and ch_id not in ("0", "00")
@@ -465,19 +440,18 @@ class DaddyLiveAPI:
                     if not sources:
                         continue
 
-                    time_str = ev.get("time") or "00:00"
-
-                    if is_upcoming:
-                        date_ms = self._parse_upcoming_date(raw_title)
-                    else:
-                        date_ms = self._parse_datetime(day_str, time_str)
+                    date_ms = self._parse_datetime(day_str, time_str)
 
                     # Discard events scheduled more than 3 days ahead
-                    now_ms = int(time.time() * 1000)
                     if date_ms and date_ms > (now_ms + 3 * 24 * 3600 * 1000):
                         continue
 
-                    # Check if simulcast / whip-around show (never extract fake teams)
+                    clean_title = self._clean_title(raw_title)
+
+                    # Detect women's event flag
+                    is_women = bool(re.search(r"\b(women(?:['’]s)?|femminile|femenil|damen|ladies|wta|wnba|uwcl)\b", f"{cat_raw} {raw_title}", re.IGNORECASE))
+
+                    # Check simulcast / whip-around show
                     sim_info = get_simulcast_info(raw_title, cat_raw) or get_simulcast_info(clean_title, cat_raw)
                     teams = None
                     if sim_info:
@@ -501,7 +475,6 @@ class DaddyLiveAPI:
                             continue
                         silo_id, category = silo_info
                         canon = detect_canonical_competition(f"{cat_raw} : {raw_title}", silo_hint=silo_id)
-                        # Only allow canonical competition to refine silo_id/category if the sport was generic
                         if canon and category in ("other", "unknown", ""):
                             canon_silo = get_canonical_silo(canon)
                             if canon_silo:
@@ -512,7 +485,7 @@ class DaddyLiveAPI:
                     slug = re.sub(r"[^a-z0-9]+", "-", clean_title.lower()).strip("-")[:60]
                     match_id = f"dlhd-{slug}-{str(date_ms)[-6:]}"
 
-                    matches.append({
+                    match_dict: Dict[str, Any] = {
                         "id": match_id,
                         "title": clean_title,
                         "category": category,
@@ -524,25 +497,47 @@ class DaddyLiveAPI:
                         "poster": None,
                         "popular": False,
                         "teams": teams,
-                        "sources": sources
-                    })
+                        "sources": sources,
+                    }
+                    if is_women:
+                        match_dict["is_women"] = True
 
-        self._cache = matches
-        self._cache_time = now
-        if new_content_hash:
+                    matches.append(match_dict)
+
+        return matches
+
+    async def get_matches(self, force: bool = False) -> List[Dict[str, Any]]:
+        now = time.time()
+        if not force and self._cache and (now - self._cache_time < self._cache_ttl):
+            return self._cache
+
+        html_str = await self._fetch_native_html()
+        if not html_str:
+            logger.warning("DaddyLive: Failed to fetch HTML schedule from all mirrors; using cached events (%d)", len(self._cache))
+            return self._cache
+
+        new_content_hash = hashlib.md5(html_str.encode("utf-8")).hexdigest()
+        if not force and new_content_hash == self._last_content_hash and self._cache:
+            self._cache_time = now
+            logger.debug("DaddyLive schedule unchanged (hash %s)", new_content_hash[:8])
+            return self._cache
+
+        matches = self.parse_html_schedule(html_str)
+        if matches:
+            self._cache = matches
+            self._cache_time = now
             self._last_content_hash = new_content_hash
 
-        # Smart Cache Invalidation: check upcoming events for today
+        # Cache Invalidation: check upcoming events for today
         now_ms = time.time() * 1000
-        future_count = sum(1 for m in matches if (m.get("date") or 0) > now_ms)
+        future_count = sum(1 for m in self._cache if (m.get("date") or 0) > now_ms)
         if future_count < 5:
-            # Morning lag: schedule likely not yet published by DaddyLive operators; recheck every 15m
             self._cache_ttl = 900  # 15 minutes
-            logger.info("DaddyLive has only %d upcoming matches; setting aggressive 15m refresh window", future_count)
         else:
             self._cache_ttl = 3600  # 1 hour
 
-        logger.info("Parsed %d matches from DaddyLive schedule (TTL: %ds, hash: %s)", len(matches), self._cache_ttl, self._last_content_hash[:8])
-        return matches
+        logger.info("Parsed %d matches from DaddyLive native schedule (TTL: %ds, hash: %s)", len(self._cache), self._cache_ttl, self._last_content_hash[:8])
+        return self._cache
+
 
 daddylive_api = DaddyLiveAPI()

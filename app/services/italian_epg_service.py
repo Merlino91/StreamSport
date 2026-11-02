@@ -13,6 +13,7 @@ from app.config import (
 )
 from app.services.tvvoo_service import tvvoo_service
 from app.services.mandrakodi_service import mandrakodi_service
+from app.services.daddylive_api import daddylive_api
 from app.services.team_matching import extract_team_name
 from app.services.canonical_competition_service import (
     is_simulcast_event,
@@ -976,12 +977,13 @@ class ItalianEPGService:
                 else:
                     cat, silo = self._resolve_category_and_silo(meta, title, synopsis, genre_name, subgenre_name)
 
-                # Stream Target Resolution: Check both TvVoo and Mandrakodi in-memory registries
+                # Stream Target Resolution: Check TvVoo, Mandrakodi, and DaddyLive 24/7 registries
                 tvvoo_streams = tvvoo_service.get_channel_streams(sky_id=ch_id, country="Italy")
                 canonical = tvvoo_service.get_canonical_from_sky_id(ch_id)
                 mandra_streams = mandrakodi_service.get_channel_streams(canonical) if canonical else []
-                if not tvvoo_streams and not mandra_streams:
-                    # GHOST EVENT FILTER: No playable source on either TvVoo or Mandrakodi
+                dl_streams = daddylive_api.get_channel_streams(canonical) if canonical else []
+                if not tvvoo_streams and not mandra_streams and not dl_streams:
+                    # GHOST EVENT FILTER: No playable source on TvVoo, Mandrakodi, or DaddyLive
                     continue
 
                 sources = []
@@ -1012,6 +1014,15 @@ class ItalianEPGService:
                         existing_stream_ids.add(st_id)
                     if sky_ch:
                         existing_sky_ids.add(sky_ch)
+
+                existing_dl_keys = set()
+                for st in dl_streams:
+                    st_id = str(st.get("id") or "")
+                    player_num = st.get("player") or 1
+                    key = (st_id, player_num)
+                    if key not in existing_dl_keys:
+                        existing_dl_keys.add(key)
+                        sources.append(dict(st))
 
                 # Contiguous session block merging on the same channel (e.g. 4 consecutive blocks of LIVE WTA 500 Tokyo)
                 if channel_matches and not teams_dict:
@@ -1232,12 +1243,13 @@ class ItalianEPGService:
                         subgenre_name=" ".join(cat_names),
                     )
 
-                # Stream Target Resolution: Check both TvVoo and Mandrakodi in-memory registries
+                # Stream Target Resolution: Check TvVoo, Mandrakodi, and DaddyLive 24/7 registries
                 tvvoo_streams = tvvoo_service.get_channel_streams(tivusat_id=ch_id, country="Italy")
                 canonical = tvvoo_service.get_canonical_from_tivusat_id(ch_id)
                 mandra_streams = mandrakodi_service.get_channel_streams(canonical) if canonical else []
-                if not tvvoo_streams and not mandra_streams:
-                    # GHOST EVENT FILTER: No playable source on either TvVoo or Mandrakodi
+                dl_streams = daddylive_api.get_channel_streams(canonical) if canonical else []
+                if not tvvoo_streams and not mandra_streams and not dl_streams:
+                    # GHOST EVENT FILTER: No playable source on TvVoo, Mandrakodi, or DaddyLive
                     continue
 
                 sources = []
@@ -1268,6 +1280,15 @@ class ItalianEPGService:
                         existing_stream_ids.add(st_id)
                     if sky_ch:
                         existing_sky_ids.add(sky_ch)
+
+                existing_dl_keys = set()
+                for st in dl_streams:
+                    st_id = str(st.get("id") or "")
+                    player_num = st.get("player") or 1
+                    key = (st_id, player_num)
+                    if key not in existing_dl_keys:
+                        existing_dl_keys.add(key)
+                        sources.append(dict(st))
 
                 # Contiguous session block merging on the same channel
                 if channel_matches and not teams_dict:
