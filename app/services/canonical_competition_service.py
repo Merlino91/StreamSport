@@ -16,6 +16,8 @@ CANONICAL_LEAGUES = {
     "football_brasileirao": {
         "display": "Brasileirão Série A",
         "silo": "football",
+        "catalog": "calcio_estero",
+        "genre": "Americhe e Leghe Extra-UE",
         "patterns": [
             r"brasileir[aã]o(?:\s*serie\s*a)?\b",
             r"brazil\s*(?:-\s*)?serie\s*a\b",
@@ -29,6 +31,8 @@ CANONICAL_LEAGUES = {
     "football_brazil_serie_b": {
         "display": "Brasileirão Série B",
         "silo": "football",
+        "catalog": "calcio_estero",
+        "genre": "Americhe e Leghe Extra-UE",
         "patterns": [
             r"brazil\s*(?:-\s*)?serie\s*b\b",
             r"brasil\s*(?:-\s*)?serie\s*b\b",
@@ -42,6 +46,8 @@ CANONICAL_LEAGUES = {
     "football_brazil_serie_c": {
         "display": "Brasileirão Série C",
         "silo": "football",
+        "catalog": "calcio_estero",
+        "genre": "Americhe e Leghe Extra-UE",
         "patterns": [
             r"brazil\s*(?:-\s*)?serie\s*c\b",
             r"brasil\s*(?:-\s*)?serie\s*c\b",
@@ -55,6 +61,8 @@ CANONICAL_LEAGUES = {
     "football_ecuador_serie_a": {
         "display": "LigaPro Serie A",
         "silo": "football",
+        "catalog": "calcio_estero",
+        "genre": "Americhe e Leghe Extra-UE",
         "patterns": [
             r"ecuador\s*(?:-\s*)?serie\s*a\b",
             r"serie\s*a\s*ecuador\b",
@@ -66,6 +74,8 @@ CANONICAL_LEAGUES = {
     "football_ecuador_serie_b": {
         "display": "LigaPro Serie B",
         "silo": "football",
+        "catalog": "calcio_estero",
+        "genre": "Americhe e Leghe Extra-UE",
         "patterns": [
             r"ecuador\s*(?:-\s*)?serie\s*b\b",
             r"serie\s*b\s*ecuador\b",
@@ -77,6 +87,8 @@ CANONICAL_LEAGUES = {
     "football_serie_a_women": {
         "display": "Serie A Femminile",
         "silo": "football",
+        "catalog": "calcio_italiano",
+        "genre": "Calcio Femminile",
         "patterns": [
             r"serie\s*a\s*(?:women|femminile|femm|frauen|dames|femenino)",
             r"(?:italian|italy)\s*women['']?s?\s*serie\s*a",
@@ -86,6 +98,8 @@ CANONICAL_LEAGUES = {
     "football_serie_a": {
         "display": "Serie A",
         "silo": "football",
+        "catalog": "calcio_italiano",
+        "genre": "Serie A",
         "patterns": [
             r"italy\s*-\s*serie\s*a\b(?!\s*women)(?!\s*femminile)",
             r"italy\s+serie\s*a\b(?!\s*women)(?!\s*femminile)",
@@ -95,6 +109,8 @@ CANONICAL_LEAGUES = {
     "football_serie_b": {
         "display": "Serie B",
         "silo": "football",
+        "catalog": "calcio_italiano",
+        "genre": "Serie B",
         "patterns": [
             r"italy\s*-\s*serie\s*b",
             r"italy\s+serie\s*b",
@@ -104,6 +120,8 @@ CANONICAL_LEAGUES = {
     "football_serie_c": {
         "display": "Serie C",
         "silo": "football",
+        "catalog": "calcio_italiano",
+        "genre": "Serie C",
         "patterns": [
             r"italy\s*-\s*serie\s*c",
             r"italy\s+serie\s*c",
@@ -113,16 +131,22 @@ CANONICAL_LEAGUES = {
     "football_coppa_italia": {
         "display": "Coppa Italia",
         "silo": "football",
+        "catalog": "calcio_italiano",
+        "genre": "Coppa Italia e Supercoppa",
         "patterns": [r"coppa\s*italia", r"supercoppa\s*italiana"],
     },
     "football_primavera": {
         "display": "Campionato Primavera",
         "silo": "football",
+        "catalog": "calcio_italiano",
+        "genre": "Primavera e Giovanili",
         "patterns": [r"\bprimavera\b", r"u-?19\s*campionato"],
     },
     "football_premier_league": {
         "display": "Premier League",
         "silo": "football",
+        "catalog": "calcio_estero",
+        "genre": "Premier League",
         "patterns": [
             r"england\s*-\s*premier\s*league\b(?!\s*2\b)(?!\s*cup)(?!\s*u\d+)",
             r"inghilterra:\s*premier\s*league\b(?!\s*2\b)(?!\s*cup)(?!\s*u\d+)",
@@ -136,6 +160,8 @@ CANONICAL_LEAGUES = {
     "football_championship": {
         "display": "Championship",
         "silo": "football",
+        "catalog": "calcio_estero",
+        "genre": "Altri Campionati Europei",
         "patterns": [
             r"england\s*-\s*championship",
             r"inghilterra:\s*championship",
@@ -146,11 +172,15 @@ CANONICAL_LEAGUES = {
     "football_fa_cup": {
         "display": "FA Cup",
         "silo": "football",
+        "catalog": "calcio_estero",
+        "genre": "Premier League",
         "patterns": [r"\bfa\s*cup\b", r"\bcarabao\s*cup\b", r"efl\s*cup"],
     },
     "football_la_liga": {
         "display": "LaLiga",
         "silo": "football",
+        "catalog": "calcio_estero",
+        "genre": "La Liga",
         "patterns": [
             r"spain\s*-\s*la\s*liga\b(?!\s*2\b)",
             r"spagna:\s*la\s*liga\b(?!\s*2\b)",
@@ -163,6 +193,8 @@ CANONICAL_LEAGUES = {
     "football_segunda": {
         "display": "Segunda División",
         "silo": "football",
+        "catalog": "calcio_estero",
+        "genre": "Altri Campionati Europei",
         "patterns": [
             r"segunda\s*division",
             r"spain\s*-\s*segunda",
@@ -175,11 +207,15 @@ CANONICAL_LEAGUES = {
     "football_copa_del_rey": {
         "display": "Copa del Rey",
         "silo": "football",
+        "catalog": "calcio_estero",
+        "genre": "La Liga",
         "patterns": [r"copa\s*del\s*rey", r"supercopa\s*de\s*espana"],
     },
     "football_bundesliga": {
         "display": "Bundesliga",
         "silo": "football",
+        "catalog": "calcio_estero",
+        "genre": "Bundesliga e Ligue 1",
         "patterns": [
             r"germany\s*-\s*bundesliga\b(?!\s*2\b)(?!\s*women\b)(?!\s*frauen\b)",
             r"germania:\s*bundesliga\b(?!\s*2\b)(?!\s*-\s*femminile)(?!\s*women\b)(?!\s*frauen\b)",
@@ -190,6 +226,8 @@ CANONICAL_LEAGUES = {
     "football_austrian_bundesliga": {
         "display": "Austrian Bundesliga",
         "silo": "football",
+        "catalog": "calcio_estero",
+        "genre": "Altri Campionati Europei",
         "patterns": [
             r"austria:\s*bundesliga",
             r"austria\s*-\s*bundesliga",
@@ -199,36 +237,50 @@ CANONICAL_LEAGUES = {
     "football_2_bundesliga": {
         "display": "2. Bundesliga",
         "silo": "football",
+        "catalog": "calcio_estero",
+        "genre": "Altri Campionati Europei",
         "patterns": [r"2\.\s*bundesliga", r"bundesliga\s*2"],
     },
     "football_dfb_pokal": {
         "display": "DFB-Pokal",
         "silo": "football",
+        "catalog": "calcio_estero",
+        "genre": "Bundesliga e Ligue 1",
         "patterns": [r"dfb\s*pokal", r"dfb-pokal"],
     },
     "football_ligue_1": {
         "display": "Ligue 1",
         "silo": "football",
+        "catalog": "calcio_estero",
+        "genre": "Bundesliga e Ligue 1",
         "patterns": [r"ligue\s*1", r"france\s*-\s*ligue\s*1"],
     },
     "football_ligue_2": {
         "display": "Ligue 2",
         "silo": "football",
+        "catalog": "calcio_estero",
+        "genre": "Altri Campionati Europei",
         "patterns": [r"ligue\s*2", r"france\s*-\s*ligue\s*2"],
     },
     "football_coupe_de_france": {
         "display": "Coupe de France",
         "silo": "football",
+        "catalog": "calcio_estero",
+        "genre": "Altri Campionati Europei",
         "patterns": [r"coupe\s*de\s*france"],
     },
     "football_uefa_youth_league": {
         "display": "UEFA Youth League",
         "silo": "football",
+        "catalog": "calcio_estero",
+        "genre": "Europei Under 21 e Nazionali Giovanili",
         "patterns": [r"uefa-youth-league", r"uefa\s*youth\s*league", r"youth\s*league"],
     },
     "football_uwcl": {
         "display": "UEFA Women's Champions League",
         "silo": "football",
+        "catalog": "calcio_estero",
+        "genre": "Champions League Femminile",
         "patterns": [
             r"uwcl",
             r"women['’]?s\s*champions\s*league",
@@ -240,6 +292,8 @@ CANONICAL_LEAGUES = {
     "football_uefa_cl": {
         "display": "UEFA Champions League",
         "silo": "football",
+        "catalog": "calcio_estero",
+        "genre": "Champions League",
         "patterns": [
             r"uefa-champions-league",
             r"uefa\s*champions\s*league",
@@ -250,41 +304,57 @@ CANONICAL_LEAGUES = {
     "football_uefa_el": {
         "display": "UEFA Europa League",
         "silo": "football",
+        "catalog": "calcio_estero",
+        "genre": "Europa e Conference League",
         "patterns": [r"uefa-europa-league", r"europa\s*league", r"uefa\s*europa\s*league", r"\buel\b"],
     },
     "football_uefa_ecl": {
         "display": "UEFA Conference League",
         "silo": "football",
+        "catalog": "calcio_estero",
+        "genre": "Europa e Conference League",
         "patterns": [r"uefa-conference-league", r"conference\s*league", r"uefa\s*conference\s*league", r"\buecl\b"],
     },
     "football_uefa_super_cup": {
         "display": "UEFA Super Cup",
         "silo": "football",
+        "catalog": "calcio_estero",
+        "genre": "Champions League",
         "patterns": [r"uefa\s*super\s*cup", r"super\s*cup\s*uefa"],
     },
     "football_uefa_nations": {
         "display": "UEFA Nations League",
         "silo": "football",
+        "catalog": "calcio_estero",
+        "genre": "Nazionali e Amichevoli",
         "patterns": [r"nations\s*league", r"uefa\s*nations\s*league"],
     },
     "football_eredivisie": {
         "display": "Eredivisie",
         "silo": "football",
+        "catalog": "calcio_estero",
+        "genre": "Altri Campionati Europei",
         "patterns": [r"eredivisie", r"netherlands\s*-\s*eredivisie", r"holland\s*eredivisie"],
     },
     "football_primeira_liga": {
         "display": "Primeira Liga",
         "silo": "football",
+        "catalog": "calcio_estero",
+        "genre": "Altri Campionati Europei",
         "patterns": [r"primeira\s*liga", r"liga\s*portugal", r"portugal\s*-\s*primeira"],
     },
     "football_scottish_prem": {
         "display": "Scottish Premiership",
         "silo": "football",
+        "catalog": "calcio_estero",
+        "genre": "Altri Campionati Europei",
         "patterns": [r"scottish\s*premiership", r"scotland\s*-\s*premiership", r"\bspfl\b"],
     },
     "football_super_lig": {
         "display": "Süper Lig",
         "silo": "football",
+        "catalog": "calcio_estero",
+        "genre": "Altri Campionati Europei",
         "patterns": [
             r"turkey\s*-\s*super\s*lig\b",
             r"turchia:\s*super\s*lig\b",
@@ -295,6 +365,8 @@ CANONICAL_LEAGUES = {
     "football_danish_superliga": {
         "display": "Danish Superliga",
         "silo": "football",
+        "catalog": "calcio_estero",
+        "genre": "Altri Campionati Europei",
         "patterns": [
             r"danimarca:\s*superliga",
             r"denmark\s*-\s*superliga",
@@ -305,6 +377,8 @@ CANONICAL_LEAGUES = {
     "football_swiss_super_league": {
         "display": "Swiss Super League",
         "silo": "football",
+        "catalog": "calcio_estero",
+        "genre": "Altri Campionati Europei",
         "patterns": [
             r"svizzera:\s*super\s*league",
             r"switzerland\s*-\s*super\s*league",
@@ -314,11 +388,15 @@ CANONICAL_LEAGUES = {
     "football_belgian_pro": {
         "display": "Belgian Pro League",
         "silo": "football",
+        "catalog": "calcio_estero",
+        "genre": "Altri Campionati Europei",
         "patterns": [r"belgian\s*pro\s*league", r"jupiler\s*pro\s*league", r"belgium\s*-\s*first\s*division"],
     },
     "football_afc_cl": {
         "display": "AFC Champions League",
         "silo": "football",
+        "catalog": "calcio_estero",
+        "genre": "Americhe e Leghe Extra-UE",
         "patterns": [
             r"afc\s*champions",
             r"afc\s*champions\s*league",
@@ -329,86 +407,120 @@ CANONICAL_LEAGUES = {
     "football_efl_league_one": {
         "display": "EFL League One",
         "silo": "football",
+        "catalog": "calcio_estero",
+        "genre": "Altri Campionati Europei",
         "patterns": [r"(?<!champions\s)(?<!afc\s)\bleague\s*one\b", r"england\s*-\s*league\s*one\b", r"\befl\s*league\s*one\b"],
     },
     "football_efl_league_two": {
         "display": "EFL League Two",
         "silo": "football",
+        "catalog": "calcio_estero",
+        "genre": "Altri Campionati Europei",
         "patterns": [r"(?<!champions\s)(?<!afc\s)\bleague\s*two\b", r"england\s*-\s*league\s*two\b", r"\befl\s*league\s*two\b"],
     },
     "football_copa_libertadores": {
         "display": "Copa Libertadores",
         "silo": "football",
+        "catalog": "calcio_estero",
+        "genre": "Americhe e Leghe Extra-UE",
         "patterns": [r"copa\s*libertadores", r"libertadores"],
     },
     "football_copa_sudamericana": {
         "display": "Copa Sudamericana",
         "silo": "football",
+        "catalog": "calcio_estero",
+        "genre": "Americhe e Leghe Extra-UE",
         "patterns": [r"copa\s*sudamericana", r"sudamericana"],
     },
     "football_mls": {
         "display": "Major League Soccer",
         "silo": "football",
+        "catalog": "calcio_estero",
+        "genre": "Americhe e Leghe Extra-UE",
         "patterns": [r"\bmls\b", r"major\s*league\s*soccer"],
     },
     "football_liga_mx": {
         "display": "Liga MX",
         "silo": "football",
+        "catalog": "calcio_estero",
+        "genre": "Americhe e Leghe Extra-UE",
         "patterns": [r"liga\s*mx", r"mexico\s*-\s*liga\s*mx"],
     },
     "football_liga_profesional_arg": {
         "display": "Liga Profesional Argentina",
         "silo": "football",
+        "catalog": "calcio_estero",
+        "genre": "Americhe e Leghe Extra-UE",
         "patterns": [r"liga\s*profesional", r"argentina\s*-\s*primera\s*division", r"primera\s*division\s*argentina"],
     },
     "football_saudi_pro": {
         "display": "Saudi Pro League",
         "silo": "football",
+        "catalog": "calcio_estero",
+        "genre": "Americhe e Leghe Extra-UE",
         "patterns": [r"saudi\s*pro\s*league", r"\broshn\b"],
     },
     "football_world_cup_qual": {
         "display": "Qualificazioni Mondiali",
         "silo": "football",
+        "catalog": "calcio_estero",
+        "genre": "Nazionali e Amichevoli",
         "patterns": [r"world\s*cup\s*qual", r"qualificazioni\s*mondiali", r"wc\s*qual"],
     },
     "football_world_cup": {
         "display": "FIFA World Cup",
         "silo": "football",
+        "catalog": "calcio_estero",
+        "genre": "Nazionali e Amichevoli",
         "patterns": [r"fifa\s*world\s*cup", r"world\s*cup", r"coppa\s*del\s*mondo"],
     },
     "football_euro_qual": {
         "display": "Qualificazioni Europei",
         "silo": "football",
+        "catalog": "calcio_estero",
+        "genre": "Nazionali e Amichevoli",
         "patterns": [r"euro\s*qual", r"uefa\s*euro\s*qual", r"qualificazioni\s*europei"],
     },
     "football_euro": {
         "display": "UEFA Euro",
         "silo": "football",
+        "catalog": "calcio_estero",
+        "genre": "Nazionali e Amichevoli",
         "patterns": [r"uefa\s*euro\b", r"european\s*championship", r"\beuro\s*202[48]\b"],
     },
     "football_copa_america": {
         "display": "Copa América",
         "silo": "football",
+        "catalog": "calcio_estero",
+        "genre": "Nazionali e Amichevoli",
         "patterns": [r"copa\s*am[eé]rica"],
     },
     "football_afcon": {
         "display": "Coppa d'Africa (AFCON)",
         "silo": "football",
+        "catalog": "calcio_estero",
+        "genre": "Nazionali e Amichevoli",
         "patterns": [r"africa\s*cup\s*of\s*nations", r"\bafcon\b", r"coppa\s*d['’]africa"],
     },
     "football_gold_cup": {
         "display": "CONCACAF Gold Cup",
         "silo": "football",
+        "catalog": "calcio_estero",
+        "genre": "Nazionali e Amichevoli",
         "patterns": [r"gold\s*cup", r"concacaf\s*gold\s*cup"],
     },
     "football_club_world_cup": {
         "display": "FIFA Club World Cup",
         "silo": "football",
+        "catalog": "calcio_estero",
+        "genre": "Nazionali e Amichevoli",
         "patterns": [r"club\s*world\s*cup", r"coppa\s*del\s*mondo\s*per\s*club"],
     },
     "football_international_friendly": {
         "display": "Amichevoli Nazionali",
         "silo": "football",
+        "catalog": "calcio_estero",
+        "genre": "Nazionali e Amichevoli",
         "patterns": [r"international\s*friendly", r"amichevole\s*internazionale", r"amichevoli\s*internazionali"],
     },
 
@@ -418,6 +530,8 @@ CANONICAL_LEAGUES = {
     "basketball_nba": {
         "display": "NBA",
         "silo": "basketball",
+        "catalog": "basket",
+        "genre": "NBA",
         "patterns": [
             r"\bnba\b",
             r"nba-preseason",
@@ -429,91 +543,127 @@ CANONICAL_LEAGUES = {
     "basketball_cba": {
         "display": "CBA Cina",
         "silo": "basketball",
+        "catalog": "basket",
+        "genre": "Campionati Esteri ed NBL",
         "patterns": [r"\bcba\b", r"chinese\s*basketball", r"chinese\s*cba", r"china\s*cba"],
     },
     "basketball_wnba": {
         "display": "WNBA",
         "silo": "basketball",
+        "catalog": "basket",
+        "genre": "WNBA e Femminile",
         "patterns": [r"\bwnba\b", r"liga\s*femenina", r"tauihi"],
     },
     "basketball_euroleague": {
         "display": "EuroLeague",
         "silo": "basketball",
+        "catalog": "basket",
+        "genre": "Eurolega ed Eurocup",
         "patterns": [r"euroleague", r"eurolega"],
     },
     "basketball_eurocup": {
         "display": "EuroCup",
         "silo": "basketball",
+        "catalog": "basket",
+        "genre": "Eurolega ed Eurocup",
         "patterns": [r"eurocup"],
     },
     "basketball_bcl": {
         "display": "Basketball Champions League",
         "silo": "basketball",
+        "catalog": "basket",
+        "genre": "Eurolega ed Eurocup",
         "patterns": [r"basketball\s*champions\s*league", r"\bbcl\b", r"fiba\s*europe\s*cup"],
     },
     "basketball_lba_serie_a": {
         "display": "LBA Serie A",
         "silo": "basketball",
+        "catalog": "basket",
+        "genre": "LBA Serie A",
         "patterns": [r"\blba\b", r"\blega\s*a\b", r"serie\s*a\s*basket", r"italy\s*-\s*lba", r"lega\s*basket", r"coppa\s*italia\s*basket"],
     },
     "basketball_serie_a2": {
         "display": "Serie A2 Basket",
         "silo": "basketball",
+        "catalog": "basket",
+        "genre": "LBA Serie A",
         "patterns": [r"serie\s*a2(?!\s*(?:femm|women))"],
     },
     "basketball_serie_a1_femm": {
         "display": "Serie A1 Femminile Basket",
         "silo": "basketball",
+        "catalog": "basket",
+        "genre": "WNBA e Femminile",
         "patterns": [r"serie\s*a1\s*femm", r"serie\s*a1\s*women", r"serie\s*a\s*femm"],
     },
     "basketball_serie_a2_femm": {
         "display": "Serie A2 Femminile Basket",
         "silo": "basketball",
+        "catalog": "basket",
+        "genre": "WNBA e Femminile",
         "patterns": [r"serie\s*a2\s*femm", r"serie\s*a2\s*women"],
     },
     "basketball_acb": {
         "display": "Liga ACB",
         "silo": "basketball",
+        "catalog": "basket",
+        "genre": "Campionati Esteri ed NBL",
         "patterns": [r"\bacb\b", r"liga\s*acb", r"liga\s*endesa", r"spagna:\s*acb", r"primera\s*feb"],
     },
     "basketball_nbl": {
         "display": "NBL Australia",
         "silo": "basketball",
+        "catalog": "basket",
+        "genre": "Campionati Esteri ed NBL",
         "patterns": [r"\bnbl\b", r"australian\s*nbl"],
     },
     "basketball_bbl": {
         "display": "BBL Germania",
         "silo": "basketball",
+        "catalog": "basket",
+        "genre": "Campionati Esteri ed NBL",
         "patterns": [r"\bbbl\b", r"german\s*cup", r"bbl-pokal"],
     },
     "basketball_lnb": {
         "display": "LNB Pro A",
         "silo": "basketball",
+        "catalog": "basket",
+        "genre": "Campionati Esteri ed NBL",
         "patterns": [r"\blnb\b", r"betclic\s*elite", r"\bpro\s*a\b"],
     },
     "basketball_greece": {
         "display": "GBL Grecia",
         "silo": "basketball",
+        "catalog": "basket",
+        "genre": "Campionati Esteri ed NBL",
         "patterns": [r"basket\s*league", r"greece\s*basket", r"\bgbl\b"],
     },
     "basketball_turkey": {
         "display": "BSL Turchia",
         "silo": "basketball",
+        "catalog": "basket",
+        "genre": "Campionati Esteri ed NBL",
         "patterns": [r"s[üu]per\s*ligi", r"super\s*lig", r"\bbsl\b"],
     },
     "basketball_aba": {
         "display": "ABA League",
         "silo": "basketball",
+        "catalog": "basket",
+        "genre": "Campionati Esteri ed NBL",
         "patterns": [r"aba\s*league", r"admiralbet\s*aba"],
     },
     "basketball_fiba": {
         "display": "FIBA",
         "silo": "basketball",
+        "catalog": "basket",
+        "genre": "FIBA e Tornei Nazionali",
         "patterns": [r"\bfiba\b", r"\b3x3\b", r"world\s*tour", r"eurobasket", r"world\s*cup"],
     },
     "basketball_ncaa": {
         "display": "NCAA Basketball",
         "silo": "basketball",
+        "catalog": "basket",
+        "genre": "NCAA e College Basket",
         "patterns": [r"ncaa\s*basketball", r"college\s*basketball", r"march\s*madness"],
     },
 
@@ -523,26 +673,36 @@ CANONICAL_LEAGUES = {
     "tennis_grand_slam": {
         "display": "Grandi Slam",
         "silo": "tennis",
+        "catalog": "tennis",
+        "genre": "Grandi Slam",
         "patterns": [r"\bwimbledon\b", r"us\s*open", r"roland\s*garros", r"australian\s*open"],
     },
     "tennis_challenger": {
         "display": "Challenger & ITF",
         "silo": "tennis",
+        "catalog": "tennis",
+        "genre": "Challenger e Altri",
         "patterns": [r"\bchallenger\b", r"\bitf\b"],
     },
     "tennis_atp": {
         "display": "ATP",
         "silo": "tennis",
+        "catalog": "tennis",
+        "genre": "ATP",
         "patterns": [r"\batp\b(?!\s*challenger)", r"atp\s*1000", r"atp\s*500", r"atp\s*250", r"atp\s*finals"],
     },
     "tennis_wta": {
         "display": "WTA",
         "silo": "tennis",
+        "catalog": "tennis",
+        "genre": "WTA",
         "patterns": [r"\bwta\b", r"wta\s*1000", r"wta\s*500", r"wta\s*250", r"wta\s*finals"],
     },
     "tennis_davis_bjk": {
         "display": "Coppa Davis & BJK",
         "silo": "tennis",
+        "catalog": "tennis",
+        "genre": "Coppa Davis e BJK Cup",
         "patterns": [r"davis\s*cup", r"coppa\s*davis", r"billie\s*jean\s*king", r"\bbjk\s*cup\b", r"laver\s*cup"],
     },
 
@@ -552,36 +712,50 @@ CANONICAL_LEAGUES = {
     "motorsport_f1": {
         "display": "Formula 1",
         "silo": "motor-sports",
+        "catalog": "motori",
+        "genre": "Formula 1",
         "patterns": [r"formula\s*1", r"formula\s*one", r"\bf1\b", r"f1\s*grand\s*prix", r"formula\s*1\s*gp"],
     },
     "motorsport_motogp": {
         "display": "MotoGP",
         "silo": "motor-sports",
+        "catalog": "motori",
+        "genre": "MotoGP e Superbike",
         "patterns": [r"motogp", r"moto\s*gp", r"\bmoto2\b", r"\bmoto3\b"],
     },
     "motorsport_sbk": {
         "display": "Superbike (WSBK)",
         "silo": "motor-sports",
+        "catalog": "motori",
+        "genre": "MotoGP e Superbike",
         "patterns": [r"superbike", r"\bwsbk\b", r"\bssp\b", r"supersport"],
     },
     "motorsport_nascar": {
         "display": "NASCAR",
         "silo": "motor-sports",
+        "catalog": "motori",
+        "genre": "NASCAR e IndyCar",
         "patterns": [r"\bnascar\b", r"cup\s*series", r"xfinity\s*series", r"craftsman\s*truck"],
     },
     "motorsport_indycar": {
         "display": "IndyCar",
         "silo": "motor-sports",
+        "catalog": "motori",
+        "genre": "NASCAR e IndyCar",
         "patterns": [r"indycar", r"indy\s*500"],
     },
     "motorsport_rally_wrc": {
         "display": "Rally (WRC)",
         "silo": "motor-sports",
+        "catalog": "motori",
+        "genre": "Rally e WRC",
         "patterns": [r"\bwrc\b", r"world\s*rally", r"\brally\b"],
     },
     "motorsport_wec": {
         "display": "WEC & Le Mans",
         "silo": "motor-sports",
+        "catalog": "motori",
+        "genre": "NASCAR e IndyCar",
         "patterns": [r"\bwec\b", r"le\s*mans", r"24\s*hours\s*of\s*le\s*mans"],
     },
 
@@ -591,11 +765,15 @@ CANONICAL_LEAGUES = {
     "am_football_nfl": {
         "display": "NFL",
         "silo": "american-football",
+        "catalog": "football_americano",
+        "genre": "NFL",
         "patterns": [r"\bnfl\b", r"redzone", r"red\s*zone", r"super\s*bowl"],
     },
     "am_football_ncaa": {
         "display": "NCAA College Football",
         "silo": "american-football",
+        "catalog": "football_americano",
+        "genre": "NCAA College Football",
         "patterns": [
             r"college\s*football",
             r"\bcfb\b",
@@ -609,11 +787,15 @@ CANONICAL_LEAGUES = {
     "am_football_cfl": {
         "display": "CFL",
         "silo": "american-football",
+        "catalog": "football_americano",
+        "genre": "CFL e Altre Leghe",
         "patterns": [r"\bcfl\b", r"canadian\s*football"],
     },
     "am_football_ufl": {
         "display": "UFL",
         "silo": "american-football",
+        "catalog": "football_americano",
+        "genre": "CFL e Altre Leghe",
         "patterns": [r"\bufl\b"],
     },
 
@@ -623,11 +805,15 @@ CANONICAL_LEAGUES = {
     "baseball_mlb": {
         "display": "MLB",
         "silo": "baseball",
+        "catalog": "baseball",
+        "genre": "MLB",
         "patterns": [r"\bmlb\b", r"major\s*league\s*baseball", r"world\s*series"],
     },
     "baseball_ncaa": {
         "display": "NCAA College Baseball",
         "silo": "baseball",
+        "catalog": "baseball",
+        "genre": "NCAA College Baseball",
         "patterns": [r"college\s*baseball", r"college\s*world\s*series"],
     },
 
@@ -637,41 +823,57 @@ CANONICAL_LEAGUES = {
     "hockey_chl": {
         "display": "Champions Hockey League",
         "silo": "hockey",
+        "catalog": "hockey",
+        "genre": "KHL e Leghe Europee",
         "patterns": [r"champions\s*hockey\s*league", r"\bchl\b", r"champions\s*league"],
     },
     "hockey_nhl": {
         "display": "NHL",
         "silo": "hockey",
+        "catalog": "hockey",
+        "genre": "NHL",
         "patterns": [r"\bnhl\b", r"stanley\s*cup"],
     },
     "hockey_khl": {
         "display": "KHL",
         "silo": "hockey",
+        "catalog": "hockey",
+        "genre": "KHL e Leghe Europee",
         "patterns": [r"\bkhl\b", r"russia\s*khl"],
     },
     "hockey_shl": {
         "display": "SHL",
         "silo": "hockey",
+        "catalog": "hockey",
+        "genre": "KHL e Leghe Europee",
         "patterns": [r"\bshl\b", r"swedish\s*hockey\s*league", r"svezia\s*shl", r"sweden\s*shl"],
     },
     "hockey_extraliga": {
         "display": "Czech Extraliga",
         "silo": "hockey",
+        "catalog": "hockey",
+        "genre": "KHL e Leghe Europee",
         "patterns": [r"czech\s*extraliga", r"tipsport\s*extraliga", r"\bextraliga\b"],
     },
     "hockey_liiga": {
         "display": "Liiga",
         "silo": "hockey",
+        "catalog": "hockey",
+        "genre": "KHL e Leghe Europee",
         "patterns": [r"\bliiga\b", r"sm-liiga", r"finnish\s*liiga"],
     },
     "hockey_del": {
         "display": "DEL",
         "silo": "hockey",
+        "catalog": "hockey",
+        "genre": "KHL e Leghe Europee",
         "patterns": [r"\bdel\b", r"deutsche\s*eishockey\s*liga"],
     },
     "hockey_euro": {
         "display": "Leghe Europee Hockey",
         "silo": "hockey",
+        "catalog": "hockey",
+        "genre": "KHL e Leghe Europee",
         "patterns": [r"leghe\s*europee", r"european\s*leagues?", r"national\s*league", r"icehl", r"ebel", r"alps\s*hockey"],
     },
 
@@ -681,21 +883,29 @@ CANONICAL_LEAGUES = {
     "fight_ufc": {
         "display": "UFC",
         "silo": "fight",
+        "catalog": "combattimento",
+        "genre": "UFC",
         "patterns": [r"\bufc\b", r"dana\s*white"],
     },
     "fight_boxing": {
         "display": "Boxe",
         "silo": "fight",
+        "catalog": "combattimento",
+        "genre": "Boxe",
         "patterns": [r"\bboxing\b", r"pugilato", r"title\s*fight"],
     },
     "fight_wwe": {
         "display": "WWE & Wrestling",
         "silo": "fight",
+        "catalog": "combattimento",
+        "genre": "Wrestling e WWE",
         "patterns": [r"\bwwe\b", r"\baew\b", r"raw\b", r"smackdown", r"wrestlemania"],
     },
     "fight_mma": {
         "display": "MMA",
         "silo": "fight",
+        "catalog": "combattimento",
+        "genre": "MMA",
         "patterns": [r"\bmma\b", r"\bbellator\b", r"\bpfl\b", r"one\s*championship"],
     },
 
@@ -705,6 +915,8 @@ CANONICAL_LEAGUES = {
     "volleyball_superlega": {
         "display": "SuperLega",
         "silo": "volley",
+        "catalog": "volley",
+        "genre": "Superlega e Serie A1",
         "patterns": [
             r"superlega",
             r"super\s*lega",
@@ -718,6 +930,8 @@ CANONICAL_LEAGUES = {
     "volleyball_serie_a2": {
         "display": "Serie A2 Maschile Volley",
         "silo": "volley",
+        "catalog": "volley",
+        "genre": "Superlega e Serie A1",
         "patterns": [
             r"italy\s*serie\s*a2\b(?!\s*femm)(?!\s*women)",
             r"serie\s*a2\s*volley(?!\s*femm)(?!\s*women)",
@@ -727,6 +941,8 @@ CANONICAL_LEAGUES = {
     "volleyball_serie_a2_femm": {
         "display": "Serie A2 Femminile Volley",
         "silo": "volley",
+        "catalog": "volley",
+        "genre": "Volley Femminile",
         "patterns": [
             r"serie\s*a2\s*femminile",
             r"a2\s*femminile\s*volley",
@@ -741,6 +957,8 @@ CANONICAL_LEAGUES = {
     "volleyball_serie_a1_femm": {
         "display": "Serie A1 Femminile Volley",
         "silo": "volley",
+        "catalog": "volley",
+        "genre": "Volley Femminile",
         "patterns": [
             r"serie\s*a1\s*femminile",
             r"a1\s*femminile\s*volley",
@@ -754,6 +972,8 @@ CANONICAL_LEAGUES = {
     "volleyball_cev_cl": {
         "display": "CEV Champions League",
         "silo": "volley",
+        "catalog": "volley",
+        "genre": "Champions League Volley",
         "patterns": [r"cev\s*champions\s*league", r"volleyball\s*champions\s*league"],
     },
 
@@ -763,46 +983,64 @@ CANONICAL_LEAGUES = {
     "rugby_serie_a_elite": {
         "display": "Serie A Elite Rugby",
         "silo": "altri_sport",
+        "catalog": "altri_sport",
+        "genre": "Rugby e AFL",
         "patterns": [r"serie\s*a\s*elite", r"\btop\s*10\b", r"eccellenza\s*rugby"],
     },
     "rugby_six_nations": {
         "display": "Sei Nazioni",
         "silo": "altri_sport",
+        "catalog": "altri_sport",
+        "genre": "Rugby e AFL",
         "patterns": [r"six\s*nations", r"sei\s*nazioni", r"rugby\s*championship"],
     },
     "rugby_top_14": {
         "display": "Top 14 & Coppe Rugby",
         "silo": "altri_sport",
+        "catalog": "altri_sport",
+        "genre": "Rugby e AFL",
         "patterns": [r"top\s*14", r"premiership\s*rugby", r"\burc\b", r"united\s*rugby\s*championship", r"champions\s*cup", r"challenge\s*cup", r"super\s*rugby"],
     },
     "afl_footy": {
         "display": "AFL (Australian Rules)",
         "silo": "altri_sport",
+        "catalog": "altri_sport",
+        "genre": "Rugby e AFL",
         "patterns": [r"\bafl\b", r"australian\s*rules", r"\bfooty\b"],
     },
     "golf_pga": {
         "display": "PGA Tour",
         "silo": "altri_sport",
+        "catalog": "altri_sport",
+        "genre": "Golf",
         "patterns": [r"pga\s*tour", r"\bpga\b", r"masters\s*tournament", r"the\s*open"],
     },
     "golf_liv": {
         "display": "LIV Golf",
         "silo": "altri_sport",
+        "catalog": "altri_sport",
+        "genre": "Golf",
         "patterns": [r"liv\s*golf", r"\bliv\b"],
     },
     "darts_pdc": {
         "display": "Freccette (PDC)",
         "silo": "altri_sport",
+        "catalog": "altri_sport",
+        "genre": "Freccette / Darts",
         "patterns": [r"\bpdc\b", r"premier\s*league\s*darts", r"world\s*darts"],
     },
     "cycling_grand_tours": {
         "display": "Grandi Giri Ciclismo",
         "silo": "altri_sport",
+        "catalog": "altri_sport",
+        "genre": "Ciclismo",
         "patterns": [r"giro\s*d['’]italia", r"tour\s*de\s*france", r"vuelta\s*a\s*espana"],
     },
     "handball_ehf_cl": {
         "display": "EHF Champions League",
         "silo": "altri_sport",
+        "catalog": "altri_sport",
+        "genre": "Pallamano",
         "patterns": [r"ehf\s*champions\s*league", r"\behf\b"],
     },
 }
@@ -979,8 +1217,26 @@ def get_simulcast_info(text: str, hint: Optional[str] = None) -> Optional[Dict[s
             "catalog": "calcio_estero",
         }
 
-    # 11. Diretta Basket / Eurolega
-    if re.search(r"\b(basket|eurolega|euroleague)\b", t):
+    # 11. Diretta Basket / Eurolega / NBA / NCAA
+    if re.search(r"\b(basket|eurolega|euroleague|nba|ncaa)\b", t):
+        if "nba" in t:
+            return {
+                "title": "NBA Simulcast" if "simulcast" in t else "Diretta NBA",
+                "competition": "NBA",
+                "silo": "basketball",
+                "canonical": "basketball_nba",
+                "genre": "NBA",
+                "catalog": "basket",
+            }
+        if "ncaa" in t or "college" in t:
+            return {
+                "title": "NCAA Basket Simulcast" if "simulcast" in t else "Diretta NCAA Basket",
+                "competition": "NCAA Basketball",
+                "silo": "basketball",
+                "canonical": "basketball_ncaa",
+                "genre": "NCAA e College Basket",
+                "catalog": "basket",
+            }
         is_el = "euro" in t
         return {
             "title": "Diretta Eurolega" if is_el else "Diretta Basket",
@@ -1083,6 +1339,18 @@ def get_canonical_silo(slug: Optional[str]) -> Optional[str]:
     if not slug or slug not in CANONICAL_LEAGUES:
         return None
     return CANONICAL_LEAGUES[slug]["silo"]
+
+
+def get_canonical_catalog_and_genre(slug: Optional[str]) -> Optional[Tuple[str, str]]:
+    """Returns (catalog_id, genre) for a canonical competition slug."""
+    if not slug or slug not in CANONICAL_LEAGUES:
+        return None
+    league = CANONICAL_LEAGUES[slug]
+    cat = league.get("catalog")
+    gen = league.get("genre")
+    if cat and gen:
+        return cat, gen
+    return None
 
 
 def is_competition_conflict(canon1: Optional[str], canon2: Optional[str]) -> bool:

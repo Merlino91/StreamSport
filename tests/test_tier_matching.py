@@ -174,3 +174,91 @@ class TestBasketGenreClassification(unittest.TestCase):
         })
         self.assertEqual(cat, "basket")
         self.assertEqual(sub, "WNBA e Femminile")
+
+
+class TestArchitectureAndSimulcastFixes(unittest.TestCase):
+    def test_basket_simulcast_routing(self):
+        from app.services.canonical_competition_service import get_simulcast_info
+
+        # NBA Simulcast
+        nba_sim = get_simulcast_info("NBA Simulcast", "basketball")
+        self.assertIsNotNone(nba_sim)
+        self.assertEqual(nba_sim["canonical"], "basketball_nba")
+        self.assertEqual(nba_sim["genre"], "NBA")
+        self.assertEqual(nba_sim["catalog"], "basket")
+
+        # NCAA Basket Simulcast
+        ncaa_sim = get_simulcast_info("NCAA Basket Simulcast", "basketball")
+        self.assertIsNotNone(ncaa_sim)
+        self.assertEqual(ncaa_sim["canonical"], "basketball_ncaa")
+        self.assertEqual(ncaa_sim["genre"], "NCAA e College Basket")
+        self.assertEqual(ncaa_sim["catalog"], "basket")
+
+        # Euroleague Simulcast
+        el_sim = get_simulcast_info("Diretta Eurolega", "basketball")
+        self.assertIsNotNone(el_sim)
+        self.assertEqual(el_sim["canonical"], "basketball_euroleague")
+        self.assertEqual(el_sim["genre"], "Eurolega ed Eurocup")
+        self.assertEqual(el_sim["catalog"], "basket")
+
+        # LBA Diretta Basket
+        lba_sim = get_simulcast_info("Diretta Basket", "basketball")
+        self.assertIsNotNone(lba_sim)
+        self.assertEqual(lba_sim["canonical"], "basketball_lba_serie_a")
+        self.assertEqual(lba_sim["genre"], "LBA Serie A")
+        self.assertEqual(lba_sim["catalog"], "basket")
+
+    def test_centralized_canonical_catalog_and_genre(self):
+        from app.services.canonical_competition_service import get_canonical_catalog_and_genre
+
+        # Serie A
+        cat, genre = get_canonical_catalog_and_genre("football_serie_a")
+        self.assertEqual(cat, "calcio_italiano")
+        self.assertEqual(genre, "Serie A")
+
+        # NBA
+        cat, genre = get_canonical_catalog_and_genre("basketball_nba")
+        self.assertEqual(cat, "basket")
+        self.assertEqual(genre, "NBA")
+
+        # Formula 1
+        cat, genre = get_canonical_catalog_and_genre("motorsport_f1")
+        self.assertEqual(cat, "motori")
+        self.assertEqual(genre, "Formula 1")
+
+    def test_u23_serie_c_pro_second_teams(self):
+        # 1. Juventus Next Gen in Serie C (even without explicit Serie C in competition)
+        cat, genre = genre_classifier.classify({
+            "title": "Juventus Next Gen vs SPAL",
+            "country": "Italia",
+            "league": "Lega Pro",
+        })
+        self.assertEqual(cat, "calcio_italiano")
+        self.assertEqual(genre, "Serie C")
+
+        # 2. Milan Futuro
+        cat, genre = genre_classifier.classify({
+            "title": "Milan Futuro vs Carrarese",
+            "country": "Italia",
+            "league": "",
+        })
+        self.assertEqual(cat, "calcio_italiano")
+        self.assertEqual(genre, "Serie C")
+
+        # 3. Atalanta U23
+        cat, genre = genre_classifier.classify({
+            "title": "Atalanta U23 vs Triestina",
+            "country": "Italia",
+            "league": "",
+        })
+        self.assertEqual(cat, "calcio_italiano")
+        self.assertEqual(genre, "Serie C")
+
+        # 4. Explicit Primavera match must still be Primavera e Giovanili
+        cat, genre = genre_classifier.classify({
+            "title": "Juventus Primavera vs Milan Primavera",
+            "country": "Italia",
+            "league": "Campionato Primavera 1",
+        })
+        self.assertEqual(cat, "calcio_italiano")
+        self.assertEqual(genre, "Primavera e Giovanili")
