@@ -211,6 +211,12 @@ class TestDaddyLiveNative(unittest.IsolatedAsyncioTestCase):
         # Should have selected Player 2 (cast/stream-877.php)
         self.assertIn("cast%2Fstream-877.php", res_url)
         self.assertIn("api_password=Z3r0EP", res_url)
+        # Verify fallback timeout of 8.0s per probe call
+        self.assertEqual(mock_client.get.call_args[1].get("timeout"), 8.0)
+        # Verify RAM cache is set to ~60s
+        self.assertIn("877", daddylive_api._active_player_cache)
+        cached_url, exp_ts = daddylive_api._active_player_cache["877"]
+        self.assertAlmostEqual(exp_ts - time.time(), 60.0, delta=5.0)
 
     def test_fastapi_daddylive_stream_endpoint(self):
         """Verifies /{config}/daddylive/stream/{channel_id}.m3u8 endpoint returns 307 redirect."""

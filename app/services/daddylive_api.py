@@ -198,7 +198,7 @@ class DaddyLiveAPI:
         5. Player 4 (plus/stream-{id}.php)
         6. Player 5 (casting/stream-{id}.php)
         7. Player 6 (player/stream-{id}.php)
-        Returns the first working EasyProxy URL and caches it for 300 seconds.
+        Returns the first working EasyProxy URL and caches it for 60 seconds.
         """
         now = time.time()
         cached = self._active_player_cache.get(ch_id)
@@ -215,7 +215,7 @@ class DaddyLiveAPI:
             base_ep = ep_url.rstrip("/")
             close_client = False
             if client is None:
-                client = httpx.AsyncClient(timeout=4.5, verify=False)
+                client = httpx.AsyncClient(verify=False)
                 close_client = True
 
             try:
@@ -228,13 +228,13 @@ class DaddyLiveAPI:
                         probe_url += f"&api_password={urllib.parse.quote(ep_pass, safe='')}"
 
                     try:
-                        r = await client.get(probe_url, follow_redirects=False, timeout=4.0)
+                        r = await client.get(probe_url, follow_redirects=False, timeout=8.0)
                         if r.status_code in (200, 302, 307):
                             logger.info(
                                 "DaddyLive: Channel %s active on %s (EasyProxy returned %d)",
                                 ch_id, player_label, r.status_code
                             )
-                            self._active_player_cache[ch_id] = (probe_url, now + 300)
+                            self._active_player_cache[ch_id] = (probe_url, now + 60)
                             return probe_url
                     except Exception as probe_err:
                         logger.debug("DaddyLive: Probe for %s on %s failed: %s", ch_id, player_label, probe_err)
