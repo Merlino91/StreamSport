@@ -72,12 +72,10 @@ def get_safe_timezone(user_tz: Optional[str] = None) -> datetime.tzinfo:
                 pass
     try:
         import pytz
-        return pytz.timezone(target)
-    except Exception:
-        pass
-    try:
-        import pytz
-        return pytz.timezone(DEFAULT_TIMEZONE)
+        try:
+            return pytz.timezone(target)
+        except Exception:
+            return pytz.timezone(DEFAULT_TIMEZONE)
     except Exception:
         pass
     return datetime.timezone(datetime.timedelta(hours=1))
@@ -89,6 +87,54 @@ class CatalogService:
     """
     Builds Stremio Catalog and Meta objects for StreamSport with granular genre filtering.
     """
+
+    # Class-level immutable sets and precompiled regexes to avoid re-allocation in loops
+    _EXCLUDED_NOISE_WORDS = frozenset({
+        "vs", "the", "fc", "ac", "cf", "sc", "as", "at", "live", "stream", "bc",
+        "pallacanestro", "pallacan", "baloncesto", "basquet", "basket", "calcio", "volley", "pallavolo", "club"
+    })
+    _COMMON_ALIASES = {
+        "internazionale": "inter",
+        "juve": "juventus",
+        "wolves": "wolverhampton",
+        "spurs": "tottenham",
+        "blazers": "trailblazers",
+    }
+    _EXCLUDED_CLUB_TERMS = frozenset({
+        "fc", "ac", "cf", "sc", "as", "the", "bc",
+        "pallacanestro", "pallacan", "baloncesto", "basquet", "basket", "calcio", "volley", "pallavolo", "club"
+    })
+    _COMPOUND_CITIES = (
+        "new york", "los angeles", "san diego", "san francisco", "kansas city",
+        "oklahoma city", "salt lake", "st louis", "san jose", "san antonio",
+        "green bay", "tampa bay", "notre dame", "penn state", "ohio state",
+        "florida state", "michigan state", "north carolina", "south carolina"
+    )
+    _COMPOUND_CITIES_REGEX = re.compile(
+        r"\b(" + "|".join(re.escape(c) for c in sorted(_COMPOUND_CITIES, key=len, reverse=True)) + r")\b",
+        re.I,
+    )
+    _EXPANDED_STOPWORDS = frozenset({
+        "vs", "v", "fc", "ac", "cf", "sc", "as", "club", "u19", "u20", "u21", "u23", "at", "the",
+        "calcio", "basket", "champions", "league", "cup", "coppa", "supercup", "supercoppa",
+        "division", "serie", "liga", "torneo", "tournament", "simulcast", "highlight", "highlights",
+        "show", "direct", "live", "conference", "europa", "uefa", "fifa", "concacaf", "conmebol",
+        "afc", "caf", "ehf", "chl", "city", "de", "del", "da", "do", "el", "al"
+    })
+    _REPLAY_ELIGIBLE_CALCIO_ESTERO = frozenset({
+        "Champions League",
+        "Champions League Femminile",
+        "Europa e Conference League",
+        "Premier League",
+        "La Liga",
+        "Bundesliga e Ligue 1",
+    })
+    _REPLAY_ELIGIBLE_BASKET = frozenset({
+        "NBA",
+        "Eurolega ed Eurocup",
+        "LBA Serie A",
+        "FIBA e Tornei Nazionali",
+    })
 
     def __init__(self):
         self._cached_matches: List[Dict[str, Any]] = []
@@ -443,18 +489,7 @@ class CatalogService:
         t = re.sub(r"\([^)]*\)", "", t)
         t = re.sub(r"^(?:italy|england|spain|germany|france|uefa|fifa|brazil|usa|[a-z]+)\s*-\s*", "", t)
         t = re.sub(r"[^a-z0-9]+", " ", t).strip()
-        EXCLUDED_NOISE_WORDS = (
-            "vs", "the", "fc", "ac", "cf", "sc", "as", "at", "live", "stream", "bc",
-            "pallacanestro", "pallacan", "baloncesto", "basquet", "basket", "calcio", "volley", "pallavolo", "club"
-        )
-        COMMON_ALIASES = {
-            "internazionale": "inter",
-            "juve": "juventus",
-            "wolves": "wolverhampton",
-            "spurs": "tottenham",
-            "blazers": "trailblazers",
-        }
-        words = sorted([COMMON_ALIASES.get(w, w) for w in t.split() if w not in EXCLUDED_NOISE_WORDS and len(w) > 1])
+        words = sorted([self._COMMON_ALIASES.get(w, w) for w in t.split() if w not in self._EXCLUDED_NOISE_WORDS and len(w) > 1])
         return " ".join(words)
 
     def _get_teams_key(self, match: Dict[str, Any]) -> Optional[Any]:
@@ -468,12 +503,8 @@ class CatalogService:
             away_str = away_val.get("name") if isinstance(away_val, dict) else str(away_val)
             h = re.sub(r"[^a-z0-9]+", " ", (home_str or "").lower()).strip()
             a = re.sub(r"[^a-z0-9]+", " ", (away_str or "").lower()).strip()
-            EXCLUDED_CLUB_TERMS = (
-                "fc", "ac", "cf", "sc", "as", "the", "bc",
-                "pallacanestro", "pallacan", "baloncesto", "basquet", "basket", "calcio", "volley", "pallavolo", "club"
-            )
-            h_words = frozenset([w for w in h.split() if w not in EXCLUDED_CLUB_TERMS and len(w) > 1])
-            a_words = frozenset([w for w in a.split() if w not in EXCLUDED_CLUB_TERMS and len(w) > 1])
+            h_words = frozenset([w for w in h.split() if w not in self._EXCLUDED_CLUB_TERMS and len(w) > 1])
+            a_words = frozenset([w for w in a.split() if w not in self._EXCLUDED_CLUB_TERMS and len(w) > 1])
             if h_words and a_words:
                 return frozenset([h_words, a_words])
         return None
@@ -950,24 +981,11 @@ class CatalogService:
         t = (text or "").lower()
         t = unicodedata.normalize("NFKD", t).encode("ascii", "ignore").decode("utf-8")
         t = re.sub(r"[\U0001F1E6-\U0001F1FF]{2}", "", t)
-        for comp in (
-            "new york", "los angeles", "san diego", "san francisco", "kansas city",
-            "oklahoma city", "salt lake", "st louis", "san jose", "san antonio",
-            "green bay", "tampa bay", "notre dame", "penn state", "ohio state",
-            "florida state", "michigan state", "north carolina", "south carolina"
-        ):
-            t = t.replace(comp, comp.replace(" ", "_"))
+        t = self._COMPOUND_CITIES_REGEX.sub(lambda m: m.group(0).replace(" ", "_"), t)
         for acr, full in self.COMMON_TEAM_ACRONYMS.items():
             t = re.sub(rf"\b{acr}\b", full, t)
         words = set(re.sub(r"[^a-z0-9_]+", " ", t).split())
-        stopwords = {
-            "vs", "v", "fc", "ac", "cf", "sc", "as", "club", "u19", "u20", "u21", "u23", "at", "the",
-            "calcio", "basket", "champions", "league", "cup", "coppa", "supercup", "supercoppa",
-            "division", "serie", "liga", "torneo", "tournament", "simulcast", "highlight", "highlights",
-            "show", "direct", "live", "conference", "europa", "uefa", "fifa", "concacaf", "conmebol",
-            "afc", "caf", "ehf", "chl", "city", "de", "del", "da", "do", "el", "al"
-        }
-        return {w for w in words if w not in stopwords and len(w) > 1}
+        return {w for w in words if w not in self._EXPANDED_STOPWORDS and len(w) > 1}
 
     def are_post_validation_duplicates(self, m1: Dict[str, Any], m2: Dict[str, Any]) -> bool:
         """
@@ -1308,15 +1326,7 @@ class CatalogService:
                 combined_check = f"{title} {home} {away}"
                 return bool(re.search(r"\b(italia|italy|azzurr[ie])\b", combined_check))
 
-            allowed_genres = {
-                "Champions League",
-                "Champions League Femminile",
-                "Europa e Conference League",
-                "Premier League",
-                "La Liga",
-                "Bundesliga e Ligue 1",
-            }
-            return genre in allowed_genres
+            return genre in CatalogService._REPLAY_ELIGIBLE_CALCIO_ESTERO
 
         # 3. Motori: Formula 1, MotoGP, Superbike
         if cat == "motori":
@@ -1332,13 +1342,7 @@ class CatalogService:
 
         # 5. Basket: EuroLeague, NBA, Italian Serie A (LBA), FIBA tournaments
         if cat == "basket":
-            allowed_genres = {
-                "NBA",
-                "Eurolega ed Eurocup",
-                "LBA Serie A",
-                "FIBA e Tornei Nazionali",
-            }
-            return genre in allowed_genres
+            return genre in CatalogService._REPLAY_ELIGIBLE_BASKET
 
         # 6. Sport da Combattimento: UFC and major Boxing
         if cat == "combattimento":
@@ -1712,6 +1716,8 @@ class CatalogService:
         if loop and loop.is_running() and self._is_running:
             logger.info("Watchdog: Scheduling auto-restart of CatalogService background sync in 10s...")
             loop.call_later(10.0, self._restart_background_sync, loop)
+        elif self._is_running:
+            logger.critical("Watchdog: Unable to acquire a running event loop to schedule auto-restart of CatalogService sync.")
 
     def _restart_background_sync(self, loop: asyncio.AbstractEventLoop):
         """Restarts the background loop if the service is still active."""

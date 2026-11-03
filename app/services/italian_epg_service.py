@@ -39,6 +39,32 @@ class ItalianEPGService:
     - Maintains a rolling cache to keep evening matches active post-midnight.
     """
 
+    # Class-level precompiled regexes and immutable sets to eliminate loop re-allocations
+    _REPLAY_SYNOPSIS_REGEX = re.compile(
+        r"\b(?:in\s+replica|replica\s+delle?|offre\s+in\s+replica|andat[ao]\s+in\s+onda)\b",
+        re.IGNORECASE,
+    )
+    _YEAR_REGEX = re.compile(r"\b(20[12][0-9])\b")
+    _EPISODE_SEASON_REGEX = re.compile(r"\b(?:ep\.\s*\d+|stagione\s*\d+)\b", re.IGNORECASE)
+    _EPG_MAJOR_COMPS = frozenset({
+        "serie a", "serie b", "serie c", "premier league", "la liga", "laliga",
+        "bundesliga", "ligue 1", "champions league", "europa league", "conference league",
+        "eurolega", "eurocup", "formula 1", "motogp", "superbike"
+    })
+    _KNOWN_TENNIS_CITIES = (
+        "tokyo", "guangzhou", "vienna", "basilea", "basel", "hong kong", "jiujiang",
+        "parigi", "paris", "torino", "turin", "milano", "roma", "madrid", "cincinnati",
+        "miami", "indian wells", "shanghai", "beijing", "pechino", "brisbane", "adelaide",
+        "auckland", "sydney", "doha", "dubai", "acapulco", "rio", "barcellona", "barcelona",
+        "monte carlo", "montecarlo", "halle", "eastbourne", "berlino", "berlin", "stuttgart"
+    )
+    _TENNIS_EXCLUDED_TOKENS = frozenset({
+        "men", "women", "singles", "doubles", "singolare", "doppio", "live", "tour",
+        "2025", "2026", "masters", "finals", "open", "quarti", "semifinali", "semifinal",
+        "finale", "finals", "giornata", "sessione", "day", "night", "court", "campo",
+        "round", "turno", "match", "diretta", "tennis"
+    })
+
     # 1. Sky Italia Channel Definitions (DTH Environment)
     SKY_SPORTS_CHANNELS: Dict[str, Dict[str, Any]] = {
         # Linear Dedicated Sports Channels
@@ -465,15 +491,8 @@ class ItalianEPGService:
                     city = c
                     break
             if not city:
-                KNOWN_TENNIS_CITIES = (
-                    "tokyo", "guangzhou", "vienna", "basilea", "basel", "hong kong", "jiujiang",
-                    "parigi", "paris", "torino", "turin", "milano", "roma", "madrid", "cincinnati",
-                    "miami", "indian wells", "shanghai", "beijing", "pechino", "brisbane", "adelaide",
-                    "auckland", "sydney", "doha", "dubai", "acapulco", "rio", "barcellona", "barcelona",
-                    "monte carlo", "montecarlo", "halle", "eastbourne", "berlino", "berlin", "stuttgart"
-                )
                 s_low = s.lower()
-                for kc in KNOWN_TENNIS_CITIES:
+                for kc in cls._KNOWN_TENNIS_CITIES:
                     if re.search(rf"\b{re.escape(kc)}\b", s_low):
                         city = kc.title()
                         break
@@ -536,15 +555,15 @@ class ItalianEPGService:
             return True
         if any(k in url_lower for k in ("/replica", "-replica", "-rerun")):
             return True
-        if s and re.search(r"\b(?:in\s+replica|replica\s+delle?|offre\s+in\s+replica|andat[ao]\s+in\s+onda)\b", s, re.I):
+        if s and cls._REPLAY_SYNOPSIS_REGEX.search(s):
             return True
 
         # 2. Previous year detection (e.g. 'ATP 1000 Parigi Bercy 2025' when current year is 2026)
         now_year = datetime.datetime.now().year
-        m_year = re.search(r"\b(20[12][0-9])\b", t)
+        m_year = cls._YEAR_REGEX.search(t)
         if m_year and int(m_year.group(1)) < now_year:
             return True
-        m_year_syn = re.search(r"\b(20[12][0-9])\b", s)
+        m_year_syn = cls._YEAR_REGEX.search(s)
         if m_year_syn and int(m_year_syn.group(1)) < now_year:
             return True
 
@@ -561,7 +580,7 @@ class ItalianEPGService:
                 return True
 
             # If title or URL mentions an episode of a tournament and NO active city matches:
-            if re.search(r"\b(?:ep\.\s*\d+|stagione\s*\d+)\b", t, re.I):
+            if cls._EPISODE_SEASON_REGEX.search(t):
                 if not any(ac in search_text for ac in active_tennis_cities):
                     return True
 
@@ -1523,8 +1542,8 @@ class ItalianEPGService:
         t = re.sub(r"[^a-z0-9]+", " ", t)
         return re.sub(r"\s+", " ", t).strip()
 
-    @staticmethod
-    def _extract_tennis_circuit_and_city(text: str) -> Tuple[Optional[str], Optional[str]]:
+    @classmethod
+    def _extract_tennis_circuit_and_city(cls, text: str) -> Tuple[Optional[str], Optional[str]]:
         """
         Dynamically extracts tennis circuit (atp, wta, challenger, slam) and city/venue
         from a tennis match or broadcast session title/synopsis without hardcoded city dictionaries.
@@ -1542,16 +1561,10 @@ class ItalianEPGService:
         elif re.search(r"\b(atp|masters\s*1000|atp\s*500|atp\s*250|atp\s*finals|masters)\b", t):
             circuit = "atp"
 
-        excluded = {
-            "men", "women", "singles", "doubles", "singolare", "doppio", "live", "tour",
-            "2025", "2026", "masters", "finals", "open", "quarti", "semifinali", "semifinal",
-            "finale", "finals", "giornata", "sessione", "day", "night", "court", "campo",
-            "round", "turno", "match", "diretta", "tennis"
-        }
         city = None
         # Pattern 1: e.g. "ATP - Singles: Shanghai (China)" or "Tennis: ATP - Singles: Shanghai"
         m_city = re.search(r"(?:atp|wta|challenger)[^:]*?:\s*([a-z]+)", t)
-        if m_city and m_city.group(1).strip() not in excluded:
+        if m_city and m_city.group(1).strip() not in cls._TENNIS_EXCLUDED_TOKENS:
             city = m_city.group(1).strip()
 
         # Pattern 2: e.g. "ATP Masters 1000 Shanghai - 8a giornata", "WTA 1000 Wuhan", "ATP 500 Vienna"
@@ -1560,13 +1573,13 @@ class ItalianEPGService:
                 r"\b(?:atp|wta|challenger)(?:\s+(?:masters|finals|\d{3,4}|series|tour|singles|men|women|uomini|donne))*\s+([a-z]+)",
                 t,
             )
-            if m_city2 and m_city2.group(1).strip() not in excluded:
+            if m_city2 and m_city2.group(1).strip() not in cls._TENNIS_EXCLUDED_TOKENS:
                 city = m_city2.group(1).strip()
 
         # Pattern 3: e.g. "di Shanghai, Cina" or "da Wuhan, Cina" (standard Sky EPG synopsis syntax)
         if not city:
             m_city3 = re.search(r"\b(?:di|da)\s+([a-z]+),\s*[a-z]+", t)
-            if m_city3 and m_city3.group(1).strip() not in excluded:
+            if m_city3 and m_city3.group(1).strip() not in cls._TENNIS_EXCLUDED_TOKENS:
                 city = m_city3.group(1).strip()
 
         return circuit, city
@@ -1699,12 +1712,7 @@ class ItalianEPGService:
                     m_c = (m.get("competition") or m.get("canonical_competition") or "").lower()
                     ep_c = (ep.get("competition") or ep.get("_competition") or "").lower()
                     if m_c and ep_c:
-                        major_comps = (
-                            "serie a", "serie b", "serie c", "premier league", "la liga", "laliga",
-                            "bundesliga", "ligue 1", "champions league", "europa league", "conference league",
-                            "eurolega", "eurocup", "formula 1", "motogp", "superbike"
-                        )
-                        if any(k in m_c and k in ep_c for k in major_comps):
+                        if any(k in m_c and k in ep_c for k in self._EPG_MAJOR_COMPS):
                             w1 = set(m_tokens.split())
                             w2 = set(ep_tokens.split())
                             if w1 & w2:

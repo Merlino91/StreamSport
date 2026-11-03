@@ -155,7 +155,8 @@ class BannerService:
                     except Exception:
                         pass
             except Exception as e:
-                # If primary directory failed to write, transparently switch to temp storage
+                # If primary directory failed to write, log cause and transparently switch to temp storage
+                logger.warning("Failed to save banner cache to primary %s: %s (attempting temp fallback)", cache_file, e, exc_info=True)
                 if "streamsport_data" not in str(self.banners_dir):
                     fallback_dir = Path(tempfile.gettempdir()) / "streamsport_data" / "posters" / "banners"
                     try:
@@ -164,9 +165,9 @@ class BannerService:
                         fallback_file = self.banners_dir / cache_file.name
                         fallback_file.write_bytes(poster_bytes)
                     except Exception as e2:
-                        logger.warning("Failed to save banner cache to fallback %s: %s", self.banners_dir, e2)
+                        logger.warning("Failed to save banner cache to fallback %s: %s (primary error: %s)", self.banners_dir, e2, e, exc_info=True)
                 else:
-                    logger.warning("Failed to save banner cache to %s: %s", cache_file, e)
+                    logger.warning("Failed to save banner cache to %s: %s", cache_file, e, exc_info=True)
             return poster_bytes
 
         return None

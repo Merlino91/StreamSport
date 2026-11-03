@@ -6,6 +6,9 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 # ==============================================================================
 # 1. CENTRALIZED VOCABULARY & ALIASES
+_SPLIT_VS_REGEX = re.compile(r"\s+vs\.?\s+", re.IGNORECASE)
+_SPLIT_DASH_REGEX = re.compile(r"\s+[\-–—]\s+")
+_SPLIT_V_REGEX = re.compile(r"\s+v\.?\s+", re.IGNORECASE)
 # ==============================================================================
 
 def extract_team_name(val: Any) -> str:
@@ -305,14 +308,14 @@ def calculate_match_score(
             t = match.get("title") or ""
             clean_t = re.sub(r"^[0-9:\s-]+(?:\s*:\s*)?", "", t)
             clean_t = re.sub(r"\([^)]*\)", "", clean_t)
-            if re.search(r"\s+vs\.?\s+", clean_t, re.IGNORECASE):
-                parts = re.split(r"\s+vs\.?\s+", clean_t, maxsplit=1, flags=re.IGNORECASE)
+            if _SPLIT_VS_REGEX.search(clean_t):
+                parts = _SPLIT_VS_REGEX.split(clean_t, maxsplit=1)
                 m_h, m_a = parts[0].strip(), parts[1].strip()
-            elif re.search(r"\s+[\-–—]\s+", clean_t):
-                parts = re.split(r"\s+[\-–—]\s+", clean_t, maxsplit=1)
+            elif _SPLIT_DASH_REGEX.search(clean_t):
+                parts = _SPLIT_DASH_REGEX.split(clean_t, maxsplit=1)
                 m_h, m_a = parts[0].strip(), parts[1].strip()
-            elif re.search(r"\s+v\.?\s+", clean_t, re.IGNORECASE):
-                parts = re.split(r"\s+v\.?\s+", clean_t, maxsplit=1, flags=re.IGNORECASE)
+            elif _SPLIT_V_REGEX.search(clean_t):
+                parts = _SPLIT_V_REGEX.split(clean_t, maxsplit=1)
                 m_h, m_a = parts[0].strip(), parts[1].strip()
 
         c_h = candidate.get("home") or ""
@@ -326,12 +329,12 @@ def calculate_match_score(
                 c_t = candidate.get("title") or ""
                 clean_ct = re.sub(r"^[0-9:\s-]+(?:\s*:\s*)?", "", c_t)
                 clean_ct = re.sub(r"\([^)]*\)", "", clean_ct)
-                if re.search(r"\s+vs\.?\s+", clean_ct, re.IGNORECASE):
-                    c_parts = re.split(r"\s+vs\.?\s+", clean_ct, maxsplit=1, flags=re.IGNORECASE)
+                if _SPLIT_VS_REGEX.search(clean_ct):
+                    c_parts = _SPLIT_VS_REGEX.split(clean_ct, maxsplit=1)
                     c_h = c_h or c_parts[0].strip()
                     c_a = c_a or c_parts[1].strip()
-                elif re.search(r"\s+[\-–—]\s+", clean_ct):
-                    c_parts = re.split(r"\s+[\-–—]\s+", clean_ct, maxsplit=1)
+                elif _SPLIT_DASH_REGEX.search(clean_ct):
+                    c_parts = _SPLIT_DASH_REGEX.split(clean_ct, maxsplit=1)
                     c_h = c_h or c_parts[0].strip()
                     c_a = c_a or c_parts[1].strip()
 
@@ -505,8 +508,8 @@ def calculate_match_score(
         # Test 3: Raw Title tokens if teams failed
         if best_score < 0.70:
             for title_cand in match.get("raw_titles", [match.get("title", "")]):
-                if re.search(r"\s+vs\.?\s+", title_cand, re.IGNORECASE):
-                    parts = re.split(r"\s+vs\.?\s+", title_cand, maxsplit=1, flags=re.IGNORECASE)
+                if _SPLIT_VS_REGEX.search(title_cand):
+                    parts = _SPLIT_VS_REGEX.split(title_cand, maxsplit=1)
                     h_score, a_score, is_inv = compare_teams_fuzzy(parts[0], parts[1], c_h, c_a, allow_inverted=True)
                     if h_score >= 0.65 and a_score >= 0.65:
                         cand_avg = (h_score + a_score) / 2.0
