@@ -1660,14 +1660,14 @@ class ItalianEPGService:
                     continue
 
                 # Guard: Senior broadcast match on Sky/Tivusat MUST NOT match a youth/primavera fixture
-                m_is_youth = m.get("_age") == "+" or any(k in m_title.lower() for k in ("u19", "u20", "u21", "u23", "primavera", "youth"))
+                m_is_youth = bool(m.get("is_youth")) or any(k in m_title.lower() for k in ("u19", "u20", "u21", "u23", "primavera", "youth"))
                 ep_is_youth = any(k in ep.get("title", "").lower() for k in ("u19", "u20", "u21", "u23", "primavera", "youth"))
                 if m_is_youth != ep_is_youth:
                     continue
 
                 # Guard: Non-tennis events must not cross men's and women's competitions
                 if m_silo != "tennis":
-                    m_is_women = m.get("_gender") == "+" or any(k in m_title.lower() for k in ("women", "femminile", "femm", "ladies", "donne"))
+                    m_is_women = bool(m.get("is_women")) or any(k in m_title.lower() for k in ("women", "femminile", "femm", "ladies", "donne"))
                     ep_is_women = any(k in ep.get("title", "").lower() for k in ("women", "femminile", "femm", "ladies", "donne"))
                     if m_is_women != ep_is_women:
                         continue

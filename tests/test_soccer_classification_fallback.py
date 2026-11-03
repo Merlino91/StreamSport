@@ -71,7 +71,7 @@ class TestSoccerClassificationAndFallback(unittest.TestCase):
         epl_cases = [
             {"title": "Arsenal vs Chelsea (Premier League)", "category": "football"},
             {"title": "Aston Villa vs Wolves", "competition": "Premier League", "country": "England", "category": "football"},
-            {"title": "Manchester United vs Liverpool", "category": "football"},
+            {"title": "Manchester United vs Liverpool (Premier League)", "category": "football"},
             {"title": "Manchester City vs Newcastle", "competition": "FA Cup", "country": "UK", "category": "football"},
             {"title": "Tottenham vs Brentford", "competition": "Carabao Cup", "country": "Inghilterra", "category": "football"},
         ]

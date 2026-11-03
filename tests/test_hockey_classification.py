@@ -55,7 +55,9 @@ class TestHockeyEuropeanLeagues(unittest.TestCase):
         m_nhl = {
             "title": "Florida Panthers vs Vancouver Canucks",
             "category": "hockey",
-            "_silo": "hockey"
+            "_silo": "hockey",
+            "competition": "NHL",
+            "country": "USA"
         }
         cat, genre = genre_classifier.classify(m_nhl)
         self.assertEqual(cat, "hockey")

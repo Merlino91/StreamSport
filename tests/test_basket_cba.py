@@ -34,15 +34,15 @@ class TestBasketClassification(unittest.TestCase):
     def test_nba_matches_in_nba(self):
         cases = [
             ({"title": "Detroit Pistons vs Boston Celtics", "category": "basketball", "competition": "NBA", "country": "USA"}, "basket", "NBA"),
-            ({"title": "Los Angeles Lakers vs Boston Celtics", "category": "basketball"}, "basket", "NBA"),
-            ({"title": "Lakers vs Celtics", "category": "basketball"}, "basket", "NBA"),
-            ({"title": "Chicago Bulls vs Houston Rockets", "category": "basketball"}, "basket", "NBA"),
+            ({"title": "Los Angeles Lakers vs Boston Celtics", "category": "basketball", "competition": "NBA", "country": "USA"}, "basket", "NBA"),
+            ({"title": "Lakers vs Celtics", "category": "basketball", "competition": "NBA", "country": "USA"}, "basket", "NBA"),
+            ({"title": "Chicago Bulls vs Houston Rockets", "category": "basketball", "competition": "NBA", "country": "USA"}, "basket", "NBA"),
             ({"title": "NBA: Warriors vs Kings", "category": "basketball"}, "basket", "NBA"),
-            ({"title": "Golden State Warriors vs Sacramento Kings", "category": "basketball"}, "basket", "NBA"),
-            ({"title": "Denver Nuggets vs Minnesota Timberwolves", "category": "basketball"}, "basket", "NBA"),
-            ({"title": "San Antonio Spurs vs Oklahoma City Thunder", "category": "basketball"}, "basket", "NBA"),
-            ({"title": "Miami Heat vs Orlando Magic", "category": "basketball"}, "basket", "NBA"),
-            ({"title": "Dallas Mavericks vs Phoenix Suns", "category": "basketball"}, "basket", "NBA"),
+            ({"title": "Golden State Warriors vs Sacramento Kings", "category": "basketball", "competition": "NBA", "country": "USA"}, "basket", "NBA"),
+            ({"title": "Denver Nuggets vs Minnesota Timberwolves", "category": "basketball", "competition": "NBA", "country": "USA"}, "basket", "NBA"),
+            ({"title": "San Antonio Spurs vs Oklahoma City Thunder", "category": "basketball", "competition": "NBA", "country": "USA"}, "basket", "NBA"),
+            ({"title": "Miami Heat vs Orlando Magic", "category": "basketball", "competition": "NBA", "country": "USA"}, "basket", "NBA"),
+            ({"title": "Dallas Mavericks vs Phoenix Suns", "category": "basketball", "competition": "NBA", "country": "USA"}, "basket", "NBA"),
         ]
         for m, exp_cat, exp_genre in cases:
             cat, genre = genre_classifier.classify(m)

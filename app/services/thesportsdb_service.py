@@ -586,11 +586,8 @@ class TheSportsDBService:
             m_date = m.get("date", 0)
             m_comp = m.get("competition") or m.get("_competition") or ""
             m_text = f"{m_comp} {m.get('title', '')}".lower()
-            m_is_youth = bool(re.search(r"\b(u-?1[5-9]|u-?2[01]|under\s*1[5-9]|under\s*2[01]|youth|juvenil|primavera|junior)\b", m_text)) or m.get("_age") == "+"
-            m_is_women = (
-                m.get("_gender") == "+"
-                or bool(re.search(r"\b(women(?:['']s)?|femminile|femenino|ladies|frauen|donne|dames|damen|w-|wta|wnba|uwcl)\b|(?<=\w)\s+[dwf]\b|\([dwf]\)", m_text))
-            )
+            m_is_youth = bool(m.get("is_youth")) or bool(re.search(r"\b(u-?1[5-9]|u-?2[01]|under\s*1[5-9]|under\s*2[01]|youth|juvenil|primavera|junior)\b", m_text))
+            m_is_women = bool(m.get("is_women")) or bool(re.search(r"\b(women(?:['']s)?|femminile|femenino|ladies|frauen|donne|dames|damen|w-|wta|wnba|uwcl)\b|(?<=\w)\s+[dwf]\b|\([dwf]\)", m_text))
 
             m_canon = m.get("canonical_competition")
             if not m_canon:
@@ -1006,10 +1003,7 @@ class TheSportsDBService:
 
             m_date = m.get("date", 0)
             m_silo = self.get_match_tsdb_silo(m)
-            m_is_women = (
-                m.get("_gender") == "+"
-                or bool(re.search(r"\b(women(?:['']s)?|femminile|femenino|ladies|frauen|donne|dames|damen|w-|wta|uwcl)\b|(?<=\w)\s+[dwf]\b|\([dwf]\)", f"{m.get('competition', '')} {m.get('title', '')}".lower()))
-            )
+            m_is_women = bool(m.get("is_women")) or bool(re.search(r"\b(women(?:['']s)?|femminile|femenino|ladies|frauen|donne|dames|damen|w-|wta|uwcl)\b|(?<=\w)\s+[dwf]\b|\([dwf]\)", f"{m.get('competition', '')} {m.get('title', '')}".lower()))
             thumb = await self.search_event_thumb_html(
                 m_home, m_away, match_date_ms=m_date, expected_silo=m_silo, is_women=m_is_women
             )

@@ -348,17 +348,11 @@ def calculate_match_score(
         m_text = f"{m_comp} {m_h} {m_a}".lower()
         c_text = f"{c_comp} {c_h} {c_a}".lower()
 
-        m_youth = bool(re.search(r"\b(u-?1[5-9]|u-?2[01]|under\s*1[5-9]|under\s*2[01]|youth|primavera|junior)\b", m_text))
-        c_youth = bool(re.search(r"\b(u-?1[5-9]|u-?2[01]|under\s*1[5-9]|under\s*2[01]|youth|primavera|junior)\b", c_text))
+        m_youth = bool(match.get("is_youth")) or bool(re.search(r"\b(u-?1[5-9]|u-?2[01]|under\s*1[5-9]|under\s*2[01]|youth|primavera|junior)\b", m_text))
+        c_youth = bool(candidate.get("is_youth")) or bool(re.search(r"\b(u-?1[5-9]|u-?2[01]|under\s*1[5-9]|under\s*2[01]|youth|primavera|junior)\b", c_text))
 
-        m_women = (
-            match.get("_gender") == "+"
-            or bool(re.search(r"\b(women(?:[’']s)?|femminile|femenino|ladies|frauen|donne|dames|damen|w-|wta|wnba|uwcl)\b|(?<=\w)\s+[dwf]\b|\([dwf]\)", m_text))
-        )
-        c_women = (
-            candidate.get("_gender") == "+"
-            or bool(re.search(r"\b(women(?:[’']s)?|femminile|femenino|ladies|frauen|donne|dames|damen|w-|wta|wnba|uwcl)\b|(?<=\w)\s+[dwf]\b|\([dwf]\)", c_text))
-        )
+        m_women = bool(match.get("is_women")) or bool(re.search(r"\b(women(?:[’']s)?|femminile|femenino|ladies|frauen|donne|dames|damen|w-|wta|wnba|uwcl)\b|(?<=\w)\s+[dwf]\b|\([dwf]\)", m_text))
+        c_women = bool(candidate.get("is_women")) or bool(re.search(r"\b(women(?:[’']s)?|femminile|femenino|ladies|frauen|donne|dames|damen|w-|wta|wnba|uwcl)\b|(?<=\w)\s+[dwf]\b|\([dwf]\)", c_text))
 
         # Penalty if stream claimed Women (+) but candidate lacks it (=)
         # When stream is neutral (=) and candidate is Women (+), penalty is 0.0 (inherits trait)

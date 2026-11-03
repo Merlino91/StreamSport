@@ -273,10 +273,8 @@ class DirettaService:
                         "tv_channels": tv_channels,
                     }
                     if is_w:
-                        match_obj["_gender"] = "+"
                         match_obj["is_women"] = True
                     if is_y:
-                        match_obj["_age"] = "+"
                         match_obj["is_youth"] = True
 
                     matches.append(match_obj)
@@ -501,10 +499,10 @@ class DirettaService:
 
             # Preserve gender/age
             c_text = f"{comp} {d_home} {d_away}".lower()
-            if re.search(r"\b(women(?:[’']s)?|femminile|femenino|ladies|frauen|donne|dames|damen|w-|wta|wnba|uwcl)\b|(?<=\w)\s+[dwf]\b|\([dwf]\)", c_text):
-                official_match["_gender"] = "+"
-            if re.search(r"\b(u-?1[5-9]|u-?2[01]|under\s*1[5-9]|under\s*2[01]|youth|primavera|junior)\b", c_text):
-                official_match["_age"] = "+"
+            if m.get("is_women") or re.search(r"\b(women(?:[’']s)?|femminile|femenino|ladies|frauen|donne|dames|damen|w-|wta|wnba|uwcl)\b|(?<=\w)\s+[dwf]\b|\([dwf]\)", c_text):
+                official_match["is_women"] = True
+            if m.get("is_youth") or re.search(r"\b(u-?1[5-9]|u-?2[01]|under\s*1[5-9]|under\s*2[01]|youth|primavera|junior)\b", c_text):
+                official_match["is_youth"] = True
 
             # Classify catalog and genre using official genre_classifier
             item_catalog, item_genre = genre_classifier.classify(official_match)
@@ -622,10 +620,10 @@ class DirettaService:
 
                 # Inherit confirmed traits from chosen candidate
                 c_text = f"{chosen.get('competition', '')} {chosen.get('home', '')} {chosen.get('away', '')}".lower()
-                if re.search(r"\b(women(?:[’']s)?|femminile|femenino|ladies|frauen|donne|dames|damen|w-|wta|wnba|uwcl)\b|(?<=\w)\s+[dwf]\b|\([dwf]\)", c_text):
-                    m["_gender"] = "+"
-                if re.search(r"\b(u-?1[5-9]|u-?2[01]|under\s*1[5-9]|under\s*2[01]|youth|primavera|junior)\b", c_text):
-                    m["_age"] = "+"
+                if chosen.get("is_women") or re.search(r"\b(women(?:[’']s)?|femminile|femenino|ladies|frauen|donne|dames|damen|w-|wta|wnba|uwcl)\b|(?<=\w)\s+[dwf]\b|\([dwf]\)", c_text):
+                    m["is_women"] = True
+                if chosen.get("is_youth") or re.search(r"\b(u-?1[5-9]|u-?2[01]|under\s*1[5-9]|under\s*2[01]|youth|primavera|junior)\b", c_text):
+                    m["is_youth"] = True
 
                 # Adopt official competition from chosen validator candidate (Diretta is authoritative)
                 if chosen.get("competition") and not self.is_generic_competition(chosen["competition"]):

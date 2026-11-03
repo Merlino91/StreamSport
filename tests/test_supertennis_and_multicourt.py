@@ -490,7 +490,7 @@ class TestSuperTennisAndMulticourt(unittest.TestCase):
                 "id": "dlhd-venezia-inter-u19",
                 "title": "Venezia U19 vs Inter U19",
                 "competition": "Campionato Primavera 1",
-                "_age": "+",
+                "is_youth": True,
                 "date": session_start,
                 "_silo": "football",
                 "category": "football",

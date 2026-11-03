@@ -99,23 +99,23 @@ class StreamSportTestCase(unittest.TestCase):
 
     def test_genre_classifier_accuracy(self):
         test_cases = [
-            ({"title": "Inter vs Milan", "category": "football", "teams": {"home": {"name": "Inter"}, "away": {"name": "Milan"}}}, ("calcio_italiano", "Serie A")),
-            ({"title": "Palermo vs Bari", "category": "football", "teams": {"home": {"name": "Palermo"}, "away": {"name": "Bari"}}}, ("calcio_italiano", "Serie B")),
-            ({"title": "Real Madrid vs Barcelona", "category": "football", "teams": {"home": {"name": "Real Madrid"}, "away": {"name": "Barcelona"}}}, ("calcio_estero", "La Liga")),
-            ({"title": "Arsenal vs Liverpool", "category": "football", "teams": {"home": {"name": "Arsenal"}, "away": {"name": "Liverpool"}}}, ("calcio_estero", "Premier League")),
+            ({"title": "Inter vs Milan", "category": "football", "country": "Italy", "competition": "Serie A", "teams": {"home": {"name": "Inter"}, "away": {"name": "Milan"}}}, ("calcio_italiano", "Serie A")),
+            ({"title": "Palermo vs Bari", "category": "football", "country": "Italy", "competition": "Serie B", "teams": {"home": {"name": "Palermo"}, "away": {"name": "Bari"}}}, ("calcio_italiano", "Serie B")),
+            ({"title": "Real Madrid vs Barcelona", "category": "football", "country": "Spain", "competition": "La Liga", "teams": {"home": {"name": "Real Madrid"}, "away": {"name": "Barcelona"}}}, ("calcio_estero", "La Liga")),
+            ({"title": "Arsenal vs Liverpool", "category": "football", "country": "England", "competition": "Premier League", "teams": {"home": {"name": "Arsenal"}, "away": {"name": "Liverpool"}}}, ("calcio_estero", "Premier League")),
             ({"title": "Formula 1 - Monza GP Race", "category": "motor-sports"}, ("motori", "Formula 1")),
             ({"title": "MotoGP Mugello", "category": "motor-sports"}, ("motori", "MotoGP e Superbike")),
             ({"title": "UFC 310 Main Card", "category": "fight"}, ("combattimento", "UFC")),
             ({"title": "WWE Monday Night Raw", "category": "fight"}, ("combattimento", "Wrestling e WWE")),
-            ({"title": "Boston Celtics vs LA Lakers", "category": "basketball", "teams": {"home": {"name": "Celtics"}, "away": {"name": "Lakers"}}}, ("basket", "NBA")),
-            ({"title": "Kansas City Chiefs vs San Francisco 49ers", "category": "american-football", "teams": {"home": {"name": "Chiefs"}, "away": {"name": "49ers"}}}, ("football_americano", "NFL")),
-            ({"title": "Saskatchewan Roughriders at BC Lions", "category": "american-football"}, ("football_americano", "CFL e Altre Leghe")),
+            ({"title": "Boston Celtics vs LA Lakers", "category": "basketball", "country": "USA", "competition": "NBA", "teams": {"home": {"name": "Celtics"}, "away": {"name": "Lakers"}}}, ("basket", "NBA")),
+            ({"title": "Kansas City Chiefs vs San Francisco 49ers", "category": "american-football", "country": "USA", "competition": "NFL", "teams": {"home": {"name": "Chiefs"}, "away": {"name": "49ers"}}}, ("football_americano", "NFL")),
+            ({"title": "Saskatchewan Roughriders at BC Lions", "category": "american-football", "country": "Canada", "competition": "CFL"}, ("football_americano", "CFL e Altre Leghe")),
             ({"title": "Oregon Ducks - USC Trojans", "category": "american-football"}, ("football_americano", "NCAA College Football")),
             # Edge cases & other sports
             ({"title": "Brazil - Serie B: Criciuma vs Operaio PR", "category": "football"}, ("calcio_estero", "Americhe e Leghe Extra-UE")),
             ({"title": "Denmark - 1. division: HB Koge vs Hobro", "category": "football"}, ("calcio_estero", "Altri Campionati Europei")),
             ({"title": "UEFA Nations League: Italy vs France", "category": "football"}, ("calcio_estero", "Nazionali e Amichevoli")),
-            ({"title": "Manchester City vs Inter", "category": "football", "teams": {"home": {"name": "Manchester City"}, "away": {"name": "Inter"}}}, ("calcio_estero", "Champions League")),
+            ({"title": "Manchester City vs Inter", "category": "football", "competition": "UEFA Champions League", "teams": {"home": {"name": "Manchester City"}, "away": {"name": "Inter"}}}, ("calcio_estero", "Champions League")),
             ({"title": "UEFA Champions League: Real Madrid vs Stuttgart", "category": "football"}, ("calcio_estero", "Champions League")),
             ({"title": "Milan vs Barcelona - Club Friendly", "category": "football"}, ("calcio_estero", "Nazionali e Amichevoli")),
             ({"title": "Italy - Serie B: Palermo vs Bari", "category": "football"}, ("calcio_italiano", "Serie B")),
@@ -124,9 +124,9 @@ class StreamSportTestCase(unittest.TestCase):
             ({"title": "Elena Rybakina vs Aryna Sabalenka (WTA - Singles)", "category": "tennis"}, ("tennis", "WTA")),
             ({"title": "Italy vs Netherlands - Billie Jean King Cup", "category": "tennis"}, ("tennis", "Coppa Davis e BJK Cup")),
             ({"title": "Itas Trentino vs Sir Susa Vim Perugia", "category": "volleyball", "country": "Italia"}, ("volley", "Superlega e Serie A1")),
-            ({"title": "New York Yankees vs Boston Red Sox", "category": "baseball"}, ("baseball", "MLB")),
-            ({"title": "Texas Longhorns vs LSU Tigers Baseball", "category": "baseball"}, ("baseball", "NCAA College Baseball")),
-            ({"title": "Edmonton Oilers vs Florida Panthers", "category": "hockey"}, ("hockey", "NHL")),
+            ({"title": "New York Yankees vs Boston Red Sox", "category": "baseball", "country": "USA", "competition": "MLB"}, ("baseball", "MLB")),
+            ({"title": "Texas Longhorns vs LSU Tigers Baseball", "category": "baseball", "competition": "NCAA"}, ("baseball", "NCAA College Baseball")),
+            ({"title": "Edmonton Oilers vs Florida Panthers", "category": "hockey", "country": "USA", "competition": "NHL"}, ("hockey", "NHL")),
             ({"title": "HC Elbflorenz Dresden vs Handball Club Hamburg (Handball Germany DHB Pokal)", "category": "other"}, ("altri_sport", "Pallamano")),
             ({"title": "Sidney University HC vs One Veszprem (IHF Club World Championship)", "category": "other"}, ("altri_sport", "Pallamano")),
             ({"title": "UCI Road World Championship U23 Montreal", "category": "other"}, ("altri_sport", "Ciclismo")),
@@ -137,7 +137,7 @@ class StreamSportTestCase(unittest.TestCase):
             ({"title": "England vs Sri Lanka (One Day International)", "category": "cricket"}, ("altri_sport", "Cricket")),
             ({"title": "England vs Sri Lanka (One Day International)", "category": "other"}, ("altri_sport", "Cricket")),
             ({"title": "South Africa vs Australia (T20 International)", "category": "other"}, ("altri_sport", "Cricket")),
-            ({"title": "Carlton Blues Women vs Hawthorn Hawks Women", "category": "altri_sport"}, ("altri_sport", "Rugby e AFL")),
+            ({"title": "Carlton Blues Women vs Hawthorn Hawks Women", "category": "altri_sport", "competition": "AFLW"}, ("altri_sport", "Rugby e AFL")),
             ({"title": "AFL: Collingwood vs Brisbane Lions", "category": "other"}, ("altri_sport", "Rugby e AFL")),
             ({"title": "ATP & WTA", "category": "tennis"}, ("tennis", "Challenger e Altri")),
         ]
@@ -246,7 +246,7 @@ class StreamSportTestCase(unittest.TestCase):
             self.assertEqual(genre_af, "NCAA College Football")
 
         # 3. Real NFL must be recognized
-        cat_nfl, genre_nfl = genre_classifier.classify({"title": "Kansas City Chiefs vs Baltimore Ravens", "category": "american-football"})
+        cat_nfl, genre_nfl = genre_classifier.classify({"title": "Kansas City Chiefs vs Baltimore Ravens", "category": "american-football", "country": "USA", "competition": "NFL"})
         self.assertEqual(cat_nfl, "football_americano")
         self.assertEqual(genre_nfl, "NFL")
 
@@ -267,12 +267,12 @@ class StreamSportTestCase(unittest.TestCase):
     def test_deduplication(self):
         from app.services.catalog_service import catalog_service
         list1 = [
-            {"id": "m1", "title": "Inter vs Juventus", "date": 1780000000000, "poster": "http://img/1.png", "sources": [{"id": "s1"}]},
-            {"id": "m2", "title": "Real Madrid vs Barcelona", "date": 1780000000000, "poster": "http://img/2.png", "sources": [{"id": "s2"}]},
+            {"id": "m1", "title": "Inter vs Juventus", "category": "football", "country": "Italy", "competition": "Serie A", "date": 1780000000000, "poster": "http://img/1.png", "sources": [{"id": "s1"}]},
+            {"id": "m2", "title": "Real Madrid vs Barcelona", "category": "football", "country": "Spain", "competition": "La Liga", "date": 1780000000000, "poster": "http://img/2.png", "sources": [{"id": "s2"}]},
         ]
         list2 = [
             # Same match with slightly different prefix and title formatting from another source
-            {"id": "dl1", "title": "Italy - Serie A : Inter vs Juventus", "date": 1780000000000, "poster": None, "sources": [{"id": "dl_s1"}]},
+            {"id": "dl1", "title": "Italy - Serie A : Inter vs Juventus", "category": "football", "date": 1780000000000, "poster": None, "sources": [{"id": "dl_s1"}]},
         ]
         merged = catalog_service.merge_and_deduplicate(list1, list2)
         self.assertEqual(len(merged), 2)

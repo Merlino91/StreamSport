@@ -57,7 +57,7 @@ class TestWomenChampionsAndTheSportsDB(unittest.IsolatedAsyncioTestCase):
             "competition": "UEFA Women's Champions League",
             "country": "Europa",
             "category": "football",
-            "_gender": "+",
+            "is_women": True,
             "canonical_competition": "football_uwcl",
         }
         cat, genre = genre_classifier.classify(uwcl_match)
@@ -173,7 +173,7 @@ class TestWomenChampionsAndTheSportsDB(unittest.IsolatedAsyncioTestCase):
             "date": 1700000000000,
             "category": "football",
             "_silo": "football",
-            "_gender": "+",
+            "is_women": True,
             "sources": [],
         }
 
