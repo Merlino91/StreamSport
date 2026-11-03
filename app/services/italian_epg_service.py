@@ -707,10 +707,13 @@ class ItalianEPGService:
 
             # Ignore pure time prefixes like '15:00'
             if not re.match(r"^\d{1,2}:\d{2}$", p0):
-                # Check if p0 has sport prefix e.g. 'Pallavolo: Serie A1'
+                # Check if p0 has generic noise prefix e.g. 'Sport - Serie A'
                 if " - " in p0:
                     subparts = p0.split(" - ", 1)
-                    comp = subparts[1].strip()
+                    if subparts[0].strip().lower() in ("sport", "live", "diretta", "in diretta"):
+                        comp = subparts[1].strip()
+                    else:
+                        comp = p0
                 else:
                     comp = p0
                 details = p1
@@ -772,11 +775,18 @@ class ItalianEPGService:
             if len(sub) == 2 and 2 <= len(sub[0].strip()) <= 35 and 2 <= len(sub[1].strip()) <= 35:
                 parts = [sub[0].strip(), sub[1].strip()]
 
+        NON_TEAM_KEYWORDS = (
+            "gara", "gp", "fp1", "fp2", "qualifiche", "sessione", "programma", "prog",
+            "finale", "semifinale", "quarti", "batterie", "round", "prova", "tappa",
+            "giornata", "sintesi", "differita", "highlights", "preliminari"
+        )
         if len(parts) >= 2:
             h_raw, a_raw = parts[-2], parts[-1]
-            if not any(k in h_raw.lower() for k in ("gara", "gp", "fp1", "fp2", "qualifiche", "sessione")):
-                h_name = cls.COUNTRY_MAP.get(h_raw.lower(), h_raw)
-                a_name = cls.COUNTRY_MAP.get(a_raw.lower(), a_raw)
+            h_low, a_low = h_raw.lower(), a_raw.lower()
+            is_non_team = any(k in h_low or k in a_low for k in NON_TEAM_KEYWORDS)
+            if not is_non_team and 2 <= len(h_raw) <= 35 and 2 <= len(a_raw) <= 35:
+                h_name = cls.COUNTRY_MAP.get(h_low, h_raw)
+                a_name = cls.COUNTRY_MAP.get(a_low, a_raw)
                 teams_dict = {
                     "home": {"name": h_name},
                     "away": {"name": a_name},
@@ -834,7 +844,7 @@ class ItalianEPGService:
             return "altri_sport", "cycling"
 
         # 3. Keyword analysis (specific sports precede football)
-        if any(k in combined for k in ("ufc", "boxe", "boxing", "pugilato", "mma", "wwe", "raw", "smackdown", "nxt", "wrestling", "bellator", "pfl", "arti marziali")):
+        if re.search(r"\b(ufc|boxe|boxing|pugilato|mma|wwe|raw|smackdown|nxt|wrestling|bellator|pfl|arti\s*marziali)\b", combined):
             return "combattimento", "fight"
         if any(k in combined for k in ("volley", "pallavolo", "superlega")):
             return "volley", "volleyball"
@@ -844,14 +854,18 @@ class ItalianEPGService:
             return "tennis", "tennis"
         if any(k in combined for k in ("f1", "motogp", "formula 1", "superbike", "gran premio", "gp indonesia", "gp singapore", "indycar", "nascar", "wec")):
             return "motori", "motor-sports"
-        if any(k in combined for k in ("calcio", "champions league", "europa league", "premier league", "la liga", "bundesliga", "coppa italia", "uefa", "fifa")) or re.search(r"\bserie\s*[abc]\b", combined):
-            return "football", "football"
+        if any(k in combined for k in ("sci", "ski", "pattinaggio", "curling", "biathlon", "snowboard", "bob", "slittino", "skeleton")):
+            return "altri_sport", "winter-sports"
+        if any(k in combined for k in ("olimp", "nuoto", "atletica", "tuffi", "pallanuoto", "ginnastica", "scherma", "pentathlon", "canottaggio", "canoa", "triathlon", "orienteering", "orientamento")):
+            return "altri_sport", "olympics"
         if any(k in combined for k in ("rugby", "sei nazioni", "six nations")):
             return "altri_sport", "rugby"
         if any(k in combined for k in ("baseball", "mlb")):
             return "baseball", "baseball"
-        if any(k in combined for k in ("ciclismo", "giro d'italia", "tour de france", "vuelta")):
+        if any(k in combined for k in ("ciclismo", "ciclocross", "giro d'italia", "tour de france", "vuelta")):
             return "altri_sport", "cycling"
+        if any(k in combined for k in ("calcio", "champions league", "europa league", "premier league", "la liga", "bundesliga", "uefa", "fifa")) or re.search(r"\bserie\s*[abc]\b", combined):
+            return "football", "football"
 
         return "altri_sport", "altri_sport"
 
@@ -1329,11 +1343,25 @@ class ItalianEPGService:
                 slug_title = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")
                 match_id = f"tivusat_{ch_id}_{slug_title}_{int(date_ms / 1000)}"
 
-                # Extract Tivùsat official image if available
+                # Extract Tivùsat official image if available (supports list of dicts, dict, or direct URL on ev and prog)
                 tivu_poster = None
-                img = prog.get("image") or (prog.get("images", {}).get("url") if isinstance(prog.get("images"), dict) else None)
-                if img and str(img).startswith("http"):
-                    tivu_poster = str(img)
+                raw_imgs = ev.get("images") or prog.get("images") or ev.get("image") or prog.get("image")
+                if isinstance(raw_imgs, list):
+                    for candidate in raw_imgs:
+                        if isinstance(candidate, dict) and candidate.get("url"):
+                            c_url = str(candidate["url"]).strip()
+                            if c_url.startswith("http"):
+                                tivu_poster = c_url
+                                break
+                        elif isinstance(candidate, str) and candidate.startswith("http"):
+                            tivu_poster = candidate
+                            break
+                elif isinstance(raw_imgs, dict):
+                    c_url = str(raw_imgs.get("url") or "").strip()
+                    if c_url.startswith("http"):
+                        tivu_poster = c_url
+                elif isinstance(raw_imgs, str) and raw_imgs.startswith("http"):
+                    tivu_poster = raw_imgs
 
                 match_obj: Dict[str, Any] = {
                     "id": match_id,

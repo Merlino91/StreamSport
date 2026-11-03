@@ -107,7 +107,7 @@ class GenreClassifier:
 
     # --- Precompiled Silo Resolution & Sub-Sport Regex Patterns ---
     _HANDBALL_OTHER_SPORTS_EXCLUSION_REGEX = re.compile(
-        r"\b(snooker|q\s*tour|billiards|biliardo|padel|golf|pga|lpga|ryder\s*cup|masters\s*tournament|darts|freccette|pdc|rugby|six\s*nations|sei\s*nazioni|nrl|top\s*14|premiership\s*rugby|urc|super\s*rugby|afl|aflw|cricket|odi|t20|twenty20|test\s*match|ipl|one\s*day\s*international|the\s*hundred|big\s*bash|ashes|ciclismo|cycling|tour\s*de\s*france|giro\s*d['’]italia|vuelta|uci|road\s*race|time\s*trial|handball|pallamano|ehf|ihf|dhb\s*pokal|waterpolo|pallanuoto|table\s*tennis|ping\s*pong|badminton)\b",
+        r"\b(snooker|q\s*tour|billiards|biliardo|padel|golf|pga|lpga|ryder\s*cup|masters\s*tournament|darts|freccette|pdc|rugby|six\s*nations|sei\s*nazioni|nrl|top\s*14|premiership\s*rugby|urc|super\s*rugby|afl|aflw|cricket|odi|t20|twenty20|test\s*match|ipl|one\s*day\s*international|the\s*hundred|big\s*bash|ashes|ciclismo|cycling|ciclocross|cyclocross|tour\s*de\s*france|giro\s*d['’]italia|vuelta|uci|road\s*race|time\s*trial|handball|pallamano|ehf|ihf|dhb\s*pokal|waterpolo|pallanuoto|table\s*tennis|ping\s*pong|badminton|curling|biathlon|pattinaggio|nuoto|swimming|atletica|athletics|olimp|olympic)\b",
         re.IGNORECASE,
     )
     _GENERIC_MOTORSPORT_REGEX = re.compile(r"\b(formula\s*1|formula\s*one|f1|motogp|moto\s*gp|moto2|moto3|superbike|wsbk|nascar|indycar|rally|wrc|dakar)\b", re.I)
@@ -118,7 +118,38 @@ class GenreClassifier:
     _GENERIC_AM_FOOTBALL_REGEX = re.compile(r"\b(nfl|cfl|ufl|cfb|college\s*football|american\s*football|super\s*bowl)\b", re.I)
     _GENERIC_BASEBALL_REGEX = re.compile(r"\b(baseball|mlb|npb|kbo|lmb)\b", re.I)
     _GENERIC_VOLLEY_REGEX = re.compile(r"\b(volleyball|volley|pallavolo|superlega|plusliga)\b", re.I)
-    _GENERIC_ALTRI_SPORT_REGEX = re.compile(r"\b(golf|pga|lpga|darts|freccette|rugby|six\s*nations|afl|cricket|odi|t20|ciclismo|cycling|tour\s*de\s*france|giro\s*d['’]italia|handball|pallamano|snooker|padel)\b", re.I)
+    _GENERIC_ALTRI_SPORT_REGEX = re.compile(r"\b(golf|pga|lpga|darts|freccette|rugby|six\s*nations|afl|cricket|odi|t20|ciclismo|cycling|ciclocross|cyclocross|tour\s*de\s*france|giro\s*d['’]italia|handball|pallamano|snooker|padel|curling|biathlon|pattinaggio|nuoto|swimming|atletica|athletics|olimp|olympic)\b", re.I)
+
+    # Altri Sport sub-sport regexes
+    _GOLF_REGEX = re.compile(
+        r"\b(golf|pga|lpga|ryder\s*cup|presidents\s*cup|liv|dp\s*world|masters\s*tournament|challenge\s*tour|links\s*championship|open\s*de\b|open\s*de\s*france|irish\s*open|italian\s*pro\s*tour|alps\s*tour)\b",
+        re.I,
+    )
+    _CYCLING_REGEX = re.compile(
+        r"\b(ciclismo|cycling|ciclocross|cyclocross|tour\s*de\s*france|giro\s*d['’]italia|vuelta|uci|road\s*race|time\s*trial)\b",
+        re.I,
+    )
+    _WINTER_SPORTS_REGEX = re.compile(
+        r"\b("
+        r"sci\b|ski|skiing|sci\s*alpino|alpine\s*skiing|sci\s*di\s*fondo|cross\s*country|"
+        r"biathlon|salto\s*con\s*gli\s*sci|ski\s*jumping|snowboard|nordic\s*combined|combinata\s*nordica|"
+        r"pattinaggio|figure\s*skating|speed\s*skating|short\s*track|skate\s*canada|skate\s*america|"
+        r"curling|bob\b|bobsleigh|slittino|luge|skeleton|winter\s*sports"
+        r")\b",
+        re.I,
+    )
+    _OLYMPIC_ATHLETICS_REGEX = re.compile(
+        r"\b("
+        r"olimp|olimpiadi|olympic|olympics|giochi\s*olimpici|youth\s*olympic|"
+        r"atletica|athletics|maratona|marathon|corsa\s*su\s*strada|"
+        r"nuoto|swimming|tuffi|diving|pallanuoto|water\s*polo|nuoto\s*sincronizzato|synchro|"
+        r"ginnastica|gymnastics|artistica|ritmica|"
+        r"scherma|fencing|pentathlon|laser\s*run|triathlon|ironman|"
+        r"canottaggio|rowing|sculls|canoa|canoe|kayak|vela|sailing|tender|"
+        r"orienteering|orientamento|judo|taekwondo|karate|sollevamento\s*pesi|weightlifting|tiro\s*con\s*l['’]arco|archery"
+        r")\b",
+        re.I,
+    )
 
     # Tennis
     _TENNIS_SLAM_REGEX = re.compile(r"\b(wimbledon|us\s*open|roland\s*garros|australian\s*open|french\s*open|slam)\b", re.I)
@@ -607,14 +638,18 @@ class GenreClassifier:
             return "altri_sport", "Rugby e AFL"
         if re.search(r"\b(cricket|odi|t20|twenty20|test\s*match|ipl|one\s*day\s*international|the\s*hundred|big\s*bash|ashes)\b", eval_text) or cat == "cricket" or silo == "cricket":
             return "altri_sport", "Cricket"
-        if re.search(r"\b(golf|pga|lpga|ryder\s*cup|presidents\s*cup|liv|dp\s*world|masters\s*tournament)\b", eval_text) or cat == "golf" or silo == "golf":
+        if self._GOLF_REGEX.search(eval_text) or cat == "golf" or silo == "golf":
             return "altri_sport", "Golf"
         if re.search(r"\b(darts|freccette|pdc|world\s*darts)\b", eval_text):
             return "altri_sport", "Freccette / Darts"
-        if (re.search(r"\b(ciclismo|cycling|tour\s*de\s*france|giro\s*d['’]italia|vuelta|uci|road\s*race|time\s*trial)\b", eval_text) or cat == "cycling" or silo == "cycling") and "hockey" not in title_lower:
+        if (self._CYCLING_REGEX.search(eval_text) or cat == "cycling" or silo == "cycling") and "hockey" not in title_lower:
             return "altri_sport", "Ciclismo"
         if re.search(r"\b(handball|pallamano|ihf|ehf|dhb\s*pokal|bundesliga\s*handball)\b", eval_text) or cat == "handball" or silo == "handball":
             return "altri_sport", "Pallamano"
+        if self._WINTER_SPORTS_REGEX.search(eval_text) or cat in ("winter-sports", "wintersports") or silo in ("winter-sports", "wintersports"):
+            return "altri_sport", "Sport Invernali"
+        if self._OLYMPIC_ATHLETICS_REGEX.search(eval_text) or cat in ("olympics", "athletics") or silo in ("olympics", "athletics"):
+            return "altri_sport", "Sport Olimpici e Atletica"
         return "altri_sport", "Biliardo, Padel e Altri"
 
     def _classify_football(self, match: Dict[str, Any], eval_text: str, is_women: bool, is_youth: bool) -> Tuple[str, str]:

@@ -271,7 +271,13 @@ class BannerService:
 
         # Clean title from redundant prefixes
         clean_title = re.sub(r"^[0-9:\s-]+(?:\s*:\s*)?", "", title)
-        clean_title = re.sub(r"^[A-Za-z0-9\s-]+:\s*", "", clean_title)
+        m_pref = re.match(r"^([A-Za-z0-9\s-]+):\s*(.+)$", clean_title)
+        if m_pref:
+            pref, rem = m_pref.group(1).strip().lower(), m_pref.group(2).strip()
+            is_generic_lead = pref in ("live", "diretta", "in diretta", "sport", "match", "evento", "partita", "in differita", "replica")
+            has_matchup = bool(re.search(r"\bvs\b|\s+-\s+", rem, re.I))
+            if is_generic_lead or has_matchup:
+                clean_title = rem
 
         # Strip all emojis, flags and 4-byte Unicode pictographs to avoid tofu boxes
         clean_title = re.sub(r"[\U00010000-\U0010ffff]", "", clean_title)

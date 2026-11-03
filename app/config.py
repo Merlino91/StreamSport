@@ -207,6 +207,8 @@ CATALOG_DEFINITIONS = [
             "Ciclismo",
             "Cricket",
             "Pallamano",
+            "Sport Invernali",
+            "Sport Olimpici e Atletica",
             "Biliardo, Padel e Altri",
         ],
     },

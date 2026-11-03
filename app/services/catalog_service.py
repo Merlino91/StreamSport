@@ -485,7 +485,12 @@ class CatalogService:
         t = (title or "").lower()
         t = unicodedata.normalize("NFKD", t).encode("ascii", "ignore").decode("utf-8")
         t = re.sub(r"\|\s*[^|]+$", "", t)
-        t = re.sub(r"^[^:]+:\s*", "", t)
+        if ":" in t:
+            after_colon = t.split(":", 1)[1]
+            if re.search(r"\bvs\b|\s+-\s+", after_colon):
+                t = after_colon
+            else:
+                t = t.replace(":", " ")
         t = re.sub(r"\([^)]*\)", "", t)
         t = re.sub(r"^(?:italy|england|spain|germany|france|uefa|fifa|brazil|usa|[a-z]+)\s*-\s*", "", t)
         t = re.sub(r"[^a-z0-9]+", " ", t).strip()
@@ -783,6 +788,15 @@ class CatalogService:
                             comp_mod = -0.20
 
                     final_score = base_sim - time_penalty + comp_mod
+
+                    # For individual / non-team events without structured teams, require a higher threshold and never merge opposing genders
+                    if not m2_teams and not ex_teams:
+                        is_m2_w = bool(re.search(r"\b(women|femminile|femminili|ladies|damen|dames)\b", (m2.get("title") or "") + " " + (m2.get("competition") or ""), re.I))
+                        is_ex_w = bool(re.search(r"\b(women|femminile|femminili|ladies|damen|dames)\b", (existing.get("title") or "") + " " + (existing.get("competition") or ""), re.I))
+                        if is_m2_w != is_ex_w:
+                            continue
+                        if final_score < 0.78:
+                            continue
 
                     if final_score >= 0.68:
                         matched_idx = idx
