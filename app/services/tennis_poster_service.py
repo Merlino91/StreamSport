@@ -441,10 +441,11 @@ class TennisPosterService:
     @staticmethod
     def is_female_competition(title: str, genre: str = "") -> bool:
         """Determines if a match belongs to a women's tournament or circuit."""
-        combined = f"{genre} {title}".lower()
-        return bool(
-            re.search(r"\b(wta|women(?:'s)?|ladies|femminile|donne|bjk|billie\s*jean|fed\s*cup)\b", combined)
-        )
+        if genre and "wta" in genre.lower():
+            return True
+        from app.utils.demographics import extract_demographics
+        is_w, _ = extract_demographics(f"{genre} {title}")
+        return is_w
 
     def _get_unknown_cutout(self, is_female: bool = False) -> Optional[Image.Image]:
         """Loads the official locked/unknown athlete bust silhouette asset (male or female)."""
@@ -608,7 +609,8 @@ class TennisPosterService:
 
         # 3. Explicit circuit identity in event TITLE (highest priority over any channel/genre noise)
         has_atp_title = bool(re.search(r"\batp\b", t_lower))
-        has_wta_title = bool(re.search(r"\bwta\b", t_lower)) or bool(re.search(r"\b(femminile|donne|women(?:'s)?|ladies)\b", t_lower))
+        from app.utils.demographics import extract_demographics
+        has_wta_title = bool(re.search(r"\bwta\b", t_lower)) or extract_demographics(t_lower)[0]
 
         if has_atp_title and has_wta_title:
             return {"bg_file": "bg_atp.jpg", "badge_text": "ATP & WTA TOURS"}

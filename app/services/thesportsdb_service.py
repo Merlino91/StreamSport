@@ -22,6 +22,7 @@ from app.services.canonical_competition_service import (
     is_simulcast_event,
 )
 from app.services.team_matching import clean_team_name, match_single_team, extract_team_name, GENERIC_CLUB_WORDS
+from app.utils.demographics import extract_demographics
 
 logger = logging.getLogger("streamsport.thesportsdb")
 
@@ -228,8 +229,7 @@ class TheSportsDBService:
 
             full_cal_text = f"{league_raw} : {event_raw}"
             cal_canon = detect_canonical_competition(full_cal_text, silo_hint=silo)
-            is_cal_youth = bool(re.search(r"\b(u-?1[5-9]|u-?2[01]|under\s*1[5-9]|under\s*2[01]|youth|juvenil|primavera|junior)\b", full_cal_text, re.IGNORECASE))
-            is_cal_women = bool(re.search(r"\b(women(?:['']s)?|femminile|femenino|ladies|frauen|donne|dames|damen|w-|wta|wnba|uwcl)\b|(?<=\w)\s+[dwf]\b|\([dwf]\)", full_cal_text, re.IGNORECASE))
+            is_cal_women, is_cal_youth = extract_demographics(league_raw)
 
             events.append({
                 "title": event_raw,
@@ -576,9 +576,12 @@ class TheSportsDBService:
 
             m_date = m.get("date", 0)
             m_comp = m.get("competition") or m.get("_competition") or ""
-            m_text = f"{m_comp} {m.get('title', '')}".lower()
-            m_is_youth = bool(m.get("is_youth")) or bool(re.search(r"\b(u-?1[5-9]|u-?2[01]|under\s*1[5-9]|under\s*2[01]|youth|juvenil|primavera|junior)\b", m_text))
-            m_is_women = bool(m.get("is_women")) or bool(re.search(r"\b(women(?:['']s)?|femminile|femenino|ladies|frauen|donne|dames|damen|w-|wta|wnba|uwcl)\b|(?<=\w)\s+[dwf]\b|\([dwf]\)", m_text))
+            m_is_youth = bool(m.get("is_youth"))
+            m_is_women = bool(m.get("is_women"))
+            if not m_is_youth or not m_is_women:
+                c_w, c_y = extract_demographics(f"{m_comp} {m.get('title', '')}")
+                m_is_women = m_is_women or c_w
+                m_is_youth = m_is_youth or c_y
 
             m_canon = m.get("canonical_competition")
             if not m_canon:
@@ -861,6 +864,7 @@ class TheSportsDBService:
         match_date_ms: int = 0,
         expected_silo: Optional[str] = None,
         is_women: Optional[bool] = None,
+        is_youth: Optional[bool] = None,
     ) -> Optional[str]:
         """
         LEVEL 2 SEARCH: Queries TheSportsDB web search (browse?s=...)
@@ -880,12 +884,8 @@ class TheSportsDBService:
         query = f"{h_kw} {a_kw}"
         url = f"https://www.thesportsdb.com/browse?s={urllib.parse.quote(query)}"
 
-        full_query_low = f"{home_raw} {away_raw}".lower()
-        is_target_youth = bool(re.search(r"\b(u-?1[5-9]|u-?2[01]|under\s*1[5-9]|under\s*2[01]|youth|juvenil|primavera)\b", full_query_low))
-        is_target_women = bool(
-            (is_women is True)
-            or re.search(r"\b(women(?:['']s)?|femminile|ladies|frauen|femenino|donne|dames|damen|w-|wta|uwcl)\b|(?<=\w)\s+[dwf]\b|\([dwf]\)", full_query_low)
-        )
+        is_target_youth = bool(is_youth) if is_youth is not None else False
+        is_target_women = bool(is_women) if is_women is not None else False
 
         try:
             client = await self._get_client()
@@ -997,9 +997,10 @@ class TheSportsDBService:
 
             m_date = m.get("date", 0)
             m_silo = self.get_match_tsdb_silo(m)
-            m_is_women = bool(m.get("is_women")) or bool(re.search(r"\b(women(?:['']s)?|femminile|femenino|ladies|frauen|donne|dames|damen|w-|wta|uwcl)\b|(?<=\w)\s+[dwf]\b|\([dwf]\)", f"{m.get('competition', '')} {m.get('title', '')}".lower()))
+            m_is_women = bool(m.get("is_women"))
+            m_is_youth = bool(m.get("is_youth"))
             thumb = await self.search_event_thumb_html(
-                query_h, query_a, match_date_ms=m_date, expected_silo=m_silo, is_women=m_is_women
+                query_h, query_a, match_date_ms=m_date, expected_silo=m_silo, is_women=m_is_women, is_youth=m_is_youth
             )
             if thumb:
                 m["poster"] = thumb

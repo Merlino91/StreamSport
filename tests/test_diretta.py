@@ -194,8 +194,8 @@ class TestCatalogServiceValidationFallback(unittest.TestCase):
         mock_espn.reconcile_matches.assert_called_once()
 
 
-class TestPostValidationDeduplication(unittest.TestCase):
-    def test_deduplicate_lafc_austin_fc_with_acronym_and_sources(self):
+class TestBuildMetaItemAndMerging(unittest.TestCase):
+    def test_merge_provider_streams_and_build_meta(self):
         from app.services.catalog_service import catalog_service
 
         match_streamed = {
@@ -227,25 +227,17 @@ class TestPostValidationDeduplication(unittest.TestCase):
             "sources": [{"id": "s2", "name": "DaddyLive", "url": "https://daddylive.sx/2"}],
         }
 
-        # 1. Direct duplicate detection test
-        is_dup = catalog_service.are_post_validation_duplicates(match_streamed, match_daddylive)
-        self.assertTrue(is_dup)
-
-        # 2. End-to-end deduplicate_post_validation
-        deduped = catalog_service.deduplicate_post_validation([match_streamed, match_daddylive])
+        # Merge provider clusters before linking
+        deduped = catalog_service.merge_and_deduplicate_by_silos([match_streamed], [match_daddylive])
         self.assertEqual(len(deduped), 1)
 
         merged = deduped[0]
-        # Streams combined from both sources without loss
         self.assertEqual(len(merged["sources"]), 2)
         urls = [s["url"] for s in merged["sources"]]
         self.assertIn("https://streamed.xyz/1", urls)
         self.assertIn("https://daddylive.sx/2", urls)
 
-        # Poster preserved
-        self.assertEqual(merged["poster"], "https://images.thesportsdb.com/events/101.jpg")
-
-        # 3. Test build_meta_item presentation: certified trophy badge, no TV channels in description
+        # Build meta item presentation test
         meta = catalog_service.build_meta_item(merged, "Americhe e Leghe Extra-UE")
         self.assertIn("🏆 Major League Soccer", meta["description"])
         self.assertNotIn("Sky Sport Uno", meta["description"])

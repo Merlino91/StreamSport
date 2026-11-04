@@ -15,6 +15,7 @@ from app.services.tvvoo_service import tvvoo_service
 from app.services.mandrakodi_service import mandrakodi_service
 from app.services.daddylive_api import daddylive_api
 from app.services.team_matching import extract_team_name
+from app.utils.demographics import extract_demographics
 from app.services.canonical_competition_service import (
     is_simulcast_event,
     get_simulcast_info,
@@ -235,7 +236,7 @@ class ItalianEPGService:
     )
 
     MAGAZINE_NOISE = re.compile(
-        r"\b(magazine|speciale|rubrica|storia|monografia|film|doc|documentario|reportage|highlights|rassegna|studio|anteprima|tg|news|debriefing|goleador|bordocam|visione di)\b",
+        r"\b(magazine|speciale|rubrica|storia|monografia|film|doc|documentario|reportage|highlights|rassegna|studio|anteprima|tg|news|debriefing|goleador|bordocam|visione di|1\s*vs\s*1|1-vs-1)\b",
         re.I,
     )
 
@@ -338,6 +339,7 @@ class ItalianEPGService:
     }
 
     MAGAZINE_SLUG_PATTERNS = [
+        re.compile(r"\b1-vs-1\b", re.I),
         re.compile(r"-remix\b", re.I), re.compile(r"\bremix\b", re.I),
         re.compile(r"-magazine\b", re.I), re.compile(r"\bmagazine\b", re.I),
         re.compile(r"-special\b", re.I), re.compile(r"-speciale\b", re.I), re.compile(r"\bspeciale\b", re.I),
@@ -661,10 +663,10 @@ class ItalianEPGService:
         """
         if is_simulcast_event(title):
             return True
-        if teams_dict:
-            return True
         if cls.MAGAZINE_NOISE.search(title):
             return False
+        if teams_dict:
+            return True
         return bool(cls.EVENT_KEYWORDS.search(title))
 
     @classmethod
@@ -1100,6 +1102,7 @@ class ItalianEPGService:
                     if chosen_img:
                         sky_poster = f"https://guidatv.sky.it{chosen_img}" if chosen_img.startswith("/") else chosen_img
 
+                is_w, is_y = extract_demographics(f"{comp} {title}")
                 match_obj: Dict[str, Any] = {
                     "id": match_id,
                     "_provider": "italian_epg",
@@ -1108,6 +1111,8 @@ class ItalianEPGService:
                     "_is_live": is_live,
                     "is_differita": is_diff,
                     "_is_differita": is_diff,
+                    "is_women": is_w,
+                    "is_youth": is_y,
                     "category": cat,
                     "_silo": silo,
                     "competition": comp,
@@ -1363,6 +1368,7 @@ class ItalianEPGService:
                 elif isinstance(raw_imgs, str) and raw_imgs.startswith("http"):
                     tivu_poster = raw_imgs
 
+                is_w, is_y = extract_demographics(f"{comp} {title}")
                 match_obj: Dict[str, Any] = {
                     "id": match_id,
                     "_provider": "italian_epg",
@@ -1371,6 +1377,8 @@ class ItalianEPGService:
                     "_is_live": is_live,
                     "is_differita": is_diff,
                     "_is_differita": is_diff,
+                    "is_women": is_w,
+                    "is_youth": is_y,
                     "category": cat,
                     "_silo": silo,
                     "competition": comp,
@@ -1401,6 +1409,60 @@ class ItalianEPGService:
             matches.extend(channel_matches)
 
         return matches
+
+    @classmethod
+    def _deduplicate_epg_events(cls, events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Deduplicates raw events fetched across Italian EPG sources:
+        1. Merges concurrent simulcasts (e.g. TV8 + Sky Sport Uno within 30m window).
+        2. Absorbs TV session / program reruns within 24h into the earliest airing.
+        """
+        merged_epg: List[Dict[str, Any]] = []
+        for m in events:
+            m_date = m.get("date", 0)
+            m_title = m.get("title", "")
+            m_silo = m.get("_silo", "")
+
+            is_m_tv = not bool(m.get("teams"))
+            duplicate = None
+            for existing in merged_epg:
+                if existing.get("_silo") != m_silo:
+                    continue
+                is_ex_tv = not bool(existing.get("teams"))
+
+                # 1. Standard concurrent simulcast (within 30m window)
+                if abs(existing.get("date", 0) - m_date) < (30 * 60 * 1000):
+                    if existing.get("title") == m_title:
+                        duplicate = existing
+                        break
+                    if m.get("teams") and existing.get("teams") and m.get("teams") == existing.get("teams"):
+                        duplicate = existing
+                        break
+
+                # 2. Non-1v1 TV program / session rerun (identical title within 24h, e.g. Abu Dhabi Judo 01:20 vs 22:15)
+                elif is_m_tv and is_ex_tv and existing.get("title") == m_title:
+                    time_diff = abs(existing.get("date", 0) - m_date)
+                    if time_diff <= 24 * 3600 * 1000:
+                        duplicate = existing
+                        if m_date < existing.get("date", 0):
+                            existing["date"] = m_date
+                            existing["id"] = m.get("id")
+                        break
+
+            if duplicate:
+                # Merge streams from both channels (e.g. Sky Sport Uno + TV8)
+                exist_keys = {(s.get("canonical"), s.get("tag")) for s in duplicate.get("sources", [])}
+                for s in m.get("sources", []):
+                    k = (s.get("canonical"), s.get("tag"))
+                    if k not in exist_keys:
+                        exist_keys.add(k)
+                        duplicate["sources"].append(s)
+                if not duplicate.get("poster") and m.get("poster"):
+                    duplicate["poster"] = m["poster"]
+                    duplicate["background"] = m.get("background") or m["poster"]
+            else:
+                merged_epg.append(m)
+        return merged_epg
 
     async def get_matches(self, force: bool = False) -> List[Dict[str, Any]]:
         """
@@ -1461,51 +1523,7 @@ class ItalianEPGService:
             combined_fetched = fetched_sky + fetched_tivu
 
             # Internal Deduplication within Italian EPG (e.g. event simulcast on Sky Sport Uno and Tivùsat TV8)
-            merged_epg: List[Dict[str, Any]] = []
-            for m in combined_fetched:
-                m_date = m.get("date", 0)
-                m_title = m.get("title", "")
-                m_silo = m.get("_silo", "")
-
-                is_m_tv = not bool(m.get("teams"))
-                duplicate = None
-                for existing in merged_epg:
-                    if existing.get("_silo") != m_silo:
-                        continue
-                    is_ex_tv = not bool(existing.get("teams"))
-
-                    # 1. Standard concurrent simulcast (within 30m window)
-                    if abs(existing.get("date", 0) - m_date) < (30 * 60 * 1000):
-                        if existing.get("title") == m_title:
-                            duplicate = existing
-                            break
-                        if m.get("teams") and existing.get("teams") and m.get("teams") == existing.get("teams"):
-                            duplicate = existing
-                            break
-
-                    # 2. Non-1v1 TV program / session rerun (identical title within 24h, e.g. Abu Dhabi Judo 01:20 vs 22:15)
-                    elif is_m_tv and is_ex_tv and existing.get("title") == m_title:
-                        time_diff = abs(existing.get("date", 0) - m_date)
-                        if time_diff <= 24 * 3600 * 1000:
-                            duplicate = existing
-                            if m_date < existing.get("date", 0):
-                                existing["date"] = m_date
-                                existing["id"] = m.get("id")
-                            break
-
-                if duplicate:
-                    # Merge streams from both channels (e.g. Sky Sport Uno + TV8)
-                    exist_keys = {(s.get("canonical"), s.get("tag")) for s in duplicate.get("sources", [])}
-                    for s in m.get("sources", []):
-                        k = (s.get("canonical"), s.get("tag"))
-                        if k not in exist_keys:
-                            exist_keys.add(k)
-                            duplicate["sources"].append(s)
-                    if not duplicate.get("poster") and m.get("poster"):
-                        duplicate["poster"] = m["poster"]
-                        duplicate["background"] = m.get("background") or m["poster"]
-                else:
-                    merged_epg.append(m)
+            merged_epg = self._deduplicate_epg_events(combined_fetched)
 
             # Rolling Cache / Anti-Midnight Dropout
             retained_old: List[Dict[str, Any]] = []
@@ -1701,15 +1719,15 @@ class ItalianEPGService:
                     continue
 
                 # Guard: Senior broadcast match on Sky/Tivusat MUST NOT match a youth/primavera fixture
-                m_is_youth = bool(m.get("is_youth")) or any(k in m_title.lower() for k in ("u19", "u20", "u21", "u23", "primavera", "youth"))
-                ep_is_youth = any(k in ep.get("title", "").lower() for k in ("u19", "u20", "u21", "u23", "primavera", "youth"))
+                m_is_youth = bool(m.get("is_youth"))
+                ep_is_youth = bool(ep.get("is_youth"))
                 if m_is_youth != ep_is_youth:
                     continue
 
                 # Guard: Non-tennis events must not cross men's and women's competitions
                 if m_silo != "tennis":
-                    m_is_women = bool(m.get("is_women")) or any(k in m_title.lower() for k in ("women", "femminile", "femm", "ladies", "donne"))
-                    ep_is_women = any(k in ep.get("title", "").lower() for k in ("women", "femminile", "femm", "ladies", "donne"))
+                    m_is_women = bool(m.get("is_women"))
+                    ep_is_women = bool(ep.get("is_women"))
                     if m_is_women != ep_is_women:
                         continue
 
@@ -1746,45 +1764,6 @@ class ItalianEPGService:
                             if w1 & w2:
                                 is_same = True
 
-                # Tennis Tournament Session Bridge:
-                # If ep is a general tournament session / main event (not a specific 1v1 match between different players)
-                # and both belong to the same circuit (ATP/WTA/Challenger/Slam) and city/venue,
-                # bridge the official TV channel to the match.
-                # NOTE: For SuperTennis, generic tournament sessions must NEVER bridge to individual 1v1 matches;
-                # individual matches receive SuperTennis strictly if Diretta.it certified it or if ep is a specific 1v1 match.
-                if not is_same and m_silo == "tennis" and ep_silo == "tennis":
-                    is_ep_specific_match = bool(ep_teams and ep_teams.get("home") and ep_teams.get("away"))
-                    is_m_specific_match = bool(m_teams and m_teams.get("home") and m_teams.get("away"))
-
-                    ep_sources = ep.get("sources", [])
-                    is_supertennis_session = any(
-                        s.get("canonical") == "supertennis" or "supertennis" in (s.get("name") or "").lower()
-                        for s in ep_sources if isinstance(s, dict)
-                    )
-
-                    if is_supertennis_session and is_m_specific_match:
-                        # SuperTennis 24/7 channel rule: do not bridge general tournament sessions to individual court matches
-                        pass
-                    elif not is_ep_specific_match:
-                        m_eval = f"{m.get('competition', '')} {m.get('title', '')} {m.get('canonical_competition', '')}"
-                        ep_eval = f"{ep.get('competition', '')} {ep.get('title', '')} {ep.get('eventSynopsis', '')}"
-                        m_circ, m_city = self._extract_tennis_circuit_and_city(m_eval)
-                        ep_circ, ep_city = self._extract_tennis_circuit_and_city(ep_eval)
-                        circ_match = False
-                        if m_circ and ep_circ:
-                            circ_match = (m_circ == ep_circ)
-                        elif m_circ or ep_circ:
-                            circ_match = not ((m_circ == "wta" or "wta" in m_eval.lower()) and (ep_circ == "atp" or "atp" in ep_eval.lower())) and \
-                                         not ((m_circ == "atp" or "atp" in m_eval.lower()) and (ep_circ == "wta" or "wta" in ep_eval.lower()))
-                        else:
-                            circ_match = True
-
-                        city_match = False
-                        if m_city and ep_city:
-                            city_match = (m_city == ep_city or m_city in ep_eval.lower() or ep_city in m_eval.lower())
-
-                        if circ_match and city_match:
-                            is_same = True
 
                 # Motorsport Session Bridge:
                 # Matches Diretta motorsport session with live Sky Sport F1 / Sky Sport MotoGP broadcast

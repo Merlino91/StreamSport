@@ -74,12 +74,13 @@ class TestWomenChampionsAndTheSportsDB(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(cat, "calcio_estero")
         self.assertEqual(genre, "Champions League Femminile")
 
-        # 3. Match with 'Champions League' and 'D' team suffix
+        # 3. Match with 'is_women: True'
         d_uwcl = {
             "title": "Juventus D vs Arsenal D",
             "competition": "Champions League",
             "country": "Europa",
             "category": "football",
+            "is_women": True,
         }
         cat, genre = genre_classifier.classify(d_uwcl)
         self.assertEqual(cat, "calcio_estero")
@@ -207,6 +208,7 @@ class TestWomenChampionsAndTheSportsDB(unittest.IsolatedAsyncioTestCase):
                 away_raw="Juventus D",
                 match_date_ms=1732100000000,
                 expected_silo="football",
+                is_women=True,
             )
             # Should NOT be rejected by is_target_women != is_result_women guard
             self.assertIsNotNone(thumb)

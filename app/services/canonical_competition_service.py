@@ -1383,18 +1383,29 @@ def is_tier_match(m: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
     league = (m.get("league") or m.get("competition") or "").lower().strip()
     sport = (m.get("sport") or "").lower().strip()
 
+    if m.get("is_women") is not None:
+        is_women = bool(m.get("is_women"))
+    else:
+        from app.utils.demographics import extract_demographics
+        is_women, _ = extract_demographics(f"{country} {league}")
+
+    if m.get("is_youth") is not None:
+        is_youth = bool(m.get("is_youth"))
+    else:
+        from app.utils.demographics import extract_demographics
+        _, is_youth = extract_demographics(f"{country} {league}")
+
     # ========================== CALCIO ==========================
     if silo == "football" or "calcio" in sport or "soccer" in sport:
         # Exclude youth, reserve, amateur, and fourth/fifth tier divisions
-        if any(w in league for w in (
-            "u15", "u16", "u17", "u18", "u19", "u20", "u21", "u23",
-            "primavera", "next pro", "amatori", "dilettanti", "eccellenza", "promozione", "tercera"
+        if is_youth or any(w in league for w in (
+            "next pro", "amatori", "dilettanti", "eccellenza", "promozione", "tercera"
         )):
             return False, None
 
         # 1. Italia (Tier 1 & 2 - Serie D strictly excluded)
         if country in ("italia", "italy"):
-            if "serie a" in league and not any(w in league for w in ("femminile", "women", "dame")):
+            if "serie a" in league and not is_women:
                 return True, "football_serie_a"
             if "serie b" in league:
                 return True, "football_serie_b"
@@ -1402,14 +1413,13 @@ def is_tier_match(m: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
                 return True, "football_serie_c"
             if "coppa italia" in league or "supercoppa italiana" in league:
                 return True, "football_coppa_italia"
-            is_femm = bool(m.get("is_women")) or any(w in league for w in ("femminile", "women", "donne"))
-            if "serie a" in league and is_femm:
+            if "serie a" in league and is_women:
                 return True, "football_serie_a_women"
             return False, None
 
         # 2. Inghilterra / UK
         if country in ("inghilterra", "england", "regno unito", "uk"):
-            if any(w in league for w in ("donne", "women", "femminile", "ladies")):
+            if is_women:
                 return False, None
             if "premier league" in league and "2" not in league:
                 return True, "football_premier_league"
@@ -1421,9 +1431,9 @@ def is_tier_match(m: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
 
         # 3. Spagna
         if country in ("spagna", "spain"):
-            if any(w in league for w in ("donne", "women", "femminile", "femenin")):
+            if is_women:
                 return False, None
-            if "laliga" in league or "la liga" in league or "primera division" in league:
+            if "laliga" in league or "laPiliga" in league or "primera division" in league or "la liga" in league:
                 if "2" in league or "hypermotion" in league:
                     return True, "football_segunda"
                 return True, "football_la_liga"
@@ -1433,7 +1443,7 @@ def is_tier_match(m: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
 
         # 4. Germania
         if country in ("germania", "germany"):
-            if any(w in league for w in ("donne", "women", "femminile", "frauen")):
+            if is_women:
                 return False, None
             if "bundesliga" in league:
                 if "2." in league or "2 " in league:
@@ -1445,7 +1455,7 @@ def is_tier_match(m: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
 
         # 5. Francia
         if country in ("francia", "france"):
-            if any(w in league for w in ("donne", "women", "femminile", "dames", "feminin")):
+            if is_women:
                 return False, None
             if "ligue 1" in league:
                 return True, "football_ligue_1"
@@ -1461,11 +1471,11 @@ def is_tier_match(m: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
                 if any(w in league for w in ("champions league", "afc", "cl", "coppa")):
                     return True, "football_afc_cl"
             if "champions league" in league or "uwcl" in league:
-                if any(w in league for w in ("donne", "women", "femminile", "uwcl")) or bool(m.get("is_women")):
+                if is_women or "uwcl" in league:
                     return True, "football_uwcl"
                 return True, "football_uefa_cl"
             if "europa league" in league:
-                if any(w in league for w in ("donne", "women", "femminile")):
+                if is_women:
                     return False, None
                 return True, "football_uefa_el"
             if "conference league" in league:
@@ -1485,11 +1495,7 @@ def is_tier_match(m: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
             return False, None
 
         # 7. Altre Leghe Tier 2
-        is_foreign_women = (
-            bool(m.get("is_women"))
-            or any(w in league for w in ("donne", "women", "femminile", "femenil", "femenino", "dames", "frauen"))
-        )
-        if is_foreign_women:
+        if is_women:
             return False, None
 
         if country in ("portogallo", "portugal") and ("liga portugal" in league or "primeira liga" in league or "taca de portugal" in league):
@@ -1533,8 +1539,7 @@ def is_tier_match(m: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
         if "champions league" in league:
             return True, "basketball_bcl"
         if country in ("italia", "italy"):
-            is_femm = bool(m.get("is_women")) or any(w in league for w in ("femminile", "women", "dame", "femm"))
-            if is_femm:
+            if is_women:
                 if "serie a2" in league:
                     return True, "basketball_serie_a2_femm"
                 return True, "basketball_serie_a1_femm"
@@ -1551,8 +1556,7 @@ def is_tier_match(m: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
     # ========================== VOLLEY ==========================
     if silo == "volley" or "pallavolo" in sport or "volleyball" in sport:
         if country in ("italia", "italy"):
-            is_femm = bool(m.get("is_women")) or any(w in league for w in ("femminile", "women", "dame", "femm"))
-            if is_femm:
+            if is_women:
                 if "serie a2" in league:
                     return True, "volleyball_serie_a2_femm"
                 return True, "volleyball_serie_a1_femm"

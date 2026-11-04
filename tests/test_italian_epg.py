@@ -718,7 +718,7 @@ class TestItalianEPGService(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(tokyo_events[0]["end_date"], int(datetime.datetime.fromisoformat("2026-10-30T08:00:00+00:00").timestamp() * 1000))
 
     def test_epg_internal_dedup_rerun_within_24h(self):
-        from app.services.catalog_service import catalog_service
+        from app.services.italian_epg_service import italian_epg_service
 
         m1 = {
             "id": "sky_9093_abu_dhabi_1",
@@ -726,6 +726,7 @@ class TestItalianEPGService(unittest.IsolatedAsyncioTestCase):
             "date": 1793282100000,  # 22:15
             "_silo": "altri_sport",
             "category": "altri_sport",
+            "sources": [{"name": "Sky Sport Uno"}],
         }
         m2 = {
             "id": "sky_11909_abu_dhabi_1_rerun",
@@ -733,9 +734,11 @@ class TestItalianEPGService(unittest.IsolatedAsyncioTestCase):
             "date": 1793308500000,  # 01:20 (3h later)
             "_silo": "altri_sport",
             "category": "altri_sport",
+            "sources": [{"name": "Sky Sport Arena"}],
         }
-        # catalog_service are_post_validation_duplicates must detect rerun within 24h
-        self.assertTrue(catalog_service.are_post_validation_duplicates(m1, m2))
+        # italian_epg_service _deduplicate_epg_events must detect rerun within 24h
+        deduped = italian_epg_service._deduplicate_epg_events([m1, m2])
+        self.assertEqual(len(deduped), 1)
 
 
 
@@ -867,6 +870,23 @@ class TestItalianEPGService(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(mandrakodi_service.get_canonical_channel_key("EuroSport 1 (ITA)"), "eurosport 1")
         self.assertEqual(mandrakodi_service.get_canonical_channel_key("EuroSport 2 (ITA)"), "eurosport 2")
         self.assertEqual(mandrakodi_service.get_canonical_channel_key("Sportitalia SoloCalcio"), "sportitalia solocalcio")
+
+    def test_one_vs_one_rubric_is_blacklisted(self):
+        """Verifies DAZN/Sky '1 vs 1' interview rubric is discarded by semantic URL and title filters."""
+        from app.services.italian_epg_service import ItalianEPGService
+
+        # 1. Semantic URL check
+        url = "/sport/1-vs-1/woltemade/c1618de0-e386-4da9-b345-6d1810a6e478"
+        comp, is_magazine = ItalianEPGService._parse_sky_semantic_url(url)
+        self.assertTrue(is_magazine)
+
+        # 2. Magazine noise regex on title
+        self.assertTrue(bool(ItalianEPGService.MAGAZINE_NOISE.search("1 vs 1: Woltermade")))
+        self.assertTrue(bool(ItalianEPGService.MAGAZINE_NOISE.search("1-vs-1: Goncalo Ramos")))
+
+        # 3. Real sport event validation drops 1 vs 1 even if misparsed as teams
+        teams = {"home": "1", "away": "1: Woltermade"}
+        self.assertFalse(ItalianEPGService._is_real_sport_event("1 vs 1: Woltermade", teams))
 
 
 if __name__ == "__main__":

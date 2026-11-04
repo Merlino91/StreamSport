@@ -12,6 +12,7 @@ import httpx
 from app.services.canonical_competition_service import detect_canonical_competition, get_canonical_display_name
 from app.services.team_matching import calculate_match_score, extract_team_words
 from app.services.tvvoo_service import tvvoo_service
+from app.utils.demographics import extract_demographics
 
 logger = logging.getLogger("streamsport.diretta")
 
@@ -220,15 +221,7 @@ class DirettaService:
                         full_home = self.reconstruct_tennis_name(home, fields.get("WU") or "")
                         full_away = self.reconstruct_tennis_name(away, fields.get("WV") or "")
 
-                    eval_text = f"{current_league} {home} {away} {current_country}".lower()
-                    is_w = bool(re.search(
-                        r"\b(women(?:[’']s)?|femminile|femenino|ladies|frauen|donne|dames|damen|w-|wta|wnba|uwcl)\b|(?<=\w)\s+[dwf]\b|\([dwf]\)",
-                        eval_text
-                    ))
-                    is_y = bool(re.search(
-                        r"\b(u-?1[5-9]|u-?2[01]|under\s*1[5-9]|under\s*2[01]|youth|primavera|junior)\b",
-                        eval_text
-                    ))
+                    is_w, is_y = extract_demographics(current_league)
 
                     match_obj = {
                         "id": f"diretta-{m_id}",
@@ -472,11 +465,16 @@ class DirettaService:
                 "sources": [],
             }
 
-            # Preserve gender/age
-            c_text = f"{comp} {d_home} {d_away}".lower()
-            if m.get("is_women") or re.search(r"\b(women(?:[’']s)?|femminile|femenino|ladies|frauen|donne|dames|damen|w-|wta|wnba|uwcl)\b|(?<=\w)\s+[dwf]\b|\([dwf]\)", c_text):
+            # Preserve gender/age strictly from official extraction or competition text
+            is_w = bool(m.get("is_women"))
+            is_y = bool(m.get("is_youth"))
+            if not is_w or not is_y:
+                comp_w, comp_y = extract_demographics(comp)
+                is_w = is_w or comp_w
+                is_y = is_y or comp_y
+            if is_w:
                 official_match["is_women"] = True
-            if m.get("is_youth") or re.search(r"\b(u-?1[5-9]|u-?2[01]|under\s*1[5-9]|under\s*2[01]|youth|primavera|junior)\b", c_text):
+            if is_y:
                 official_match["is_youth"] = True
 
             # Classify catalog and genre using official genre_classifier
@@ -600,12 +598,15 @@ class DirettaService:
                     m["country"] = chosen["country"]
                     m["_country"] = chosen["country"]
 
-                # Inherit confirmed traits from chosen candidate
-                c_text = f"{chosen.get('competition', '')} {chosen.get('home', '')} {chosen.get('away', '')}".lower()
-                if chosen.get("is_women") or re.search(r"\b(women(?:[’']s)?|femminile|femenino|ladies|frauen|donne|dames|damen|w-|wta|wnba|uwcl)\b|(?<=\w)\s+[dwf]\b|\([dwf]\)", c_text):
+                # Inherit confirmed traits from chosen candidate (Diretta is authoritative)
+                if chosen.get("is_women"):
                     m["is_women"] = True
-                if chosen.get("is_youth") or re.search(r"\b(u-?1[5-9]|u-?2[01]|under\s*1[5-9]|under\s*2[01]|youth|primavera|junior)\b", c_text):
+                elif "is_women" in chosen:
+                    m["is_women"] = False
+                if chosen.get("is_youth"):
                     m["is_youth"] = True
+                elif "is_youth" in chosen:
+                    m["is_youth"] = False
 
                 # Adopt official competition from chosen validator candidate (Diretta is authoritative)
                 if chosen.get("competition") and not self.is_generic_competition(chosen["competition"]):

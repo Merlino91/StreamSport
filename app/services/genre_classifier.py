@@ -1,5 +1,6 @@
 import re
 from typing import Any, Dict, Optional, Tuple
+from app.utils.demographics import extract_demographics
 from app.services.canonical_competition_service import (
     is_redzone_event,
     is_simulcast_event,
@@ -13,16 +14,6 @@ class GenreClassifier:
     5-layer intelligent classifier that assigns a dedicated catalog and granular genre
     to any sports match/event.
     """
-
-    # Women & Youth patterns
-    _WOMEN_REGEX = re.compile(
-        r"\b(women(?:[’']s)?|femminile|ladies|frauen|féminine|femenino|donne|dames|damen|w-|wta|uwcl)\b|(?<=\w)\s+[dwf]\b|\([dwf]\)",
-        re.IGNORECASE,
-    )
-    _YOUTH_REGEX = re.compile(
-        r"\b(u-?\d{1,2}|under\s*\d{1,2}|sub-?\d{1,2}|primavera|youth|giovanili|allievi|juniores|cadete|juvenil|college(?:\s*soccer)?|ncaa)\b",
-        re.IGNORECASE,
-    )
 
     # Foreign leagues & countries that might have homonym leagues (e.g. Brazil - Serie B, Russia - FNL)
     _FOREIGN_LEAGUE_REGEX = re.compile(
@@ -154,7 +145,6 @@ class GenreClassifier:
     # Tennis
     _TENNIS_SLAM_REGEX = re.compile(r"\b(wimbledon|us\s*open|roland\s*garros|australian\s*open|french\s*open|slam)\b", re.I)
     _TENNIS_DAVIS_BJK_REGEX = re.compile(r"\b(davis|bjk|billie\s*jean|laver\s*cup|united\s*cup|hopman\s*cup)\b", re.I)
-    _TENNIS_WOMEN_REGEX = re.compile(r"\b(women|femminile|femenino)\b", re.I)
     _TENNIS_CHALLENGER_REGEX = re.compile(r"\b(challenger|itf|exhibition|esibizione|uts|ultimate\s*tennis)\b", re.I)
 
     # Motori
@@ -173,7 +163,6 @@ class GenreClassifier:
     _NBA_TOKEN_REGEX = re.compile(r"\b(nba|nba-preseason|summer\s*league|national\s*basketball\s*association)\b", re.I)
 
     # Volley
-    _VOLLEY_WOMEN_REGEX = re.compile(r"\b(women(?:['’]s)?|femminile|femenil|dames|frauen|ladies|a1\s*femm|serie\s*a1\s*f)\b", re.I)
     _VOLLEY_CEV_REGEX = re.compile(r"\b(cev|champions\s*league|cev\s*cup|challenge\s*cup)\b", re.I)
     _VOLLEY_NATIONAL_REGEX = re.compile(r"\b(vnl|nations\s*league|mondiali|europei|olympics|world\s*championship|world\s*cup|qualif|national\s*team)\b", re.I)
     _VOLLEY_FOREIGN_REGEX = re.compile(r"\b(plusliga|tauron|sultanlar|superliga\s*russia|pro\s*a|bundesliga|volley\s*league|extraliga)\b", re.I)
@@ -225,8 +214,15 @@ class GenreClassifier:
         country = (match.get("country") or match.get("_country") or "").lower().strip()
         raw_title_lower = (match.get("raw_title") or "").strip().lower()
         eval_text = f"{title_lower} {country} {comp} {raw_title_lower}".strip()
-        is_women = bool(match.get("is_women")) or bool(self._WOMEN_REGEX.search(eval_text))
-        is_youth = bool(match.get("is_youth")) or bool(self._YOUTH_REGEX.search(eval_text))
+        if match.get("is_women") is not None:
+            is_women = bool(match.get("is_women"))
+        else:
+            is_women, _ = extract_demographics(f"{comp} {title_lower} {raw_title_lower}")
+
+        if match.get("is_youth") is not None:
+            is_youth = bool(match.get("is_youth"))
+        else:
+            _, is_youth = extract_demographics(f"{comp} {title_lower} {raw_title_lower}")
 
         # 0. Early Simulcast & Multi-match show routing (NFL RedZone, Golazo, Diretta Gol, etc.)
         sim_info = get_simulcast_info(title_lower, match.get("category") or match.get("_silo")) or get_simulcast_info(str(match.get("id", "")))
@@ -366,7 +362,11 @@ class GenreClassifier:
                 return "altri_sport"
 
         # 2. Football explicit OR match with soccer league indicators
-        is_youth = bool(match.get("is_youth")) or bool(self._YOUTH_REGEX.search(eval_text))
+        if match.get("is_youth") is not None:
+            is_youth = bool(match.get("is_youth"))
+        else:
+            _, is_youth = extract_demographics(f"{match.get('competition', '')} {eval_text}")
+
         is_football_candidate = (
             cat in ("football", "soccer")
             or silo == "football"
@@ -416,9 +416,10 @@ class GenreClassifier:
             return "tennis", "Grandi Slam"
         if self._TENNIS_DAVIS_BJK_REGEX.search(eval_text):
             return "tennis", "Coppa Davis e BJK Cup"
-        if "atp" in eval_text and "wta" in eval_text:
-            return "tennis", "Challenger e Altri"
-        if is_women or "wta" in eval_text or self._TENNIS_WOMEN_REGEX.search(eval_text):
+        comp_text = (match.get("competition") or match.get("_competition") or match.get("league") or "").lower()
+        if "atp" in comp_text:
+            return "tennis", "ATP"
+        if is_women or "wta" in comp_text or "wta" in eval_text:
             return "tennis", "WTA"
         if "atp" in eval_text:
             return "tennis", "ATP"
@@ -439,7 +440,7 @@ class GenreClassifier:
 
     def _classify_basketball(self, match: Dict[str, Any], eval_text: str, is_women: bool, is_youth: bool) -> Tuple[str, str]:
         # 1. WNBA & Basket Femminile
-        if is_women or self._WNBA_REGEX.search(eval_text):
+        if is_women:
             return "basket", "WNBA e Femminile"
 
         # 2. FIBA, 3x3 e Tornei Nazionali
@@ -491,7 +492,7 @@ class GenreClassifier:
 
     def _classify_volleyball(self, match: Dict[str, Any], eval_text: str, is_women: bool) -> Tuple[str, str]:
         # 1. Volley Femminile
-        if is_women or bool(self._VOLLEY_WOMEN_REGEX.search(eval_text)):
+        if is_women:
             return "volley", "Volley Femminile"
 
         # 2. Champions League Volley

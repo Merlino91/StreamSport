@@ -21,6 +21,7 @@ from app.services.canonical_competition_service import (
     is_simulcast_event,
     get_simulcast_info,
 )
+from app.utils.demographics import extract_demographics
 
 logger = logging.getLogger("streamsport.daddylive")
 
@@ -518,8 +519,8 @@ class DaddyLiveAPI:
 
                     clean_title = self._clean_title(raw_title)
 
-                    # Detect women's event flag
-                    is_women = bool(re.search(r"\b(women(?:['’]s)?|femminile|femenil|damen|ladies|wta|wnba|uwcl)\b", f"{cat_raw} {raw_title}", re.IGNORECASE))
+                    # Detect demographics from category and title
+                    is_women, is_youth = extract_demographics(f"{cat_raw} {raw_title}")
 
                     # Check simulcast / whip-around show
                     sim_info = get_simulcast_info(raw_title, cat_raw) or get_simulcast_info(clean_title, cat_raw)
@@ -571,6 +572,8 @@ class DaddyLiveAPI:
                     }
                     if is_women:
                         match_dict["is_women"] = True
+                    if is_youth:
+                        match_dict["is_youth"] = True
 
                     matches.append(match_dict)
 

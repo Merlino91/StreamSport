@@ -3,6 +3,7 @@ import re
 import unicodedata
 from difflib import SequenceMatcher
 from typing import Any, Dict, List, Optional, Set, Tuple
+from app.utils.demographics import extract_demographics
 
 # ==============================================================================
 # 1. CENTRALIZED VOCABULARY & ALIASES
@@ -339,19 +340,28 @@ def calculate_match_score(
             return result
 
         # 3. Trait Evaluation: Youth and Women
-        # Neutral ('=') is the natural default when unspecified.
-        # Only explicit markers indicate '+' (Women / Youth).
-        # We never assign or infer '-' from league names.
-        m_comp = (match.get("competition") or match.get("_competition") or "").lower()
-        c_comp = (candidate.get("competition") or "").lower()
-        m_text = f"{m_comp} {m_h} {m_a}".lower()
-        c_text = f"{c_comp} {c_h} {c_a}".lower()
+        m_comp = (match.get("competition") or match.get("league") or "").lower().strip()
+        c_comp = (candidate.get("competition") or candidate.get("league") or "").lower().strip()
 
-        m_youth = bool(match.get("is_youth")) or bool(re.search(r"\b(u-?1[5-9]|u-?2[01]|under\s*1[5-9]|under\s*2[01]|youth|primavera|junior)\b", m_text))
-        c_youth = bool(candidate.get("is_youth")) or bool(re.search(r"\b(u-?1[5-9]|u-?2[01]|under\s*1[5-9]|under\s*2[01]|youth|primavera|junior)\b", c_text))
+        if match.get("is_youth") is not None:
+            m_youth = bool(match.get("is_youth"))
+        else:
+            _, m_youth = extract_demographics(f"{m_comp} {match.get('title', '')}")
 
-        m_women = bool(match.get("is_women")) or bool(re.search(r"\b(women(?:[’']s)?|femminile|femenino|ladies|frauen|donne|dames|damen|w-|wta|wnba|uwcl)\b|(?<=\w)\s+[dwf]\b|\([dwf]\)", m_text))
-        c_women = bool(candidate.get("is_women")) or bool(re.search(r"\b(women(?:[’']s)?|femminile|femenino|ladies|frauen|donne|dames|damen|w-|wta|wnba|uwcl)\b|(?<=\w)\s+[dwf]\b|\([dwf]\)", c_text))
+        if candidate.get("is_youth") is not None:
+            c_youth = bool(candidate.get("is_youth"))
+        else:
+            _, c_youth = extract_demographics(f"{c_comp} {candidate.get('title', '')}")
+
+        if match.get("is_women") is not None:
+            m_women = bool(match.get("is_women"))
+        else:
+            m_women, _ = extract_demographics(f"{m_comp} {match.get('title', '')}")
+
+        if candidate.get("is_women") is not None:
+            c_women = bool(candidate.get("is_women"))
+        else:
+            c_women, _ = extract_demographics(f"{c_comp} {candidate.get('title', '')}")
 
         # Penalty if stream claimed Women (+) but candidate lacks it (=)
         # When stream is neutral (=) and candidate is Women (+), penalty is 0.0 (inherits trait)
