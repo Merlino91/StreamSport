@@ -28,9 +28,7 @@ MASTER_CLUB_ALIASES: Dict[str, str] = {
     r"\b(?:ac\s*|a\s*c\s*)?milan\b": "milan",
     r"\bjuve\b": "juventus",
     
-    # 2. Cross-Language Club Translations & Non-Overlapping Names
-    r"\bstella rossa\b": "crvena zvezda",
-    r"\bred star(?:\s*belgrade)?\b": "crvena zvezda",
+    # 2. European Club Colloquial Names & Aliases
     r"\bsporting lisbona?\b": "sporting",
     r"\bsporting cp\b": "sporting",
     r"\bathletic bilbao\b": "athletic club",

@@ -605,12 +605,8 @@ class TheSportsDBTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(window_sa, 160)
 
     def test_international_aliases_and_acronyms(self):
-        """Verifies matching for translated club names and 3-letter acronyms."""
-        # 1. Stella Rossa -> Crvena Zvezda
-        self.assertTrue(thesportsdb_service._team_matches("Stella rossa", "Crvena Zvezda"))
-        self.assertTrue(thesportsdb_service._team_matches("Red Star Belgrade", "Crvena Zvezda"))
-        
-        # 2. Stade Rennais -> Rennes
+        """Verifies matching for club aliases and 3-letter acronyms."""
+        # 1. Stade Rennais -> Rennes
         self.assertTrue(thesportsdb_service._team_matches("Stade Rennais", "Rennes"))
         self.assertTrue(thesportsdb_service._team_matches("Rennais", "Rennes"))
 
