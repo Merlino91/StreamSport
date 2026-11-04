@@ -20,12 +20,12 @@ def extract_team_name(val: Any) -> str:
     return ""
 
 # Master aliases dictionary unifying Diretta, TheSportsDB, EPG, and Catalog mappings
-# Master aliases dictionary unifying Diretta, TheSportsDB, EPG, and Catalog mappings
 # Contains ONLY strictly necessary mappings where names have zero significant word overlap
 MASTER_CLUB_ALIASES: Dict[str, str] = {
     # 1. Italian Top Clubs (essential short forms)
-    r"\bfc internazionale(?:\s*milano)?\b": "inter",
+    r"\b(?:fc\s*)?internazionale(?:\s*milano)?\b": "inter",
     r"\binter\s*(?:milan|milano)\b": "inter",
+    r"\b(?:ac\s*|a\s*c\s*)?milan\b": "milan",
     r"\bjuve\b": "juventus",
     
     # 2. Cross-Language Club Translations & Non-Overlapping Names

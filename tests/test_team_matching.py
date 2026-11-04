@@ -15,12 +15,24 @@ class TestTeamMatching(unittest.TestCase):
         self.assertEqual(clean_team_name("Los Angeles FC"), "lafc")
         self.assertEqual(clean_team_name("Paris Saint-Germain"), "psg")
         self.assertEqual(clean_team_name("FC Internazionale Milano"), "inter")
+        self.assertEqual(clean_team_name("Internazionale"), "inter")
+        self.assertEqual(clean_team_name("FC Internazionale"), "inter")
+        self.assertEqual(clean_team_name("Inter Milan"), "inter")
+        self.assertEqual(clean_team_name("AC Milan"), "milan")
+        self.assertEqual(clean_team_name("A.C. Milan"), "milan")
+        self.assertEqual(clean_team_name("Milan"), "milan")
         self.assertEqual(clean_team_name("Manchester United"), "man utd")
         self.assertEqual(clean_team_name("Tenerife"), "canarias")
 
     def test_single_team_similarity(self):
         # Exact alias match
         self.assertGreaterEqual(match_single_team("Stella Rossa", "Crvena Zvezda"), 0.95)
+        self.assertGreaterEqual(match_single_team("Internazionale", "Inter"), 0.95)
+        self.assertGreaterEqual(match_single_team("Inter Milan", "Inter"), 0.95)
+        self.assertGreaterEqual(match_single_team("AC Milan", "Milan"), 0.95)
+        self.assertGreaterEqual(match_single_team("A.C. Milan", "Milan"), 0.95)
+        self.assertLess(match_single_team("Inter", "Milan"), 0.60)
+        self.assertLess(match_single_team("Inter Milan", "AC Milan"), 0.60)
         self.assertGreaterEqual(match_single_team("Tenerife", "Canarias"), 0.95)
         self.assertGreaterEqual(match_single_team("Venezia", "Reyer Venezia Mestre"), 0.80)
         self.assertGreaterEqual(match_single_team("Sir Susa Vim Perugia", "Perugia"), 0.80)
@@ -161,6 +173,25 @@ class TestTeamMatching(unittest.TestCase):
         }
         res_diff = calculate_match_score(match, cand_diff_id, phase="phase1_diretta")
         self.assertLess(res_diff["score"], res_same["score"])
+
+    def test_inter_internazionale_feyenoord_champions_league(self):
+        diretta_match = {
+            "title": "Feyenoord vs Inter",
+            "teams": {"home": {"name": "Feyenoord"}, "away": {"name": "Inter"}},
+            "date": 1793736000000,
+            "_silo": "football",
+            "competition": "Champions League - Prima fase",
+        }
+        dlhd_cand = {
+            "title": "Feyenoord 🇳🇱 vs Internazionale 🇮🇹 (UEFA Champions League)",
+            "teams": {"home": {"name": "Feyenoord"}, "away": {"name": "Internazionale"}},
+            "date": 1793736000000,
+            "_silo": "football",
+            "competition": "UEFA Champions League",
+        }
+        res = calculate_match_score(dlhd_cand, diretta_match, phase="phase1_diretta")
+        self.assertTrue(res["matched"], f"Failed with reason: {res.get('reason')}")
+        self.assertGreaterEqual(res["score"], 0.95)
 
 if __name__ == "__main__":
     unittest.main()
