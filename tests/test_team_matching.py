@@ -141,6 +141,35 @@ class TestTeamMatching(unittest.TestCase):
         self.assertTrue(res["matched"])
         self.assertGreaterEqual(res["score"], 0.80)
 
+        # Test multi-delimiter split (dash) in raw title fallback
+        match_dash = {
+            "title": "Arsenal - Chelsea",
+            "date": 1729018800000,
+        }
+        cand_tsdb_dash = {
+            "home": "Arsenal",
+            "away": "Chelsea",
+            "date_ms": 1729018800000,
+        }
+        res_dash = calculate_match_score(match_dash, cand_tsdb_dash, phase="phase3_tsdb")
+        self.assertTrue(res_dash["matched"])
+        self.assertGreaterEqual(res_dash["score"], 0.85)
+
+        # Test alt_teams Italian fallback
+        match_alt = {
+            "title": "Crvena zvezda vs Inter",
+            "teams": {"home": {"name": "Unknown"}, "away": {"name": "Unknown"}},
+            "alt_teams": [{"home": {"name": "Stella Rossa"}, "away": {"name": "Inter"}}],
+            "date": 1729018800000,
+        }
+        cand_tsdb_alt = {
+            "home": "Crvena zvezda",
+            "away": "Inter",
+            "date_ms": 1729018800000,
+        }
+        res_alt = calculate_match_score(match_alt, cand_tsdb_alt, phase="phase3_tsdb")
+        self.assertTrue(res_alt["matched"])
+
     def test_phase1_diretta_flashscore_id_bonus_and_penalty(self):
         # Match with stream title and candidate
         match = {

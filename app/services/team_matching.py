@@ -505,11 +505,31 @@ def calculate_match_score(
                     best_score = dir_avg
                     best_inv = is_inv
 
-        # Test 3: Raw Title tokens if teams failed
+        # Test 2b: Alternate teams (e.g. Italian Diretta names vs English TSDB)
+        if best_score < 0.70 and match.get("alt_teams"):
+            for alt_t in match["alt_teams"]:
+                if isinstance(alt_t, dict) and alt_t.get("home") and alt_t.get("away"):
+                    ah = extract_team_name(alt_t["home"])
+                    aa = extract_team_name(alt_t["away"])
+                    h_score, a_score, is_inv = compare_teams_fuzzy(ah, aa, c_h, c_a, allow_inverted=True)
+                    if h_score >= 0.65 and a_score >= 0.65:
+                        alt_avg = (h_score + a_score) / 2.0
+                        if alt_avg > best_score:
+                            best_score = alt_avg
+                            best_inv = is_inv
+
+        # Test 3: Raw Title tokens if teams failed (multi-delimiter: vs, -, v)
         if best_score < 0.70:
             for title_cand in match.get("raw_titles", [match.get("title", "")]):
+                parts = None
                 if _SPLIT_VS_REGEX.search(title_cand):
                     parts = _SPLIT_VS_REGEX.split(title_cand, maxsplit=1)
+                elif _SPLIT_DASH_REGEX.search(title_cand):
+                    parts = _SPLIT_DASH_REGEX.split(title_cand, maxsplit=1)
+                elif _SPLIT_V_REGEX.search(title_cand):
+                    parts = _SPLIT_V_REGEX.split(title_cand, maxsplit=1)
+
+                if parts and len(parts) == 2:
                     h_score, a_score, is_inv = compare_teams_fuzzy(parts[0], parts[1], c_h, c_a, allow_inverted=True)
                     if h_score >= 0.65 and a_score >= 0.65:
                         cand_avg = (h_score + a_score) / 2.0
