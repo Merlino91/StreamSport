@@ -128,6 +128,39 @@ class TestDBServiceAsync(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(conn3)
         self.assertIsNot(conn1, conn3)
 
+    async def test_teams_traits_and_alt_titles_persistence(self):
+        match_data = {
+            "id": "match_traits_test",
+            "title": "Stella Rossa vs Bayern Monaco",
+            "category": "football",
+            "date": 2000000000000,
+            "teams": {
+                "home": {"name": "Stella Rossa"},
+                "away": {"name": "Bayern Monaco"},
+            },
+            "alt_home": "Crvena zvezda",
+            "alt_away": "Bayern Munich",
+            "alt_title": "Crvena zvezda vs Bayern Munich",
+            "is_women": True,
+            "is_youth": True,
+            "sources": [],
+            "competition": "UEFA Champions League",
+        }
+        await self.service.upsert_matches_async([match_data])
+
+        fetched = await self.service.get_match_by_id_async("match_traits_test")
+        self.assertIsNotNone(fetched)
+        self.assertEqual(fetched["title"], "Stella Rossa vs Bayern Monaco")
+        self.assertEqual(fetched["home"], "Stella Rossa")
+        self.assertEqual(fetched["away"], "Bayern Monaco")
+        self.assertEqual(fetched["teams"]["home"]["name"], "Stella Rossa")
+        self.assertEqual(fetched["teams"]["away"]["name"], "Bayern Monaco")
+        self.assertEqual(fetched["alt_home"], "Crvena zvezda")
+        self.assertEqual(fetched["alt_away"], "Bayern Munich")
+        self.assertEqual(fetched["alt_title"], "Crvena zvezda vs Bayern Munich")
+        self.assertTrue(fetched["is_women"])
+        self.assertTrue(fetched["is_youth"])
+
 
 if __name__ == "__main__":
     unittest.main()

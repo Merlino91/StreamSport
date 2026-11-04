@@ -343,7 +343,7 @@ class CatalogService:
     ) -> Dict[str, Any]:
         """Converts a raw match object into a Stremio meta preview object."""
         match_id = match.get("id", "")
-        display_title = match.get("display_title_it") or match.get("_italian_title") or match.get("title", "Live Sports")
+        display_title = match.get("title") or match.get("display_title_it") or match.get("_italian_title") or "Live Sports"
         date_ms = match.get("date", 0)
         is_popular = match.get("popular", False)
         poster_url = self.normalize_image_url(match.get("poster"), base_url=base_url)

@@ -113,6 +113,12 @@ class DBService:
                         competition TEXT,
                         country TEXT,
                         canonical_competition TEXT,
+                        teams TEXT,
+                        alt_home TEXT,
+                        alt_away TEXT,
+                        alt_title TEXT,
+                        is_women INTEGER DEFAULT 0,
+                        is_youth INTEGER DEFAULT 0,
                         updated_at INTEGER NOT NULL
                     )
                 """)
@@ -130,6 +136,18 @@ class DBService:
                     cursor.execute("ALTER TABLE matches ADD COLUMN country TEXT")
                 if "canonical_competition" not in cols:
                     cursor.execute("ALTER TABLE matches ADD COLUMN canonical_competition TEXT")
+                if "teams" not in cols:
+                    cursor.execute("ALTER TABLE matches ADD COLUMN teams TEXT")
+                if "alt_home" not in cols:
+                    cursor.execute("ALTER TABLE matches ADD COLUMN alt_home TEXT")
+                if "alt_away" not in cols:
+                    cursor.execute("ALTER TABLE matches ADD COLUMN alt_away TEXT")
+                if "alt_title" not in cols:
+                    cursor.execute("ALTER TABLE matches ADD COLUMN alt_title TEXT")
+                if "is_women" not in cols:
+                    cursor.execute("ALTER TABLE matches ADD COLUMN is_women INTEGER DEFAULT 0")
+                if "is_youth" not in cols:
+                    cursor.execute("ALTER TABLE matches ADD COLUMN is_youth INTEGER DEFAULT 0")
 
                 cursor.execute("""
                     CREATE TABLE IF NOT EXISTS thesportsdb_cache (
@@ -165,7 +183,13 @@ class DBService:
             comp = m.get("competition") or m.get("_competition") or ""
             country = m.get("country") or m.get("_country") or ""
             canon = m.get("canonical_competition") or m.get("_canonical_competition") or ""
-            records.append((m_id, title, category, date, end_date, poster, popular, sources, comp, country, canon, now))
+            teams_str = json.dumps(m["teams"]) if isinstance(m.get("teams"), dict) else ""
+            alt_home = m.get("alt_home") or ""
+            alt_away = m.get("alt_away") or ""
+            alt_title = m.get("alt_title") or ""
+            is_w = 1 if m.get("is_women") else 0
+            is_y = 1 if m.get("is_youth") else 0
+            records.append((m_id, title, category, date, end_date, poster, popular, sources, comp, country, canon, teams_str, alt_home, alt_away, alt_title, is_w, is_y, now))
 
         if not records:
             return
@@ -174,8 +198,8 @@ class DBService:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.executemany("""
-                    INSERT INTO matches (id, title, category, date, end_date, poster, popular, sources, competition, country, canonical_competition, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO matches (id, title, category, date, end_date, poster, popular, sources, competition, country, canonical_competition, teams, alt_home, alt_away, alt_title, is_women, is_youth, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(id) DO UPDATE SET
                         title = excluded.title,
                         category = excluded.category,
@@ -201,6 +225,30 @@ class DBService:
                         canonical_competition = CASE
                             WHEN excluded.canonical_competition IS NOT NULL AND excluded.canonical_competition != '' THEN excluded.canonical_competition
                             ELSE matches.canonical_competition
+                        END,
+                        teams = CASE
+                            WHEN excluded.teams IS NOT NULL AND excluded.teams != '' THEN excluded.teams
+                            ELSE matches.teams
+                        END,
+                        alt_home = CASE
+                            WHEN excluded.alt_home IS NOT NULL AND excluded.alt_home != '' THEN excluded.alt_home
+                            ELSE matches.alt_home
+                        END,
+                        alt_away = CASE
+                            WHEN excluded.alt_away IS NOT NULL AND excluded.alt_away != '' THEN excluded.alt_away
+                            ELSE matches.alt_away
+                        END,
+                        alt_title = CASE
+                            WHEN excluded.alt_title IS NOT NULL AND excluded.alt_title != '' THEN excluded.alt_title
+                            ELSE matches.alt_title
+                        END,
+                        is_women = CASE
+                            WHEN excluded.is_women = 1 THEN 1
+                            ELSE matches.is_women
+                        END,
+                        is_youth = CASE
+                            WHEN excluded.is_youth = 1 THEN 1
+                            ELSE matches.is_youth
                         END,
                         updated_at = excluded.updated_at
                 """, records)
@@ -450,6 +498,30 @@ class DBService:
         if canon:
             d["canonical_competition"] = canon
             d["_canonical_competition"] = canon
+
+        if "teams" in keys and row["teams"]:
+            try:
+                teams_obj = json.loads(row["teams"])
+                if isinstance(teams_obj, dict):
+                    d["teams"] = teams_obj
+                    if "home" in teams_obj and isinstance(teams_obj["home"], dict):
+                        d["home"] = teams_obj["home"].get("name", "")
+                    if "away" in teams_obj and isinstance(teams_obj["away"], dict):
+                        d["away"] = teams_obj["away"].get("name", "")
+            except Exception:
+                pass
+
+        if "alt_home" in keys and row["alt_home"]:
+            d["alt_home"] = row["alt_home"]
+        if "alt_away" in keys and row["alt_away"]:
+            d["alt_away"] = row["alt_away"]
+        if "alt_title" in keys and row["alt_title"]:
+            d["alt_title"] = row["alt_title"]
+        if "is_women" in keys and row["is_women"]:
+            d["is_women"] = True
+        if "is_youth" in keys and row["is_youth"]:
+            d["is_youth"] = True
+
         return d
 
 db_service = DBService()

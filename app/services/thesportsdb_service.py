@@ -568,10 +568,10 @@ class TheSportsDBService:
                     continue
                 candidates = self._calendar_cache
 
-            m_home, m_away = self._extract_teams(m)
-            dir_home = m.get("_diretta_home") or ""
-            dir_away = m.get("_diretta_away") or ""
-            if not (m_home and m_away) and not (dir_home and dir_away):
+            alt_h = self._clean_team_name(m.get("alt_home") or "")
+            alt_a = self._clean_team_name(m.get("alt_away") or "")
+            m_h, m_a = self._extract_teams(m)
+            if not (alt_h and alt_a) and not (m_h and m_a):
                 continue
 
             m_date = m.get("date", 0)
@@ -600,29 +600,21 @@ class TheSportsDBService:
                 if not cal_home or not cal_away:
                     continue
 
-                # Gatekeeper 2: Bilateral team match is MANDATORY (Dual-Test: Raw stream teams OR Diretta normalized teams)
-                h_direct = self._team_matches(m_home, cal_home) if (m_home and m_away) else False
-                a_direct = self._team_matches(m_away, cal_away) if (m_home and m_away) else False
-                h_inverted = self._team_matches(m_home, cal_away) if (m_home and m_away) else False
-                a_inverted = self._team_matches(m_away, cal_home) if (m_home and m_away) else False
-                teams_matched = (h_direct and a_direct) or (h_inverted and a_inverted)
+                # Gatekeeper 2: Bilateral team match (English slot first for TSDB, Italian slot as fallback)
+                teams_matched = False
+                if alt_h and alt_a:
+                    h_direct = self._team_matches(alt_h, cal_home)
+                    a_direct = self._team_matches(alt_a, cal_away)
+                    h_inv = self._team_matches(alt_h, cal_away)
+                    a_inv = self._team_matches(alt_a, cal_home)
+                    teams_matched = (h_direct and a_direct) or (h_inv and a_inv)
 
-                if not teams_matched and dir_home and dir_away:
-                    dh_direct = self._team_matches(dir_home, cal_home)
-                    da_direct = self._team_matches(dir_away, cal_away)
-                    dh_inverted = self._team_matches(dir_home, cal_away)
-                    da_inverted = self._team_matches(dir_away, cal_home)
-                    teams_matched = (dh_direct and da_direct) or (dh_inverted and da_inverted)
-
-                if not teams_matched and m.get("alt_teams"):
-                    for alt_t in m["alt_teams"]:
-                        if isinstance(alt_t, dict) and alt_t.get("home") and alt_t.get("away"):
-                            ah = self._clean_team_name(extract_team_name(alt_t["home"]))
-                            aa = self._clean_team_name(extract_team_name(alt_t["away"]))
-                            if (self._team_matches(ah, cal_home) and self._team_matches(aa, cal_away)) or \
-                               (self._team_matches(ah, cal_away) and self._team_matches(aa, cal_home)):
-                                teams_matched = True
-                                break
+                if not teams_matched and m_h and m_a:
+                    h_direct = self._team_matches(m_h, cal_home)
+                    a_direct = self._team_matches(m_a, cal_away)
+                    h_inv = self._team_matches(m_h, cal_away)
+                    a_inv = self._team_matches(m_a, cal_home)
+                    teams_matched = (h_direct and a_direct) or (h_inv and a_inv)
 
                 if not teams_matched:
                     continue
@@ -656,9 +648,9 @@ class TheSportsDBService:
                     q_key = f"{best_match['home']} vs {best_match['away']}"
                     db_service.save_poster_to_cache(q_key, cal_thumb, "found")
 
-                # 2. Official competition assignment
+                # 2. Official competition assignment ONLY if missing on match
                 cal_comp = best_match.get("competition")
-                if cal_comp:
+                if cal_comp and not m.get("competition"):
                     m["competition"] = cal_comp
                     m["_competition"] = cal_comp
 
@@ -668,13 +660,7 @@ class TheSportsDBService:
                     m["canonical_competition"] = cal_canon
                     m["_canonical_competition"] = cal_canon
 
-                # 4. Canonical team names if missing
-                if not m.get("teams") or not isinstance(m.get("teams"), dict):
-                    m["teams"] = {
-                        "home": {"name": best_match["home"]},
-                        "away": {"name": best_match["away"]},
-                    }
-
+                # Team names are strictly preserved under Diretta/Flashscore authority (never overwritten)
                 m["_tsdb_matched"] = True
                 reconciled_count += 1
 
@@ -987,11 +973,18 @@ class TheSportsDBService:
             if m_silo == "tennis":
                 continue
 
-            m_home, m_away = self._extract_teams(m)
-            if not m_home or not m_away:
-                continue
+            # Prioritize English names for TheSportsDB semantic web search
+            alt_h = m.get("alt_home")
+            alt_a = m.get("alt_away")
+            if alt_h and alt_a:
+                query_h, query_a = alt_h, alt_a
+            else:
+                m_h, m_a = self._extract_teams(m)
+                if not m_h or not m_a:
+                    continue
+                query_h, query_a = m_h, m_a
 
-            q_key = f"{m_home} vs {m_away}"
+            q_key = f"{query_h} vs {query_a}"
             cached = await db_service.get_poster_from_cache_async(q_key)
             if cached:
                 status, thumb_url, _ = cached
@@ -1006,7 +999,7 @@ class TheSportsDBService:
             m_silo = self.get_match_tsdb_silo(m)
             m_is_women = bool(m.get("is_women")) or bool(re.search(r"\b(women(?:['']s)?|femminile|femenino|ladies|frauen|donne|dames|damen|w-|wta|uwcl)\b|(?<=\w)\s+[dwf]\b|\([dwf]\)", f"{m.get('competition', '')} {m.get('title', '')}".lower()))
             thumb = await self.search_event_thumb_html(
-                m_home, m_away, match_date_ms=m_date, expected_silo=m_silo, is_women=m_is_women
+                query_h, query_a, match_date_ms=m_date, expected_silo=m_silo, is_women=m_is_women
             )
             if thumb:
                 m["poster"] = thumb
@@ -1014,7 +1007,7 @@ class TheSportsDBService:
                 await db_service.update_match_poster_async(m["id"], thumb)
                 await db_service.save_poster_to_cache_async(q_key, thumb, "found")
                 found_count += 1
-                logger.info("TheSportsDB Level 2 Fallback: trovata locandina per '%s vs %s' -> %s", m_home, m_away, thumb)
+                logger.info("TheSportsDB Level 2 Fallback: trovata locandina per '%s vs %s' -> %s", query_h, query_a, thumb)
             else:
                 await db_service.save_poster_to_cache_async(q_key, None, "not_found")
 

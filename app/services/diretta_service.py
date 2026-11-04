@@ -412,54 +412,55 @@ class DirettaService:
             comp = m.get("competition") or m.get("league", "")
             country = m.get("country", "")
 
-            # Livesport.com (English) names are authoritative for TheSportsDB and deduplication matching
+            # Italian names are primary for UI/catalog; English (Flashscore UK) are kept in alt_* for TSDB/providers
             if silo == "motor-sports":
-                primary_home = ""
-                primary_away = ""
-                primary_title = m.get("title", "")
-                it_title = m.get("title", "")
+                home = ""
+                away = ""
+                title = m.get("title", "")
+                alt_home = ""
+                alt_away = ""
+                alt_title = m.get("title", "")
                 teams_obj: Dict[str, Any] = {}
                 alt_teams_obj: List[Dict[str, Any]] = []
             else:
-                primary_home = m.get("alt_home") or d_home
-                primary_away = m.get("alt_away") or d_away
-                primary_title = m.get("alt_title") or f"{primary_home} vs {primary_away}"
-                it_title = f"{d_home} vs {d_away}"
+                home = d_home
+                away = d_away
+                title = f"{d_home} vs {d_away}"
+                alt_home = m.get("alt_home") or d_home
+                alt_away = m.get("alt_away") or d_away
+                alt_title = m.get("alt_title") or f"{alt_home} vs {alt_away}"
                 teams_obj = {
-                    "home": {"name": primary_home},
-                    "away": {"name": primary_away},
+                    "home": {"name": home},
+                    "away": {"name": away},
                 }
                 alt_teams_obj = [
-                    {"home": {"name": d_home}, "away": {"name": d_away}},
-                    {"home": {"name": primary_home}, "away": {"name": primary_away}},
+                    {"home": {"name": alt_home}, "away": {"name": alt_away}},
                 ]
 
             # Infer canonical slug fallback if needed
             if not slug:
-                fallback_text = primary_title if silo == "motor-sports" else f"{country}: {comp} {primary_home} vs {primary_away}"
+                fallback_text = title if silo == "motor-sports" else f"{country}: {comp} {title}"
                 slug = detect_canonical_competition(fallback_text, silo_hint=silo)
 
             official_match = {
                 "id": f"diretta-{fid}",
                 "flashscore_id": fid,
                 "_official_id": fid,
-                "title": primary_title,
-                "display_title_it": it_title,
-                "_italian_title": it_title,
+                "title": title,
                 "category": silo,
                 "_silo": silo,
                 "sport": m.get("sport", ""),
                 "session": m.get("session", ""),
-                "home": primary_home,
-                "away": primary_away,
-                "_diretta_home": primary_home,
-                "_diretta_away": primary_away,
-                "_diretta_title": primary_title,
+                "home": home,
+                "away": away,
+                "alt_home": alt_home,
+                "alt_away": alt_away,
+                "alt_title": alt_title,
                 "date": date_ms,
                 "_date_ms": date_ms,
                 "teams": teams_obj,
                 "alt_teams": alt_teams_obj,
-                "raw_titles": list(dict.fromkeys([t for t in (it_title, primary_title, m.get("alt_title", "")) if t])),
+                "raw_titles": list(dict.fromkeys([t for t in (title, alt_title) if t])),
                 "competition": comp,
                 "_competition": comp,
                 "country": country,
@@ -570,17 +571,24 @@ class DirettaService:
                 m["_diretta_matched"] = True
                 d_home = chosen.get("full_home") or chosen["home"]
                 d_away = chosen.get("full_away") or chosen["away"]
-                m["_diretta_home"] = d_home
-                m["_diretta_away"] = d_away
-                m["_diretta_title"] = f"{d_home} vs {d_away}"
+                m["home"] = d_home
+                m["away"] = d_away
+                m["title"] = f"{d_home} vs {d_away}"
+                m["teams"] = {"home": {"name": d_home}, "away": {"name": d_away}}
+                if chosen.get("full_home") and chosen.get("full_away"):
+                    m["_full_players"] = (d_home, d_away)
+
+                alt_h = chosen.get("alt_home")
+                alt_a = chosen.get("alt_away")
+                if alt_h and alt_a:
+                    m["alt_home"] = alt_h
+                    m["alt_away"] = alt_a
+                    m["alt_title"] = chosen.get("alt_title") or f"{alt_h} vs {alt_a}"
+                    m["alt_teams"] = [{"home": {"name": alt_h}, "away": {"name": alt_a}}]
 
                 # Non-destructive: preserve raw title if not already tracked
                 if "raw_titles" not in m and m.get("title"):
                     m["raw_titles"] = [m["title"]]
-                m["title"] = m["_diretta_title"]
-                m["teams"] = {"home": {"name": d_home}, "away": {"name": d_away}}
-                if chosen.get("full_home") and chosen.get("full_away"):
-                    m["_full_players"] = (d_home, d_away)
 
                 # Adopt exact kickoff time from Diretta
                 if chosen.get("date"):

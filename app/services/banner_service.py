@@ -266,7 +266,7 @@ class BannerService:
         im = Image.new("RGB", (CANVAS_WIDTH, CANVAS_HEIGHT), (12, 15, 20))
         draw = ImageDraw.Draw(im)
 
-        title = (match.get("display_title_it") or match.get("_italian_title") or match.get("title") or "Live Sports").strip()
+        title = (match.get("title") or match.get("display_title_it") or match.get("_italian_title") or "Live Sports").strip()
         comp = (match.get("competition") or match.get("_competition") or "").strip().upper()
 
         # Clean title from redundant prefixes
