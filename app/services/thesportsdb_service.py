@@ -22,7 +22,7 @@ from app.services.canonical_competition_service import (
     is_competition_conflict,
     is_simulcast_event,
 )
-from app.services.team_matching import clean_team_name, match_single_team, extract_team_name
+from app.services.team_matching import clean_team_name, match_single_team, extract_team_name, GENERIC_CLUB_WORDS
 
 logger = logging.getLogger("streamsport.thesportsdb")
 
@@ -316,11 +316,7 @@ class TheSportsDBService:
             logger.info("TheSportsDB calendario completato: %d eventi totali indicizzati in memoria.", len(all_events))
             return all_events
 
-    GENERIC_CLUB_WORDS = {
-        "real", "atletico", "sporting", "racing", "deportivo", "dinamo",
-        "inter", "union", "united", "city", "club", "estrella", "olimpia",
-        "virtus", "san", "santa", "saint", "st"
-    }
+    GENERIC_CLUB_WORDS = GENERIC_CLUB_WORDS
 
     def _clean_team_name(self, name: str) -> str:
         return clean_team_name(name)

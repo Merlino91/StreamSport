@@ -37,7 +37,7 @@ from app.services.mandrakodi_service import mandrakodi_service
 from app.services.spon_service import spon_service
 from app.services.italian_epg_service import italian_epg_service
 from app.services.diretta_service import diretta_service
-from app.services.team_matching import extract_team_name
+from app.services.team_matching import extract_team_name, clean_team_name
 from app.services.canonical_competition_service import (
     detect_canonical_competition,
     get_canonical_display_name,
@@ -93,13 +93,6 @@ class CatalogService:
         "vs", "the", "fc", "ac", "cf", "sc", "as", "at", "live", "stream", "bc",
         "pallacanestro", "pallacan", "baloncesto", "basquet", "basket", "calcio", "volley", "pallavolo", "club"
     })
-    _COMMON_ALIASES = {
-        "internazionale": "inter",
-        "juve": "juventus",
-        "wolves": "wolverhampton",
-        "spurs": "tottenham",
-        "blazers": "trailblazers",
-    }
     _EXCLUDED_CLUB_TERMS = frozenset({
         "fc", "ac", "cf", "sc", "as", "the", "bc",
         "pallacanestro", "pallacan", "baloncesto", "basquet", "basket", "calcio", "volley", "pallavolo", "club"
@@ -493,8 +486,8 @@ class CatalogService:
                 t = t.replace(":", " ")
         t = re.sub(r"\([^)]*\)", "", t)
         t = re.sub(r"^(?:italy|england|spain|germany|france|uefa|fifa|brazil|usa|[a-z]+)\s*-\s*", "", t)
-        t = re.sub(r"[^a-z0-9]+", " ", t).strip()
-        words = sorted([self._COMMON_ALIASES.get(w, w) for w in t.split() if w not in self._EXCLUDED_NOISE_WORDS and len(w) > 1])
+        cleaned_t = clean_team_name(t)
+        words = sorted([w for w in cleaned_t.split() if w not in self._EXCLUDED_NOISE_WORDS and len(w) > 1])
         return " ".join(words)
 
     def _get_teams_key(self, match: Dict[str, Any]) -> Optional[Any]:
@@ -627,10 +620,7 @@ class CatalogService:
 
     @staticmethod
     def _clean_team_str(s: str) -> str:
-        s = (s or "").lower().strip()
-        s = unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode("utf-8")
-        s = re.sub(r"\b(pallacanestro|pallacan|baloncesto|basquet|basket|bc|fc|ac|cf|sc|as|calcio|volley|pallavolo|club)\b", " ", s)
-        return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9]+", " ", s)).strip()
+        return clean_team_name(s)
 
     @classmethod
     def _teams_match_fuzzy(cls, t1: Optional[Dict[str, Any]], t2: Optional[Dict[str, Any]]) -> bool:
@@ -968,36 +958,12 @@ class CatalogService:
 
         return linked_schedule
 
-    COMMON_TEAM_ACRONYMS: Dict[str, str] = {
-        "lafc": "los angeles fc",
-        "lag": "la galaxy",
-        "nycfc": "new york city fc",
-        "rbny": "new york red bulls",
-        "psg": "paris saint germain",
-        "man utd": "manchester united",
-        "mufc": "manchester united",
-        "man city": "manchester city",
-        "mcfc": "manchester city",
-        "wolves": "wolverhampton",
-        "spurs": "tottenham",
-        "inter": "internazionale",
-        "juve": "juventus",
-        "atleti": "atletico madrid",
-        "atletico": "atletico madrid",
-        "bvb": "borussia dortmund",
-        "dortmund": "borussia dortmund",
-        "bayern": "bayern monaco",
-        "barca": "barcelona",
-        "sporting": "sporting lisbona",
-    }
-
     def _clean_tokens_expanded(self, text: str) -> Set[str]:
         t = (text or "").lower()
         t = unicodedata.normalize("NFKD", t).encode("ascii", "ignore").decode("utf-8")
         t = re.sub(r"[\U0001F1E6-\U0001F1FF]{2}", "", t)
         t = self._COMPOUND_CITIES_REGEX.sub(lambda m: m.group(0).replace(" ", "_"), t)
-        for acr, full in self.COMMON_TEAM_ACRONYMS.items():
-            t = re.sub(rf"\b{acr}\b", full, t)
+        t = clean_team_name(t)
         words = set(re.sub(r"[^a-z0-9_]+", " ", t).split())
         return {w for w in words if w not in self._EXPANDED_STOPWORDS and len(w) > 1}
 
@@ -1080,11 +1046,7 @@ class CatalogService:
                 generic = {"", "other", "unknown", "altri sport", "live sports", "football", "soccer", "americhe e leghe extra-ue", "altre leghe europee"}
                 if c1 and c2 and c1 not in generic and c2 not in generic and (c1 == c2 or c1 in c2 or c2 in c1):
                     if len(common) >= 1:
-                        raw_t1 = (m1.get("title") or "").lower()
-                        raw_t2 = (m2.get("title") or "").lower()
-                        for acr, full in self.COMMON_TEAM_ACRONYMS.items():
-                            if (acr in raw_t1 and full in raw_t2) or (acr in raw_t2 and full in raw_t1):
-                                return True
+                        return True
 
         # Signal 4: Garbage Side Asymmetric Match for Team Sports
         # Protects against corrupt upstream provider team names (e.g. '114 vs Ipswich Town' vs 'Manchester City vs Ipswich Town')

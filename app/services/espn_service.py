@@ -6,7 +6,7 @@ import time
 from typing import Any, Dict, List, Optional, Tuple
 import unicodedata
 import httpx
-from app.services.team_matching import extract_team_name
+from app.services.team_matching import extract_team_name, clean_team_name
 
 logger = logging.getLogger("streamsport.espn")
 
@@ -265,17 +265,6 @@ class ESPNService:
         r"\bbosnia herzegovina\b": "bosnia",
         r"\bsouth korea\b": "korea",
         r"\bnorth macedonia\b": "macedonia",
-        r"\binternazionale\b": "inter",
-        r"\bparis saint germain\b": "psg",
-        r"\bparis sg\b": "psg",
-        r"\bmanchester city\b": "man city",
-        r"\bmanchester united\b": "man utd",
-        r"\bman united\b": "man utd",
-        r"\bbayern munchen\b": "bayern",
-        r"\bbayern munich\b": "bayern",
-        r"\bborussia dortmund\b": "dortmund",
-        r"\batletico madrid\b": "atletico",
-        r"\bolympiakos\b": "olympiacos",
     }
 
     GENERIC_LOCATION_WORDS = {
@@ -298,10 +287,8 @@ class ESPNService:
     def _extract_team_words(self, match: Dict[str, Any]) -> Tuple[set, set]:
         teams = match.get("teams")
         if isinstance(teams, dict) and teams.get("home") and teams.get("away"):
-            h = extract_team_name(teams.get("home")).lower()
-            a = extract_team_name(teams.get("away")).lower()
-            h = unicodedata.normalize("NFKD", h).encode("ascii", "ignore").decode("utf-8")
-            a = unicodedata.normalize("NFKD", a).encode("ascii", "ignore").decode("utf-8")
+            h = clean_team_name(extract_team_name(teams.get("home")))
+            a = clean_team_name(extract_team_name(teams.get("away")))
             for pat, rep in self.ESPN_NORM_ALIASES.items():
                 h = re.sub(pat, rep, h)
                 a = re.sub(pat, rep, a)

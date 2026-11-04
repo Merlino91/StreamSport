@@ -57,32 +57,6 @@ class DirettaService:
         "Origin": "https://www.flashscore.com"
     }
 
-    # Normalized aliases for common club names across Italian & international sources
-    TEAM_ALIASES = {
-        r"\bla fc\b": "lafc",
-        r"\blos angeles fc\b": "lafc",
-        r"\bnew york city\b": "nycfc",
-        r"\bny city\b": "nycfc",
-        r"\bred bulls\b": "rbny",
-        r"\bred bull salzburg\b": "salzburg",
-        r"\brb leipzig\b": "leipzig",
-        r"\binternazionale\b": "inter",
-        r"\bparis saint germain\b": "psg",
-        r"\bparis sg\b": "psg",
-        r"\bmanchester city\b": "man city",
-        r"\bmanchester united\b": "man utd",
-        r"\bman united\b": "man utd",
-        r"\bbayern munchen\b": "bayern",
-        r"\bbayern monaco\b": "bayern",
-        r"\bborussia dortmund\b": "dortmund",
-        r"\batletico madrid\b": "atletico",
-        r"\bolympiakos\b": "olympiacos",
-        r"\bsporting lisbona\b": "sporting",
-        r"\bsporting cp\b": "sporting",
-        r"\bstella rossa\b": "red star",
-        r"\bwolverhampton\b": "wolves",
-        r"\btottenham\b": "spurs",
-    }
 
     GENERIC_TERMS: Set[str] = {
         "fc", "ac", "cf", "sc", "as", "the", "club", "calcio", "basket", "u19", "u20", "u21", "u23", "vs", "at"
