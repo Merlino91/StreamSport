@@ -13,7 +13,6 @@ from app.config import (
     ENABLE_THESPORTSDB,
     THESPORTSDB_USER,
     THESPORTSDB_PASS,
-    THESPORTSDB_API_KEY,
     THESPORTSDB_CALENDAR_INTERVAL,
 )
 from app.services.db_service import db_service
@@ -25,8 +24,6 @@ from app.services.canonical_competition_service import (
 from app.services.team_matching import clean_team_name, match_single_team, extract_team_name, GENERIC_CLUB_WORDS
 
 logger = logging.getLogger("streamsport.thesportsdb")
-
-THESPORTSDB_API_BASE = f"https://www.thesportsdb.com/api/v1/json/{THESPORTSDB_API_KEY}"
 
 THESPORTSDB_SPORT_TO_SILO = {
     "soccer": "football",
@@ -201,9 +198,7 @@ class TheSportsDBService:
             img_match = re.search(r'src=[\"\']([^\"\']*thumb[^\"\']*)[\"\']', row)
             thumb = img_match.group(1) if img_match else None
             if thumb and "no_thumb" not in thumb:
-                thumb = re.sub(r'/(?:small|tiny|preview)$', '', thumb)
-                if not thumb.endswith('/medium'):
-                    thumb = f"{thumb}/medium"
+                thumb = self.format_thumb_url(thumb)
             else:
                 thumb = None
 
@@ -959,6 +954,16 @@ class TheSportsDBService:
 
         return None
 
+    @staticmethod
+    def format_thumb_url(thumb: Optional[str]) -> Optional[str]:
+        if not thumb:
+            return None
+        t = thumb.strip()
+        t = re.sub(r"/(?:small|tiny|preview)$", "", t)
+        if "thesportsdb.com" in t and not t.endswith("/medium"):
+            t = f"{t}/medium"
+        return t
+
     async def fallback_semantic_search_orphans(self, matches: List[Dict[str, Any]]):
         """
         LEVEL 2 FALLBACK:
@@ -1060,120 +1065,6 @@ class TheSportsDBService:
                 self._is_enriching = False
 
         asyncio.create_task(_search_task())
-
-    # =========================================================================
-    # DORMANT METHODS: Legacy Single-Event Search (Kept for fallback evaluation)
-    # =========================================================================
-
-    def parse_retry_delay(self, text: str, headers: Optional[Dict[str, str]] = None, default_seconds: int = 300) -> int:
-        if headers:
-            retry_after = headers.get("retry-after") or headers.get("Retry-After")
-            if retry_after and retry_after.isdigit():
-                return int(retry_after)
-
-        if not text:
-            return default_seconds
-
-        m_sec = re.search(r"(?:riprova|retry)\s+(?:in|tra)\s*(\d+)\s*(?:s|sec|secondi|seconds)\b", text, re.I)
-        if m_sec:
-            return int(m_sec.group(1))
-
-        m_min = re.search(r"(?:riprova|retry)\s+(?:in|tra)\s*(\d+)\s*(?:m|min|minuti|minutes)\b", text, re.I)
-        if m_min:
-            return int(m_min.group(1)) * 60
-
-        m_any_min = re.search(r"\b(\d+)\s*(?:m|min|minuti|minutes)\b", text, re.I)
-        if m_any_min:
-            return int(m_any_min.group(1)) * 60
-
-        m_any_sec = re.search(r"\b(\d+)\s*(?:s|sec|secondi|seconds)\b", text, re.I)
-        if m_any_sec:
-            return int(m_any_sec.group(1))
-
-        return default_seconds
-
-    def clean_event_query(
-        self, title: str, teams: Optional[Dict[str, Any]] = None
-    ) -> Tuple[str, Optional[str], Optional[str]]:
-        home = ""
-        away = ""
-        if teams and isinstance(teams, dict):
-            home = extract_team_name(teams.get("home"))
-            away = extract_team_name(teams.get("away"))
-
-        if home and away:
-            clean_home = re.sub(r"[\U0001F1E6-\U0001F1FF]", "", home).strip()
-            clean_away = re.sub(r"[\U0001F1E6-\U0001F1FF]", "", away).strip()
-            clean_home = re.sub(r"^[0-9:\s-]+", "", clean_home).strip()
-            clean_away = re.sub(r"\s*\([^)]*\)$", "", clean_away).strip()
-            return f"{clean_home} vs {clean_away}", clean_home, clean_away
-
-        t = title or ""
-        # Strip timestamps at start: "24-09 20:45 "
-        t = re.sub(r"^\d{1,2}[-/.]\d{1,2}(?:\s+\d{1,2}:\d{2})?\s*:?\s*", "", t)
-        # Strip live markers
-        t = re.sub(r"^🔴\s*Inizio\s*:\s*[0-9:]+\s*", "", t, flags=re.I).strip()
-        # Strip category/league prefix: "ITA D1 : ", "Italy - Serie A : "
-        t = re.sub(r"^[^:]+:\s*", "", t)
-        # Strip parenthesized notes: "(NBL)", "(One Day International)"
-        t = re.sub(r"\([^)]*\)", "", t)
-        # Strip bracket notes: "[HD]"
-        t = re.sub(r"\[[^\]]*\]", "", t)
-        # Strip flag emojis
-        t = re.sub(r"[\U0001F1E6-\U0001F1FF]", "", t)
-        t = re.sub(r"\s+", " ", t).strip()
-
-        if " vs " in t.lower():
-            parts = re.split(r"\s+vs\s+", t, flags=re.I)
-            h = parts[0].strip()
-            a = parts[1].strip()
-            return f"{h} vs {a}", h, a
-        elif " - " in t:
-            parts = t.split(" - ", 1)
-            h = parts[0].strip()
-            a = parts[1].strip()
-            return f"{h} vs {a}", h, a
-
-        return t, None, None
-
-    @staticmethod
-    def format_thumb_url(thumb: Optional[str]) -> Optional[str]:
-        if not thumb:
-            return None
-        t = thumb.strip()
-        t = re.sub(r"/(?:small|tiny|preview)$", "", t)
-        if "thesportsdb.com" in t and not t.endswith("/medium"):
-            t = f"{t}/medium"
-        return t
-
-    async def search_event_thumb(
-        self,
-        query: str,
-        home: Optional[str] = None,
-        away: Optional[str] = None,
-        date_ms: Optional[int] = None,
-        category: Optional[str] = None,
-    ) -> Tuple[Optional[str], Optional[int]]:
-        """Dormant single-event search implementation."""
-        # Query API as primary
-        api_query = query.replace(" ", "_")
-        url = f"{THESPORTSDB_API_BASE}/searchevents.php?e={urllib.parse.quote(api_query)}"
-        try:
-            client = await self._get_client()
-            res = await client.get(url)
-            if res.status_code == 429:
-                wait_sec = self.parse_retry_delay(res.text, res.headers, default_seconds=300)
-                return None, wait_sec
-            if res.status_code == 200:
-                data = res.json()
-                events = data.get("event") or []
-                for ev in events:
-                    thumb = ev.get("strThumb")
-                    if thumb:
-                        return self.format_thumb_url(thumb), None
-        except Exception as e:
-            logger.debug("search_event_thumb exception: %s", e)
-        return None, None
 
 
 thesportsdb_service = TheSportsDBService()

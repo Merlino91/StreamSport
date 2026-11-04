@@ -14,47 +14,6 @@ from app.services.db_service import db_service
 
 class TheSportsDBTestCase(unittest.IsolatedAsyncioTestCase):
 
-    def test_parse_retry_delay(self):
-        # Header retry-after
-        self.assertEqual(thesportsdb_service.parse_retry_delay("", {"Retry-After": "480"}), 480)
-        self.assertEqual(thesportsdb_service.parse_retry_delay("", {"retry-after": "120"}), 120)
-
-        # Italian text formats
-        self.assertEqual(thesportsdb_service.parse_retry_delay("Riprova tra 8m"), 480)
-        self.assertEqual(thesportsdb_service.parse_retry_delay("Riprova tra 8 minuti"), 480)
-        self.assertEqual(thesportsdb_service.parse_retry_delay("Riprova tra 30 secondi"), 30)
-
-        # English text formats
-        self.assertEqual(thesportsdb_service.parse_retry_delay("Retry in 5 minutes"), 300)
-        self.assertEqual(thesportsdb_service.parse_retry_delay("Rate limit exceeded. Retry in 60s"), 60)
-
-        # Default fallback
-        self.assertEqual(thesportsdb_service.parse_retry_delay("Too Many Requests"), 300)
-
-    def test_clean_event_query(self):
-        # Case 1: Teams dictionary present
-        teams = {"home": {"name": "Inter"}, "away": {"name": "Milan"}}
-        q, h, a = thesportsdb_service.clean_event_query("24-09 20:45 Serie A: Inter vs Milan", teams)
-        self.assertEqual(q, "Inter vs Milan")
-        self.assertEqual(h, "Inter")
-        self.assertEqual(a, "Milan")
-
-        # Case 2: Dirty title with date, league, and suffixes
-        q, h, a = thesportsdb_service.clean_event_query("24-09 20:00 Italy - Serie A : Inter vs Juventus (NBL) [HD]")
-        self.assertEqual(q, "Inter vs Juventus")
-        self.assertEqual(h, "Inter")
-        self.assertEqual(a, "Juventus")
-
-        # Case 3: Match with flag emoji
-        q, h, a = thesportsdb_service.clean_event_query("🇮🇹 Inter vs 🇮🇹 Milan")
-        self.assertEqual(q, "Inter vs Milan")
-
-        # Case 4: England vs Sri Lanka (One Day International)
-        q, h, a = thesportsdb_service.clean_event_query("England vs Sri Lanka (One Day International)")
-        self.assertEqual(q, "England vs Sri Lanka")
-        self.assertEqual(h, "England")
-        self.assertEqual(a, "Sri Lanka")
-
     def test_sqlite_poster_cache(self):
         import time
         unique_suffix = str(time.time()).replace(".", "")
@@ -97,43 +56,6 @@ class TheSportsDBTestCase(unittest.IsolatedAsyncioTestCase):
             "https://r2.thesportsdb.com/images/media/event/thumb/test.jpg/medium",
         )
         self.assertIsNone(thesportsdb_service.format_thumb_url(None))
-
-    async def test_search_event_thumb_success(self):
-        import json
-        from unittest.mock import MagicMock
-        mock_response = {
-            "event": [
-                {
-                    "strEvent": "Real Madrid Baloncesto vs Dubai Basketball",
-                    "strThumb": "https://r2.thesportsdb.com/images/media/event/thumb/o4p5ix1786182990.jpg",
-                    "strSquare": "https://r2.thesportsdb.com/images/media/event/square/boafxn1786186466.jpg"
-                }
-            ]
-        }
-
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.text = json.dumps(mock_response)
-        mock_resp.json.return_value = mock_response
-
-        with patch("httpx.AsyncClient.get", new_callable=AsyncMock) as mock_get:
-            mock_get.return_value = mock_resp
-            thumb_url, retry_after = await thesportsdb_service.search_event_thumb("Real Madrid Baloncesto vs Dubai Basketball")
-            self.assertEqual(thumb_url, "https://r2.thesportsdb.com/images/media/event/thumb/o4p5ix1786182990.jpg/medium")
-            self.assertIsNone(retry_after)
-
-    async def test_search_event_thumb_rate_limit(self):
-        from unittest.mock import MagicMock
-        mock_resp = MagicMock()
-        mock_resp.status_code = 429
-        mock_resp.text = "Rate limit exceeded. Riprova tra 8m"
-        mock_resp.headers = {"Retry-After": "480"}
-
-        with patch("httpx.AsyncClient.get", new_callable=AsyncMock) as mock_get:
-            mock_get.return_value = mock_resp
-            thumb_url, retry_after = await thesportsdb_service.search_event_thumb("Some Team vs Other Team")
-            self.assertIsNone(thumb_url)
-            self.assertEqual(retry_after, 480)
 
     def test_parse_calendar_html(self):
         sample_html = """
