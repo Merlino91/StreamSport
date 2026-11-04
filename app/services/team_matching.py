@@ -233,11 +233,9 @@ def calculate_match_score(
     phase: str = "phase1_diretta",
 ) -> Dict[str, Any]:
     """
-    Calculates unified match score tailored for each phase:
+    Calculates unified match score tailored for linking stream clusters to the official Diretta/Flashscore schedule:
     - phase1_diretta: Team similarity is primary (>= 0.75). Time is plausibility guard (<= 90m).
                       Competition is never penalized if missing; veto only on hard conflict (Youth/Women).
-    - phase2_epg: Asymmetric window (-90m / +20m). Bonus for channels certified by Diretta.
-    - phase3_tsdb: High precision time & competition. Dual-test on raw provider names AND Diretta normalized names.
     """
     result = {
         "matched": False,
@@ -414,137 +412,6 @@ def calculate_match_score(
             result["reason"] = "ok"
         elif not result.get("reason"):
             result["reason"] = f"low_similarity_h{h_score:.2f}_a{a_score:.2f}"
-        return result
-
-    # --------------------------------------------------------------------------
-    # FASE 2: PALINSESTO TV ITALIANO (EPG SKY / TIVÙSAT)
-    # --------------------------------------------------------------------------
-    if phase == "phase2_epg":
-        m_silo = (match.get("_silo") or match.get("category") or "").lower()
-        if m_date > 0 and c_date > 0:
-            pre_max = (120 * 60 * 1000) if m_silo == "motor-sports" else (90 * 60 * 1000)
-            post_max = 20 * 60 * 1000
-            time_diff = m_date - c_date  # Positive if EPG starts before match
-            if time_diff > pre_max or time_diff < -post_max:
-                result["reason"] = f"epg_asymmetric_window_exceeded_{time_diff / 60000:.0f}m"
-                return result
-
-        # Channel check against Diretta certified channels
-        diretta_tvs = match.get("_diretta_tv_channels") or []
-        channel_name = candidate.get("channel_name") or ""
-        channel_confirmed = any(channel_name.lower() in dtv.lower() for dtv in diretta_tvs) if channel_name else False
-
-        m_teams = match.get("teams") or {}
-        m_h = extract_team_name(m_teams.get("home")) if isinstance(m_teams, dict) else ""
-        m_a = extract_team_name(m_teams.get("away")) if isinstance(m_teams, dict) else ""
-        c_teams = candidate.get("teams") or {}
-        c_h = extract_team_name(c_teams.get("home")) if isinstance(c_teams, dict) else ""
-        c_a = extract_team_name(c_teams.get("away")) if isinstance(c_teams, dict) else ""
-
-        if m_h and m_a and c_h and c_a:
-            h_score, a_score, is_inv = compare_teams_fuzzy(m_h, m_a, c_h, c_a, allow_inverted=True)
-            avg_score = (h_score + a_score) / 2.0
-            if (h_score >= 0.70 and a_score >= 0.70) or (channel_confirmed and avg_score >= 0.60):
-                result["matched"] = True
-                result["score"] = avg_score + (0.1 if channel_confirmed else 0.0)
-                result["is_inverted"] = is_inv
-                result["reason"] = "epg_teams_matched"
-                return result
-
-        # Token matching fallback
-        m_title = match.get("title") or ""
-        c_title = candidate.get("title") or ""
-        seq = SequenceMatcher(None, clean_team_name(m_title), clean_team_name(c_title)).ratio()
-        if seq >= 0.70 or (channel_confirmed and seq >= 0.50):
-            result["matched"] = True
-            result["score"] = seq + (0.1 if channel_confirmed else 0.0)
-            result["reason"] = "epg_tokens_matched"
-            return result
-
-        result["reason"] = "epg_no_match"
-        return result
-
-    # --------------------------------------------------------------------------
-    # FASE 3: THESPORTSDB LOCANDINE (DOPPIO BINARIO)
-    # --------------------------------------------------------------------------
-    if phase == "phase3_tsdb":
-        # Check strict time proximity (max 90 min)
-        if m_date > 0 and c_date > 0:
-            diff_min = abs(m_date - c_date) / 60000.0
-            if diff_min > 90.0:
-                result["reason"] = f"tsdb_time_exceeded_{diff_min:.0f}m"
-                return result
-
-        c_h = candidate.get("home") or ""
-        c_a = candidate.get("away") or ""
-        if not c_h or not c_a:
-            result["reason"] = "tsdb_missing_candidate_teams"
-            return result
-
-        best_score = 0.0
-        best_inv = False
-
-        # Test 1: Raw provider teams
-        raw_teams = match.get("teams") or {}
-        raw_h = extract_team_name(raw_teams.get("home")) if isinstance(raw_teams, dict) else ""
-        raw_a = extract_team_name(raw_teams.get("away")) if isinstance(raw_teams, dict) else ""
-        if raw_h and raw_a:
-            h_score, a_score, is_inv = compare_teams_fuzzy(raw_h, raw_a, c_h, c_a, allow_inverted=True)
-            if h_score >= 0.65 and a_score >= 0.65:
-                best_score = (h_score + a_score) / 2.0
-                best_inv = is_inv
-
-        # Test 2: Diretta.it normalized teams (if present)
-        dir_h = match.get("_diretta_home") or ""
-        dir_a = match.get("_diretta_away") or ""
-        if dir_h and dir_a:
-            h_score, a_score, is_inv = compare_teams_fuzzy(dir_h, dir_a, c_h, c_a, allow_inverted=True)
-            if h_score >= 0.65 and a_score >= 0.65:
-                dir_avg = (h_score + a_score) / 2.0
-                if dir_avg > best_score:
-                    best_score = dir_avg
-                    best_inv = is_inv
-
-        # Test 2b: Alternate teams (e.g. Italian Diretta names vs English TSDB)
-        if best_score < 0.70 and match.get("alt_teams"):
-            for alt_t in match["alt_teams"]:
-                if isinstance(alt_t, dict) and alt_t.get("home") and alt_t.get("away"):
-                    ah = extract_team_name(alt_t["home"])
-                    aa = extract_team_name(alt_t["away"])
-                    h_score, a_score, is_inv = compare_teams_fuzzy(ah, aa, c_h, c_a, allow_inverted=True)
-                    if h_score >= 0.65 and a_score >= 0.65:
-                        alt_avg = (h_score + a_score) / 2.0
-                        if alt_avg > best_score:
-                            best_score = alt_avg
-                            best_inv = is_inv
-
-        # Test 3: Raw Title tokens if teams failed (multi-delimiter: vs, -, v)
-        if best_score < 0.70:
-            for title_cand in match.get("raw_titles", [match.get("title", "")]):
-                parts = None
-                if _SPLIT_VS_REGEX.search(title_cand):
-                    parts = _SPLIT_VS_REGEX.split(title_cand, maxsplit=1)
-                elif _SPLIT_DASH_REGEX.search(title_cand):
-                    parts = _SPLIT_DASH_REGEX.split(title_cand, maxsplit=1)
-                elif _SPLIT_V_REGEX.search(title_cand):
-                    parts = _SPLIT_V_REGEX.split(title_cand, maxsplit=1)
-
-                if parts and len(parts) == 2:
-                    h_score, a_score, is_inv = compare_teams_fuzzy(parts[0], parts[1], c_h, c_a, allow_inverted=True)
-                    if h_score >= 0.65 and a_score >= 0.65:
-                        cand_avg = (h_score + a_score) / 2.0
-                        if cand_avg > best_score:
-                            best_score = cand_avg
-                            best_inv = is_inv
-
-        if best_score >= 0.75:
-            result["matched"] = True
-            result["score"] = best_score
-            result["is_inverted"] = best_inv
-            result["reason"] = "tsdb_matched"
-        else:
-            result["reason"] = f"tsdb_score_insufficient_{best_score:.2f}"
-
         return result
 
     result["reason"] = f"unknown_phase_{phase}"

@@ -5,7 +5,7 @@ from app.services.canonical_competition_service import (
     detect_canonical_competition,
 )
 from app.services.genre_classifier import genre_classifier
-from app.services.team_matching import match_single_team, calculate_match_score
+from app.services.team_matching import match_single_team
 from app.services.thesportsdb_service import thesportsdb_service
 
 
@@ -86,30 +86,13 @@ class TestRugbyAndBasketTheSportsDB(unittest.TestCase):
     def test_basket_tenerife_canarias_and_thesportsdb_reconciliation(self):
         """
         Verify that Tenerife vs Canarias and other basketball cross-namings
-        match accurately in TheSportsDB phase 3.
+        match accurately in TheSportsDB team matching.
         """
-        now_ms = int(time.time() * 1000)
-
-        # 1. Tenerife vs Venezia (Diretta naming) vs Canarias vs Reyer Venezia Mestre (TheSportsDB naming)
-        match_diretta = {
-            "title": "Tenerife vs Venezia",
-            "teams": {"home": "Tenerife", "away": "Venezia"},
-            "category": "basketball",
-            "_silo": "basketball",
-            "date": now_ms,
-        }
-        cal_tsdb = {
-            "title": "Canarias vs Reyer Venezia Mestre",
-            "home": "Canarias",
-            "away": "Reyer Venezia Mestre",
-            "category": "basketball",
-            "_silo": "basketball",
-            "date_ms": now_ms,
-        }
-
-        res = calculate_match_score(match_diretta, cal_tsdb, phase="phase3_tsdb")
-        self.assertTrue(res["matched"], f"Tenerife vs Canarias failed: {res}")
-        self.assertGreaterEqual(res["score"], 0.85)
+        # 1. Tenerife vs Canarias (TheSportsDB) and Venezia vs Reyer Venezia Mestre (TheSportsDB)
+        self.assertTrue(thesportsdb_service._team_matches("Tenerife", "Canarias"))
+        self.assertTrue(thesportsdb_service._team_matches("Venezia", "Reyer Venezia Mestre"))
+        self.assertGreaterEqual(match_single_team("Tenerife", "Canarias"), 0.85)
+        self.assertGreaterEqual(match_single_team("Venezia", "Reyer Venezia Mestre"), 0.85)
 
         # 2. Tortona vs Derthona
         self.assertGreaterEqual(match_single_team("Tortona", "Bertram Derthona Tortona"), 0.80)
