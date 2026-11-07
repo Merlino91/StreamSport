@@ -62,6 +62,8 @@ class TestSoccerClassificationAndFallback(unittest.TestCase):
             {"title": "Al Ahly vs Zamalek", "competition": "Egyptian Premier League", "country": "Egypt", "category": "football"},
             {"title": "Forge FC vs Cavalry FC", "competition": "Canadian Premier League", "country": "Canada", "category": "football"},
             {"title": "Al Kuwait vs Al Qadsia", "competition": "Kuwait Premier League", "country": "Kuwait", "category": "football"},
+            {"title": "Al Hilal vs Al Nassr", "competition": "King's Cup", "country": "Saudi Arabia", "canonical_competition": "football_fa_cup", "category": "football"},
+            {"title": "Al Orobah vs Al Adalah", "competition": "Championship", "country": "Saudi Arabia", "canonical_competition": "football_championship", "category": "football"},
         ]
         for c in extra_eu_cases:
             cat, genre = genre_classifier.classify(c)

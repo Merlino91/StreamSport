@@ -301,7 +301,7 @@ class GenreClassifier:
             elif canon == "football_la_liga":
                 if country_clean and country_clean not in ("spagna", "spain"):
                     canon = None
-            elif canon == "football_premier_league":
+            elif canon in ("football_premier_league", "football_fa_cup", "football_championship"):
                 if country_clean and country_clean not in ("inghilterra", "england", "uk", "regno unito"):
                     canon = None
 
