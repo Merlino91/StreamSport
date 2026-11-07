@@ -368,6 +368,14 @@ class DoHClient:
                 content = response.content
                 self._save_to_image_cache(url, content, content_type, now)
                 return content, content_type
+            if response.status_code in (301, 302, 307, 308):
+                redirect_loc = response.headers.get("location")
+                if redirect_loc:
+                    if redirect_loc.startswith("/"):
+                        redirect_loc = f"{parsed.scheme}://{hostname}{redirect_loc}"
+                    is_safe, _ = await self.is_safe_image_target_async(redirect_loc)
+                    if is_safe and redirect_loc != url:
+                        return await self.get_raw(redirect_loc, headers=headers, custom_headers=custom_headers, timeout=timeout)
             logger.warning("Raw request to %s returned status %d", url, response.status_code)
         except Exception as e:
             if target_url != url:
@@ -380,6 +388,14 @@ class DoHClient:
                         content = response.content
                         self._save_to_image_cache(url, content, content_type, now)
                         return content, content_type
+                    if response.status_code in (301, 302, 307, 308):
+                        redirect_loc = response.headers.get("location")
+                        if redirect_loc:
+                            if redirect_loc.startswith("/"):
+                                redirect_loc = f"{parsed.scheme}://{hostname}{redirect_loc}"
+                            is_safe, _ = await self.is_safe_image_target_async(redirect_loc)
+                            if is_safe and redirect_loc != url:
+                                return await self.get_raw(redirect_loc, headers=headers, custom_headers=custom_headers, timeout=timeout)
                 except Exception:
                     pass
             logger.error("Failed raw request to %s: %s", url, e)

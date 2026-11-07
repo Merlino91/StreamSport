@@ -43,13 +43,14 @@ class DaddyLiveAPI:
     """
 
     MIRROR_DOMAINS: List[str] = [
+        "thedaddy.li",
+        "dlhd.pk",
+        "dlhd.st",
+        "dlstreams.st",
         "thedaddy.pk",
-        "thedaddy.to",
-        "dlhd.dad",
-        "dlhd.so",
         "daddylive.pk",
     ]
-    DEFAULT_DOMAIN: str = "thedaddy.pk"
+    DEFAULT_DOMAIN: str = "thedaddy.li"
 
     DADDYLIVE_EXCLUDED_CATEGORIES = (
         "tv show", "tv shows", "upcoming events", "upcoming event"
@@ -438,7 +439,10 @@ class DaddyLiveAPI:
         Fetches raw schedule HTML from DaddyLive with automatic mirror failover via DoHClient.
         Bypasses ISP DNS blocking (AGCOM 172.16.0.2 in Italy) using Cloudflare DoH (1.1.1.1).
         """
-        for mirror in self.MIRROR_DOMAINS:
+        active_domain = await self.get_active_domain()
+        domains = [active_domain] + [d for d in self.MIRROR_DOMAINS if d != active_domain]
+
+        for mirror in domains:
             url = f"https://{mirror}/index.php"
             try:
                 raw_bytes, ct = await doh_client.get_raw(url, timeout=8.0)
@@ -451,7 +455,7 @@ class DaddyLiveAPI:
             except Exception as e:
                 logger.debug("DaddyLive schedule fetch failed for %s: %s", mirror, e)
                 continue
-        logger.warning("DaddyLive schedule fetch failed across all %d mirrors", len(self.MIRROR_DOMAINS))
+        logger.warning("DaddyLive schedule fetch failed across all %d mirrors", len(domains))
         return None
 
     def parse_html_schedule(self, html_str: str) -> List[Dict[str, Any]]:
