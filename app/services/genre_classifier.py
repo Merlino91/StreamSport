@@ -101,7 +101,18 @@ class GenreClassifier:
         r"\b(snooker|q\s*tour|billiards|biliardo|padel|golf|pga|lpga|ryder\s*cup|masters\s*tournament|darts|freccette|pdc|rugby|six\s*nations|sei\s*nazioni|nrl|top\s*14|premiership\s*rugby|urc|super\s*rugby|afl|aflw|cricket|odi|t20|twenty20|test\s*match|ipl|one\s*day\s*international|the\s*hundred|big\s*bash|ashes|ciclismo|cycling|ciclocross|cyclocross|tour\s*de\s*france|giro\s*d['’]italia|vuelta|uci|road\s*race|time\s*trial|handball|pallamano|ehf|ihf|dhb\s*pokal|waterpolo|pallanuoto|table\s*tennis|ping\s*pong|badminton|curling|biathlon|pattinaggio|nuoto|swimming|atletica|athletics|olimp|olympic)\b",
         re.IGNORECASE,
     )
-    _GENERIC_MOTORSPORT_REGEX = re.compile(r"\b(formula\s*1|formula\s*one|f1|motogp|moto\s*gp|moto2|moto3|superbike|wsbk|nascar|indycar|rally|wrc|dakar)\b", re.I)
+    _GENERIC_MOTORSPORT_REGEX = re.compile(
+        r"\b("
+        r"formula\s*[123e]|f[123e]|formula\s*one|"
+        r"motogp|moto\s*gp|moto\s*[23e]|motomondiale|motociclismo|automobilismo|"
+        r"superbike|wsbk|worldsbk|civ|supersport|"
+        r"wec|world\s*(?:championship\s*)?endurance|endurance|le\s*mans|imsa|dtm|supercars|gt\s*world|porsche\s*supercup|(?:6|12|24)\s*ore|"
+        r"nascar|indycar|indy\s*500|"
+        r"rally|wrc|dakar|erc|mxgp|motocross|supercross|karting|bathurst|"
+        r"gp|gran\s*premio"
+        r")\b",
+        re.I,
+    )
     _GENERIC_TENNIS_REGEX = re.compile(r"\b(atp|wta|bjk|davis\s*cup|wimbledon|us\s*open|roland\s*garros|australian\s*open|french\s*open)\b", re.I)
     _GENERIC_BASKET_REGEX = re.compile(r"\b(nba|wnba|euroleague|eurocup|lba|nbl|fiba|cba)\b", re.I)
     _GENERIC_FIGHT_REGEX = re.compile(r"\b(ufc|wwe|aew|bellator|boxing|boxe|mma|pfl|one\s*championship)\b", re.I)
@@ -149,9 +160,9 @@ class GenreClassifier:
 
     # Motori
     _F1_REGEX = re.compile(r"\b(f1|formula\s*1|formula\s*one)\b", re.I)
-    _MOTOGP_REGEX = re.compile(r"\b(motogp|moto\s*gp|moto2|moto3|superbike|wsbk|worldsbk|civ)\b", re.I)
+    _MOTOGP_REGEX = re.compile(r"\b(motogp|moto\s*gp|moto\s*[23e]|motomondiale|motociclismo|superbike|wsbk|worldsbk|civ|supersport|mxgp|motocross|supercross)\b", re.I)
     _RALLY_REGEX = re.compile(r"\b(rally|wrc|dakar|erc)\b", re.I)
-    _NASCAR_REGEX = re.compile(r"\b(nascar|indycar|indy\s*500|supercars|dtm|le\s*mans|wec|imsa|gt\s*world|bathurst)\b", re.I)
+    _NASCAR_REGEX = re.compile(r"\b(nascar|indycar|indy\s*500|supercars|dtm|le\s*mans|wec|world\s*(?:championship\s*)?endurance|endurance|imsa|gt\s*world|porsche\s*supercup|bathurst|automobilismo|(?:6|12|24)\s*ore)\b", re.I)
 
     # Basket
     _WNBA_REGEX = re.compile(r"\b(wnba|liga\s*femenina|tauihi|wlb|women|femminile|femenino|wbbl|wnbl)\b", re.I)
@@ -357,11 +368,50 @@ class GenreClassifier:
                 "golf", "cycling", "ciclismo", "rugby", "afl", "aussie-rules",
                 "cricket", "darts", "handball", "pallamano", "waterpolo",
                 "table-tennis", "badminton", "billiards", "snooker", "padel",
-                "squash", "altri_sport"
+                "squash", "altri_sport", "altri-sport", "altri sport", "other"
             ):
+                # Guard: if title explicitly matches a dedicated sport, don't let a generic "altri_sport" or "other" trap it!
+                if val in ("altri_sport", "altri-sport", "altri sport", "other"):
+                    if self._GENERIC_MOTORSPORT_REGEX.search(eval_text):
+                        return "motor-sports"
+                    if self._GENERIC_TENNIS_REGEX.search(eval_text):
+                        return "tennis"
+                    if self._GENERIC_BASKET_REGEX.search(eval_text):
+                        return "basketball"
+                    if self._GENERIC_FIGHT_REGEX.search(eval_text):
+                        return "fight"
+                    if self._GENERIC_HOCKEY_REGEX.search(eval_text) or (re.search(r"\bdel\b", eval_text) and any(k in eval_text for k in ("hockey", "eishockey"))):
+                        return "hockey"
+                    if self._GENERIC_AM_FOOTBALL_REGEX.search(eval_text):
+                        return "american-football"
+                    if self._GENERIC_BASEBALL_REGEX.search(eval_text):
+                        return "baseball"
+                    if self._GENERIC_VOLLEY_REGEX.search(eval_text):
+                        return "volley"
                 return "altri_sport"
 
-        # 2. Football explicit OR match with soccer league indicators
+        # 2. Unlabeled / Generic items: inspect eval_text for definitive sport tokens
+        if self._GENERIC_MOTORSPORT_REGEX.search(eval_text):
+            return "motor-sports"
+        if self._GENERIC_TENNIS_REGEX.search(eval_text):
+            return "tennis"
+        if self._GENERIC_BASKET_REGEX.search(eval_text):
+            return "basketball"
+        if self._GENERIC_FIGHT_REGEX.search(eval_text):
+            return "fight"
+        # Note: DEL requires hockey context so 'Corea del Nord' or 'Giro del Trentino' never triggers hockey!
+        if self._GENERIC_HOCKEY_REGEX.search(eval_text) or (re.search(r"\bdel\b", eval_text) and any(k in eval_text for k in ("hockey", "eishockey"))):
+            return "hockey"
+        if self._GENERIC_AM_FOOTBALL_REGEX.search(eval_text):
+            return "american-football"
+        if self._GENERIC_BASEBALL_REGEX.search(eval_text):
+            return "baseball"
+        if self._GENERIC_VOLLEY_REGEX.search(eval_text):
+            return "volley"
+        if self._GENERIC_ALTRI_SPORT_REGEX.search(eval_text):
+            return "altri_sport"
+
+        # 3. Football explicit OR match with soccer league indicators
         if match.get("is_youth") is not None:
             is_youth = bool(match.get("is_youth"))
         else:
@@ -387,27 +437,6 @@ class GenreClassifier:
             if self._HANDBALL_OTHER_SPORTS_EXCLUSION_REGEX.search(eval_text):
                 return "altri_sport"
             return "football"
-
-        # 3. Unlabeled / Generic items: inspect eval_text for definitive sport tokens
-        if self._GENERIC_MOTORSPORT_REGEX.search(eval_text):
-            return "motor-sports"
-        if self._GENERIC_TENNIS_REGEX.search(eval_text):
-            return "tennis"
-        if self._GENERIC_BASKET_REGEX.search(eval_text):
-            return "basketball"
-        if self._GENERIC_FIGHT_REGEX.search(eval_text):
-            return "fight"
-        # Note: DEL requires hockey context so 'Corea del Nord' or 'Giro del Trentino' never triggers hockey!
-        if self._GENERIC_HOCKEY_REGEX.search(eval_text) or (re.search(r"\bdel\b", eval_text) and any(k in eval_text for k in ("hockey", "eishockey"))):
-            return "hockey"
-        if self._GENERIC_AM_FOOTBALL_REGEX.search(eval_text):
-            return "american-football"
-        if self._GENERIC_BASEBALL_REGEX.search(eval_text):
-            return "baseball"
-        if self._GENERIC_VOLLEY_REGEX.search(eval_text):
-            return "volley"
-        if self._GENERIC_ALTRI_SPORT_REGEX.search(eval_text):
-            return "altri_sport"
 
         return "altri_sport"
 

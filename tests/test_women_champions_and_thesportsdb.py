@@ -213,6 +213,48 @@ class TestWomenChampionsAndTheSportsDB(unittest.IsolatedAsyncioTestCase):
             # Should NOT be rejected by is_target_women != is_result_women guard
             self.assertIsNotNone(thumb)
 
+    def test_afc_women_rejection_and_afc_men_admission(self):
+        """Verifies AFC Women's Champions League is rejected, while men's AFC Champions League Elite is admitted."""
+        # 1. AFC Women's Champions League rejected
+        adm_afc_w, slug_afc_w = is_tier_match({
+            "category": "football",
+            "country": "Asia",
+            "league": "AFC Champions League Women",
+        })
+        self.assertFalse(adm_afc_w)
+        self.assertIsNone(slug_afc_w)
+
+        # 2. AFC Champions League Donne rejected
+        adm_afc_w2, slug_afc_w2 = is_tier_match({
+            "category": "football",
+            "country": "Asia",
+            "league": "AFC Champions League Donne",
+        })
+        self.assertFalse(adm_afc_w2)
+        self.assertIsNone(slug_afc_w2)
+
+        # 3. Men's AFC Champions League Elite admitted
+        adm_afc_m, slug_afc_m = is_tier_match({
+            "category": "football",
+            "country": "Asia",
+            "league": "AFC Champions League Elite",
+        })
+        self.assertTrue(adm_afc_m)
+        self.assertEqual(slug_afc_m, "football_afc_cl")
+
+        # 4. Canonical detection does not mislabel AFC Women as UEFA Women
+        detect_slug = detect_canonical_competition("AFC Women's Champions League: Bam Khatoon vs Melbourne City", silo_hint="football")
+        self.assertNotEqual(detect_slug, "football_uwcl")
+
+        # 5. UEFA Women's Champions League remains admitted
+        adm_uwcl, slug_uwcl = is_tier_match({
+            "category": "football",
+            "country": "Europa",
+            "league": "Champions League Donne",
+        })
+        self.assertTrue(adm_uwcl)
+        self.assertEqual(slug_uwcl, "football_uwcl")
+
 
 if __name__ == "__main__":
     unittest.main()

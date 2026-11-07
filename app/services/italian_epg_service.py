@@ -47,6 +47,18 @@ class ItalianEPGService:
     )
     _YEAR_REGEX = re.compile(r"\b(20[12][0-9])\b")
     _EPISODE_SEASON_REGEX = re.compile(r"\b(?:ep\.\s*\d+|stagione\s*\d+)\b", re.IGNORECASE)
+    _MOTORSPORT_REGEX = re.compile(
+        r"\b("
+        r"formula\s*[123e]|f[123e]|formula\s*one|"
+        r"motogp|moto\s*gp|moto\s*[23e]|motomondiale|motociclismo|automobilismo|"
+        r"superbike|wsbk|worldsbk|civ|supersport|"
+        r"wec|world\s*(?:championship\s*)?endurance|endurance|le\s*mans|imsa|dtm|supercars|gt\s*world|porsche\s*supercup|(?:6|12|24)\s*ore|"
+        r"nascar|indycar|indy\s*500|"
+        r"rally|wrc|dakar|erc|mxgp|motocross|supercross|karting|bathurst|"
+        r"gp|gran\s*premio"
+        r")\b",
+        re.IGNORECASE,
+    )
     _EPG_MAJOR_COMPS = frozenset({
         "serie a", "serie b", "serie c", "premier league", "la liga", "laliga",
         "bundesliga", "ligue 1", "champions league", "europa league", "conference league",
@@ -854,7 +866,7 @@ class ItalianEPGService:
             return "basket", "basketball"
         if any(k in combined for k in ("tennis", "atp", "wta", "padel", "wimbledon", "us open", "roland garros", "australian open")):
             return "tennis", "tennis"
-        if any(k in combined for k in ("f1", "motogp", "formula 1", "superbike", "gran premio", "gp indonesia", "gp singapore", "indycar", "nascar", "wec")):
+        if cls._MOTORSPORT_REGEX.search(combined):
             return "motori", "motor-sports"
         if any(k in combined for k in ("sci", "ski", "pattinaggio", "curling", "biathlon", "snowboard", "bob", "slittino", "skeleton")):
             return "altri_sport", "winter-sports"

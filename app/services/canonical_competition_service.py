@@ -282,10 +282,10 @@ CANONICAL_LEAGUES = {
         "catalog": "calcio_estero",
         "genre": "Champions League Femminile",
         "patterns": [
-            r"uwcl",
-            r"women['’]?s\s*champions\s*league",
-            r"uefa\s*women\s*champions",
-            r"(?:champions\s*league|uefa\s*champions).*(?:donne|women|femminile|\s+[dwf]\b|\([dwf]\))",
+            r"\buwcl\b",
+            r"uefa\s*women(?:['’]?s)?\s*champions",
+            r"(?:^|:\s*)women['’]?s\s*champions\s*league",
+            r"(?:uefa\s*champions\s*league|champions\s*league).*(?:donne|women|femminile|\s+[dwf]\b|\([dwf]\))",
             r"(?:\b[dwf]\b|\([dwf]\)).*(?:champions\s*league)",
         ],
     },
@@ -721,7 +721,7 @@ CANONICAL_LEAGUES = {
         "silo": "motor-sports",
         "catalog": "motori",
         "genre": "MotoGP e Superbike",
-        "patterns": [r"motogp", r"moto\s*gp", r"\bmoto2\b", r"\bmoto3\b"],
+        "patterns": [r"motogp", r"moto\s*gp", r"\bmoto\s*[23e]\b", r"motomondiale", r"motociclismo"],
     },
     "motorsport_sbk": {
         "display": "Superbike (WSBK)",
@@ -756,7 +756,14 @@ CANONICAL_LEAGUES = {
         "silo": "motor-sports",
         "catalog": "motori",
         "genre": "NASCAR e IndyCar",
-        "patterns": [r"\bwec\b", r"le\s*mans", r"24\s*hours\s*of\s*le\s*mans"],
+        "patterns": [
+            r"\bwec\b",
+            r"le\s*mans",
+            r"24\s*hours\s*of\s*le\s*mans",
+            r"world\s*(?:championship\s*)?endurance",
+            r"\bendurance\b",
+            r"\b(?:6|12|24)\s*ore\b",
+        ],
     },
 
     # --------------------------------------------------------------------------
@@ -1468,15 +1475,21 @@ def is_tier_match(m: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
         # 6. Coppe Europee & Internazionali
         if country in ("europa", "europe", "mondo", "world", "sud america", "south america", "asia"):
             if "afc" in league or country == "asia":
-                if any(w in league for w in ("champions league", "afc", "cl", "coppa")):
-                    return True, "football_afc_cl"
-            if "champions league" in league or "uwcl" in league:
-                if is_women or "uwcl" in league:
-                    return True, "football_uwcl"
-                return True, "football_uefa_cl"
-            if "europa league" in league:
+                # Women's AFC competitions (e.g. AFC Women's Champions League) are strictly excluded
                 if is_women:
                     return False, None
+                if any(w in league for w in ("champions league", "afc", "cl", "coppa")):
+                    return True, "football_afc_cl"
+
+            if is_women:
+                # Strictly UEFA Women's Champions League only (European confederation)
+                if country in ("europa", "europe") and ("champions league" in league or "uwcl" in league):
+                    return True, "football_uwcl"
+                return False, None
+
+            if "champions league" in league or "uwcl" in league:
+                return True, "football_uefa_cl"
+            if "europa league" in league:
                 return True, "football_uefa_el"
             if "conference league" in league:
                 return True, "football_uefa_ecl"

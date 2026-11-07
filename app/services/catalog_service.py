@@ -1288,9 +1288,6 @@ class CatalogService:
                 for m in all_matches:
                     if not m.get("_espn_matched") and not m.get("_ocb_matched"):
                         cat, genre = genre_classifier.classify(m)
-                        # Strict rule: only officially verified events can enter Formula 1 or MotoGP e Superbike
-                        if cat == "motori" and genre in ("Formula 1", "MotoGP e Superbike"):
-                            genre = "NASCAR e IndyCar"
                         m["_catalog"] = cat
                         m["_genre"] = genre
 
@@ -1494,8 +1491,6 @@ class CatalogService:
             item_genre = m.get("_genre")
             if not item_catalog or not item_genre:
                 item_catalog, item_genre = genre_classifier.classify(m)
-                if item_catalog == "motori" and item_genre in ("Formula 1", "MotoGP e Superbike") and not m.get("_ocb_matched") and not m.get("_espn_matched"):
-                    item_genre = "NASCAR e IndyCar"
                 m["_catalog"] = item_catalog
                 m["_genre"] = item_genre
 
