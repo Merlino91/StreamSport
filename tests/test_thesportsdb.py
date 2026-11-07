@@ -510,6 +510,7 @@ class TheSportsDBTestCase(unittest.IsolatedAsyncioTestCase):
             "id": "dlhd-villarreal-u19-vs-napoli-u19-uefa-youth-league-000000",
             "title": "Villarreal U19 🇪🇸 vs Napoli U19 🇮🇹 (UEFA Youth League)",
             "category": "other",
+            "_silo": "football",
             "date": 1791900000000,
         }
         window = catalog_service.get_live_window_minutes(youth_match)

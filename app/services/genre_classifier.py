@@ -113,7 +113,7 @@ class GenreClassifier:
         r")\b",
         re.I,
     )
-    _GENERIC_TENNIS_REGEX = re.compile(r"\b(atp|wta|bjk|davis\s*cup|wimbledon|us\s*open|roland\s*garros|australian\s*open|french\s*open)\b", re.I)
+    _GENERIC_TENNIS_REGEX = re.compile(r"\b(atp|wta|bjk|davis\s*cup|(?<!afc\s)wimbledon|us\s*open|roland\s*garros|australian\s*open|french\s*open)\b", re.I)
     _GENERIC_BASKET_REGEX = re.compile(r"\b(nba|wnba|euroleague|eurocup|lba|nbl|fiba|cba)\b", re.I)
     _GENERIC_FIGHT_REGEX = re.compile(r"\b(ufc|wwe|aew|bellator|boxing|boxe|mma|pfl|one\s*championship)\b", re.I)
     _GENERIC_HOCKEY_REGEX = re.compile(r"\b(nhl|khl|shl|liiga|extraliga|ice\s*hockey)\b", re.I)
@@ -154,7 +154,7 @@ class GenreClassifier:
     )
 
     # Tennis
-    _TENNIS_SLAM_REGEX = re.compile(r"\b(wimbledon|us\s*open|roland\s*garros|australian\s*open|french\s*open|slam)\b", re.I)
+    _TENNIS_SLAM_REGEX = re.compile(r"\b((?<!afc\s)wimbledon|us\s*open|roland\s*garros|australian\s*open|french\s*open|slam)\b", re.I)
     _TENNIS_DAVIS_BJK_REGEX = re.compile(r"\b(davis|bjk|billie\s*jean|laver\s*cup|united\s*cup|hopman\s*cup)\b", re.I)
     _TENNIS_CHALLENGER_REGEX = re.compile(r"\b(challenger|itf|exhibition|esibizione|uts|ultimate\s*tennis)\b", re.I)
 
