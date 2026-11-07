@@ -49,7 +49,7 @@ THESPORTSDB_CALENDAR_INTERVAL = int(os.getenv("THESPORTSDB_CALENDAR_INTERVAL", "
 # TvVoo (Vavoo) Provider and Italian EPG TV Guide Settings (Sky & Tivùsat)
 ENABLE_TVVOO = os.getenv("ENABLE_TVVOO", "true").lower() in ("true", "1", "yes")
 ENABLE_ITALIAN_EPG = os.getenv("ENABLE_ITALIAN_EPG", "true").lower() in ("true", "1", "yes")
-TVVOO_CACHE_INTERVAL = int(os.getenv("TVVOO_CACHE_INTERVAL", "21600"))  # 6 hours (in seconds)
+TVVOO_CACHE_INTERVAL = int(os.getenv("TVVOO_CACHE_INTERVAL", "3600"))  # 1 hour (in seconds)
 ITALIAN_EPG_CACHE_INTERVAL = int(os.getenv("ITALIAN_EPG_CACHE_INTERVAL", "7200"))  # 2 hours (in seconds)
 
 # Server Timezone (Defaults to Europe/Rome, customizable via docker-compose / .env)

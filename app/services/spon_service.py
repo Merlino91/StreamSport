@@ -70,7 +70,7 @@ class SPONService:
         urls = [SPON_PRIMARY_URL, SPON_FALLBACK_URL]
         for url in urls:
             try:
-                async with httpx.AsyncClient(timeout=10.0, follow_redirects=True, headers=self.headers) as client:
+                async with httpx.AsyncClient(timeout=10.0, follow_redirects=True, verify=False, headers=self.headers) as client:
                     resp = await client.get(url)
                     if resp.status_code == 200:
                         text = resp.text

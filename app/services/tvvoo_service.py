@@ -67,7 +67,7 @@ def is_safe_vavoo_play_url(url: str) -> bool:
         return False
 
     # Check against authorized Vavoo mirrors
-    allowed_domains = {"vavoo.to", "huhu.to", "kool.to", "oha.to", "vavoo.tv"}
+    allowed_domains = {"vavoo.to", "vavoo.net", "huhu.to", "kool.to", "oha.to", "vavoo.tv"}
     is_allowed = any(
         hostname == domain or hostname.endswith(f".{domain}")
         for domain in allowed_domains
@@ -268,7 +268,29 @@ class LiveManifestManager:
         return res.text
 
     async def _refresh_session(self, current: Optional[LiveStreamSession], play_url: str, client_ip: Optional[str]) -> Optional[LiveStreamSession]:
+        original_play_url = play_url
         resolved = await self.service.resolve_clean_stream_url(play_url, client_ip)
+        if not resolved or not resolved.get("url"):
+            meta = self.service._url_to_channel_meta.get(play_url)
+            now = time.time()
+            if meta and (now - self.service._last_sync_time) > 45:
+                canonical = meta.get("canonical")
+                country = meta.get("country")
+                target_tag = meta.get("tag")
+                logger.info("[LiveManifest] Attempting dynamic auto-repair for expired/rotated Vavoo channel '%s' (%s)...", canonical, play_url[-25:])
+                await self.service.sync_channels(force=True)
+                fresh_streams = self.service.get_channel_streams(channel_name=canonical, country=country)
+                for fs in fresh_streams:
+                    new_url = fs.get("url")
+                    if new_url and new_url != play_url:
+                        if not target_tag or fs.get("tag") == target_tag:
+                            resolved_fresh = await self.service.resolve_clean_stream_url(new_url, client_ip)
+                            if resolved_fresh and resolved_fresh.get("url"):
+                                logger.info("[LiveManifest] Successfully auto-repaired Vavoo channel '%s': rotated %s -> %s", canonical, play_url[-25:], new_url[-25:])
+                                resolved = resolved_fresh
+                                play_url = new_url
+                                break
+
         if not resolved or not resolved.get("url"):
             logger.warning("[LiveManifest] Failed to resolve Vavoo stream URL for %s", play_url[:80])
             return current
@@ -292,6 +314,9 @@ class LiveManifestManager:
         key = self._get_key(play_url, client_ip)
         async with self._lock:
             self.sessions[key] = updated
+            if original_play_url != play_url:
+                old_key = self._get_key(original_play_url, client_ip)
+                self.sessions[old_key] = updated
             if len(self.sessions) > self.MAX_SESSIONS:
                 excess = len(self.sessions) - self.MAX_SESSIONS
                 oldest_keys = sorted(self.sessions.keys(), key=lambda k: self.sessions[k].last_fetched_at)[:excess]
@@ -322,7 +347,7 @@ class TvVooService:
 
     PING_URL = "https://www.vypn.net/api/app/ping"
     DEFAULT_DOMAIN = "vavoo.to"
-    DOMAIN_MIRRORS: List[str] = ["vavoo.to", "huhu.to", "kool.to", "oha.to"]
+    DOMAIN_MIRRORS: List[str] = ["vavoo.to", "huhu.to", "kool.to", "oha.to", "vavoo.net"]
 
     # Supported Vavoo country groups for sports broadcasting
     TVVOO_COUNTRY_GROUPS: List[str] = ["Italy", "Spain", "Germany", "France", "United Kingdom"]
@@ -1271,6 +1296,7 @@ class TvVooService:
 
     def __init__(self):
         self._channels_by_canonical: Dict[str, List[Dict[str, Any]]] = {}
+        self._url_to_channel_meta: Dict[str, Dict[str, Any]] = {}
         self._last_sync_time: float = 0.0
         self._sync_lock = asyncio.Lock()
         self._addon_sig: Optional[str] = None
@@ -1483,7 +1509,7 @@ class TvVooService:
                 domain_succeeded = True
 
                 try:
-                    async with httpx.AsyncClient(timeout=15.0) as client:
+                    async with httpx.AsyncClient(timeout=15.0, verify=False) as client:
                         for group in self.TVVOO_COUNTRY_GROUPS:
                             cursor: Any = 0
                             while True:
@@ -1535,6 +1561,7 @@ class TvVooService:
 
             # Group and map channels to canonical names respecting country silos
             grouped: Dict[str, List[Dict[str, Any]]] = {}
+            url_to_meta: Dict[str, Dict[str, Any]] = {}
             for it in all_raw_items:
                 raw_name = it.get("name", "")
                 url = it.get("url") or it.get("play") or ""
@@ -1561,6 +1588,7 @@ class TvVooService:
                     "tag": tag,
                     "country": country_group,
                 }
+                url_to_meta[url] = channel_entry
 
                 # Store under canonical key
                 if canonical not in grouped:
@@ -1580,6 +1608,7 @@ class TvVooService:
 
             if grouped:
                 self._channels_by_canonical = grouped
+                self._url_to_channel_meta = url_to_meta
                 self._last_sync_time = time.time()
                 logger.info(
                     "TvVoo sync complete. Indexed %d canonical sports channels across 5 countries (%d total stream URLs).",
@@ -1751,7 +1780,7 @@ class TvVooService:
         for domain in candidate_domains:
             resolve_url = f"https://{domain}/mediahubmx-resolve.json"
             try:
-                async with httpx.AsyncClient(timeout=8.0) as client:
+                async with httpx.AsyncClient(timeout=8.0, verify=False) as client:
                     res = await client.post(resolve_url, headers=headers, json=payload)
                     if res.status_code == 200:
                         data = res.json()
@@ -1766,6 +1795,8 @@ class TvVooService:
                                 "url": direct_url,
                                 "valid_until": time.time() + 1200,
                             }
+                    elif res.status_code == 500 and "not found" in res.text.lower():
+                        logger.debug("Vavoo mirror %s reported URL %s as Not Found (500)", domain, play_url[-25:])
             except Exception as e:
                 logger.debug("Failed resolve via %s: %s", domain, e)
 

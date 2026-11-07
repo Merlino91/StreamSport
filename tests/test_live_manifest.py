@@ -296,3 +296,61 @@ chunk_102.ts
             resp = await client.get("/live/manifest.m3u8?url=https://attacker.org/play/1")
             self.assertEqual(resp.status_code, 400)
 
+    async def test_dynamic_autorepair_expired_vavoo_channel(self):
+        """Verifies that LiveManifestManager automatically recovers when a channel ID rotates."""
+        import time
+        manager = LiveManifestManager(tvvoo_service)
+        try:
+            old_url = "https://vavoo.to/vavoo-iptv/play/old_expired_123"
+            new_url = "https://vavoo.to/vavoo-iptv/play/fresh_rotated_456"
+
+            # Register old_url in metadata
+            tvvoo_service._url_to_channel_meta[old_url] = {
+                "canonical": "sky sport uno",
+                "display_name": "Sky Sport Uno",
+                "url": old_url,
+                "tag": "s",
+                "country": "Italy",
+            }
+            tvvoo_service._last_sync_time = time.time() - 100  # Older than 45s
+
+            # Mock sync_channels and resolve_clean_stream_url
+            with patch.object(tvvoo_service, "sync_channels", new_callable=AsyncMock) as mock_sync, \
+                 patch.object(tvvoo_service, "get_channel_streams") as mock_get_streams, \
+                 patch.object(tvvoo_service, "resolve_clean_stream_url", new_callable=AsyncMock) as mock_resolve, \
+                 patch.object(manager, "_fetch_upstream", new_callable=AsyncMock) as mock_fetch:
+
+                mock_get_streams.return_value = [{
+                    "canonical": "sky sport uno",
+                    "display_name": "Sky Sport Uno",
+                    "url": new_url,
+                    "tag": "s",
+                    "country": "Italy",
+                }]
+
+                # resolve fails for old_url, succeeds for new_url
+                async def side_effect_resolve(url, client_ip=None):
+                    if url == old_url:
+                        return None
+                    if url == new_url:
+                        return {"url": "https://edge.vavoo.to/hls/new_stream.m3u8", "valid_until": time.time() + 1200}
+                    return None
+
+                mock_resolve.side_effect = side_effect_resolve
+                mock_fetch.return_value = "#EXTM3U\n#EXTINF:8.0,\nseg_new.ts\n"
+
+                manifest = await manager.get_live_manifest(old_url, client_ip="1.2.3.4")
+                self.assertIsNotNone(manifest)
+                self.assertIn("https://edge.vavoo.to/hls/seg_new.ts", manifest)
+                mock_sync.assert_called_once_with(force=True)
+
+                # Both old_key and new_key should exist in sessions
+                old_key = manager._get_key(old_url, "1.2.3.4")
+                new_key = manager._get_key(new_url, "1.2.3.4")
+                self.assertIn(old_key, manager.sessions)
+                self.assertIn(new_key, manager.sessions)
+                self.assertEqual(manager.sessions[old_key].stream_url, "https://edge.vavoo.to/hls/new_stream.m3u8")
+        finally:
+            await manager.close()
+
+
