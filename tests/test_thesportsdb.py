@@ -533,10 +533,53 @@ class TheSportsDBTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(thesportsdb_service._team_matches("Stade Rennais", "Rennes"))
         self.assertTrue(thesportsdb_service._team_matches("Rennais", "Rennes"))
 
+        # 2. Unicaja / Baloncesto Malaga -> Malaga
+        self.assertTrue(thesportsdb_service._team_matches("Unicaja", "Baloncesto Malaga"))
+        self.assertTrue(thesportsdb_service._team_matches("Unicaja Malaga", "Malaga"))
+
         # 3. OFI Crete -> OFI (3-letter acronym)
         self.assertTrue(thesportsdb_service._team_matches("OFI Crete", "OFI"))
         self.assertTrue(thesportsdb_service._team_matches("PSV Eindhoven", "PSV"))
         self.assertTrue(thesportsdb_service._team_matches("AZ Alkmaar", "AZ"))
+
+    def test_level2_search_html_slug_matching(self):
+        """Verifies Level 2 search parses slugs with match_single_team and finds thumbnails."""
+        sample_browse_html = """
+        <div>
+            <a href="/event/99901-vfl-bochum-vs-karlsruher-sc">
+                <img src="/sports/Soccer.svg" />
+                <img src="https://r2.thesportsdb.com/images/media/event/thumb/bochum_karlsruhe.jpg" />
+                Bochum vs Karlsruhe
+            </a>
+            (2026-11-08)
+        </div>
+        """
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.text = sample_browse_html
+
+        mock_client = AsyncMock()
+        mock_client.get.return_value = mock_response
+
+        with patch.object(thesportsdb_service, "_get_client", return_value=mock_client):
+            thumb = asyncio.run(
+                thesportsdb_service.search_event_thumb_html(
+                    "VfL Bochum",
+                    "Karlsruher SC",
+                    match_date_ms=int(time.time() * 1000),
+                    expected_silo="football",
+                )
+            )
+            self.assertEqual(
+                thumb,
+                "https://r2.thesportsdb.com/images/media/event/thumb/bochum_karlsruhe.jpg/medium",
+            )
+
+    def test_canonical_2_bundesliga_precedence(self):
+        """Verifies that 2. Bundesliga matches resolve to football_2_bundesliga and not generic bundesliga."""
+        from app.services.canonical_competition_service import detect_canonical_competition
+        canon = detect_canonical_competition("German 2. Bundesliga : Bochum vs Karlsruhe")
+        self.assertEqual(canon, "football_2_bundesliga")
 
 
 if __name__ == "__main__":

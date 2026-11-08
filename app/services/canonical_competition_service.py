@@ -211,6 +211,13 @@ CANONICAL_LEAGUES = {
         "genre": "La Liga",
         "patterns": [r"copa\s*del\s*rey", r"supercopa\s*de\s*espana"],
     },
+    "football_2_bundesliga": {
+        "display": "2. Bundesliga",
+        "silo": "football",
+        "catalog": "calcio_estero",
+        "genre": "Altri Campionati Europei",
+        "patterns": [r"2\.\s*bundesliga", r"bundesliga\s*2"],
+    },
     "football_bundesliga": {
         "display": "Bundesliga",
         "silo": "football",
@@ -233,13 +240,6 @@ CANONICAL_LEAGUES = {
             r"austria\s*-\s*bundesliga",
             r"austrian\s*bundesliga",
         ],
-    },
-    "football_2_bundesliga": {
-        "display": "2. Bundesliga",
-        "silo": "football",
-        "catalog": "calcio_estero",
-        "genre": "Altri Campionati Europei",
-        "patterns": [r"2\.\s*bundesliga", r"bundesliga\s*2"],
     },
     "football_dfb_pokal": {
         "display": "DFB-Pokal",

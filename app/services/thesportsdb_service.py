@@ -868,75 +868,136 @@ class TheSportsDBService:
     ) -> Optional[str]:
         """
         LEVEL 2 SEARCH: Queries TheSportsDB web search (browse?s=...)
-        using clean primary team keywords (e.g. 'Ostia Forli').
+        using clean primary team keywords (e.g. 'Bochum Karlsruhe').
         Parses matching event thumb and validates against expected date and sport.
         """
         h_clean = self._clean_team_name(home_raw)
         a_clean = self._clean_team_name(away_raw)
 
-        h_words = [w for w in h_clean.split() if w not in self.GENERIC_CLUB_WORDS and len(w) >= 3]
-        a_words = [w for w in a_clean.split() if w not in self.GENERIC_CLUB_WORDS and len(w) >= 3]
-        if not h_words or not a_words:
+        if not h_clean or not a_clean:
             return None
 
-        h_kw = h_words[0]
-        a_kw = a_words[0]
-        query = f"{h_kw} {a_kw}"
-        url = f"https://www.thesportsdb.com/browse?s={urllib.parse.quote(query)}"
+        # Build candidate queries in priority order
+        queries: List[str] = []
+        q_full = f"{h_clean} {a_clean}".strip()
+        if q_full:
+            queries.append(q_full)
+
+        h_tokens = [w for w in h_clean.split() if w not in self.GENERIC_CLUB_WORDS and len(w) >= 2]
+        a_tokens = [w for w in a_clean.split() if w not in self.GENERIC_CLUB_WORDS and len(w) >= 2]
+
+        if h_tokens and a_tokens:
+            # Fallback for teams with multi-word or sponsor names: query last non-generic tokens (e.g. city/historic root)
+            q_last = f"{h_tokens[-1]} {a_tokens[-1]}".strip()
+            if q_last not in queries:
+                queries.append(q_last)
+
+            # Query first non-generic tokens if distinct
+            q_first = f"{h_tokens[0]} {a_tokens[0]}".strip()
+            if q_first not in queries:
+                queries.append(q_first)
 
         is_target_youth = bool(is_youth) if is_youth is not None else False
         is_target_women = bool(is_women) if is_women is not None else False
 
+        pattern = re.compile(
+            r"<a\s+href=['\"]/event/(\d+)-([^'\"]+)['\"][^>]*>(.*?)</a>(?:\s*(?:<[^>]+>\s*)*\(([0-9]{4}-[0-9]{2}-[0-9]{2})\))?",
+            re.DOTALL | re.IGNORECASE,
+        )
+
         try:
             client = await self._get_client()
-            res = await client.get(url)
-            if res.status_code == 429:
-                logger.warning("TheSportsDB rate limited (429) during HTML search for %s.", query)
-                return None
-            if res.status_code != 200:
-                return None
-
-            pattern = re.compile(
-                r"<a\s+href=['\"]/event/(\d+)-([^'\"]+)['\"][^>]*>(.*?)</a>(?:\s*(?:<[^>]+>\s*)*\(([0-9]{4}-[0-9]{2}-[0-9]{2})\))?",
-                re.DOTALL | re.IGNORECASE,
-            )
-            for ev_id, slug, inner, date_str in pattern.findall(res.text):
-                slug_norm = unicodedata.normalize("NFKD", urllib.parse.unquote(slug)).encode("ascii", "ignore").decode("utf-8").lower()
-                if h_kw not in slug_norm or a_kw not in slug_norm:
+            for query in queries:
+                url = f"https://www.thesportsdb.com/browse?s={urllib.parse.quote(query)}"
+                res = await client.get(url)
+                if res.status_code == 429:
+                    logger.warning("TheSportsDB rate limited (429) during HTML search for %s.", query)
+                    return None
+                if res.status_code != 200:
                     continue
 
-                # Guard: Youth & Women coherence - prevent junior/women events from inheriting senior/men posters (and vice versa)
-                is_result_youth = bool(re.search(r"\b(u-?1[5-9]|u-?2[01]|under\s*1[5-9]|under\s*2[01]|youth|juvenil|primavera)\b", slug_norm))
-                is_result_women = bool(re.search(r"\b(women(?:['']s)?|femminile|ladies|frauen|femenino|femeni|donne|dames|damen|w-|wta|uwcl)\b", slug_norm))
-                if is_target_youth != is_result_youth:
-                    continue
-                if is_target_women != is_result_women:
+                matches_found = pattern.findall(res.text)
+                if not matches_found:
                     continue
 
-                # 1. Sport validation if SVG icon is present
-                sport_m = re.search(r'/sports/([^.\x27\x22/]+)\.svg', inner, re.IGNORECASE)
-                event_sport = sport_m.group(1) if sport_m else ""
-                if event_sport and expected_silo:
-                    if not self.is_tsdb_sport_compatible(event_sport, expected_silo):
+                for ev_id, slug, inner, date_str in matches_found:
+                    slug_unquoted = urllib.parse.unquote(slug)
+                    slug_norm = (
+                        unicodedata.normalize("NFKD", slug_unquoted)
+                        .encode("ascii", "ignore")
+                        .decode("utf-8")
+                        .lower()
+                    )
+
+                    # Validate team names using robust fuzzy matching on slug components
+                    slug_clean = slug_norm.replace("-", " ")
+                    cand_h, cand_a = "", ""
+                    if " vs " in slug_clean:
+                        parts = slug_clean.split(" vs ", 1)
+                        cand_h, cand_a = parts[0].strip(), parts[1].strip()
+                    elif " v " in slug_clean:
+                        parts = slug_clean.split(" v ", 1)
+                        cand_h, cand_a = parts[0].strip(), parts[1].strip()
+
+                    if cand_h and cand_a:
+                        h_dir = match_single_team(h_clean, cand_h)
+                        a_dir = match_single_team(a_clean, cand_a)
+                        h_inv = match_single_team(h_clean, cand_a)
+                        a_inv = match_single_team(a_clean, cand_h)
+                        is_team_ok = (h_dir >= 0.70 and a_dir >= 0.70) or (h_inv >= 0.70 and a_inv >= 0.70)
+                    else:
+                        is_team_ok = (
+                            match_single_team(h_clean, slug_clean) >= 0.70
+                            and match_single_team(a_clean, slug_clean) >= 0.70
+                        )
+
+                    if not is_team_ok:
                         continue
 
-                # 2. Date proximity validation: tolerance of +/- 1 calendar day to absorb worldwide timezones
-                if match_date_ms > 0 and date_str:
-                    try:
-                        ev_dt = datetime.datetime.strptime(date_str, "%Y-%m-%d").date()
-                        m_dt = datetime.datetime.fromtimestamp(match_date_ms / 1000.0, tz=datetime.timezone.utc).date()
-                        diff_days = abs((m_dt - ev_dt).days)
-                        if diff_days > 1:
-                            continue
-                    except Exception:
-                        pass
+                    # Guard: Youth & Women coherence - prevent junior/women events from inheriting senior/men posters (and vice versa)
+                    is_result_youth = bool(
+                        re.search(
+                            r"\b(u-?1[5-9]|u-?2[01]|under\s*1[5-9]|under\s*2[01]|youth|juvenil|primavera)\b",
+                            slug_norm,
+                        )
+                    )
+                    is_result_women = bool(
+                        re.search(
+                            r"\b(women(?:['']s)?|femminile|ladies|frauen|femenino|femeni|donne|dames|damen|w-|wta|uwcl)\b",
+                            slug_norm,
+                        )
+                    )
+                    if is_target_youth != is_result_youth:
+                        continue
+                    if is_target_women != is_result_women:
+                        continue
 
-                # 3. Valid thumbnail extraction
-                m_thumb = re.search(r"src=['\"](https?://[^'\" >]+/thumb/[^'\" >]+)['\"]", inner)
-                if m_thumb and "no_thumb" not in m_thumb.group(1):
-                    return self.format_thumb_url(m_thumb.group(1))
+                    # 1. Sport validation if SVG icon is present
+                    sport_m = re.search(r'/sports/([^.\x27\x22/]+)\.svg', inner, re.IGNORECASE)
+                    event_sport = sport_m.group(1) if sport_m else ""
+                    if event_sport and expected_silo:
+                        if not self.is_tsdb_sport_compatible(event_sport, expected_silo):
+                            continue
+
+                    # 2. Date proximity validation: tolerance of +/- 1 calendar day to absorb worldwide timezones
+                    if match_date_ms > 0 and date_str:
+                        try:
+                            ev_dt = datetime.datetime.strptime(date_str, "%Y-%m-%d").date()
+                            m_dt = datetime.datetime.fromtimestamp(
+                                match_date_ms / 1000.0, tz=datetime.timezone.utc
+                            ).date()
+                            diff_days = abs((m_dt - ev_dt).days)
+                            if diff_days > 1:
+                                continue
+                        except Exception:
+                            pass
+
+                    # 3. Valid thumbnail extraction
+                    m_thumb = re.search(r"src=['\"](https?://[^'\" >]+/thumb/[^'\" >]+)['\"]", inner)
+                    if m_thumb and "no_thumb" not in m_thumb.group(1):
+                        return self.format_thumb_url(m_thumb.group(1))
         except Exception as e:
-            logger.debug("TheSportsDB HTML search error for %s: %s", query, e)
+            logger.debug("TheSportsDB HTML search error: %s", e)
 
         return None
 

@@ -73,6 +73,8 @@ MASTER_CLUB_ALIASES: Dict[str, str] = {
     r"\bderthona\b": "tortona",
     r"\bjoventut badalona\b": "joventut",
     r"\bbadalona\b": "joventut",
+    r"\bunicaja(?:\s*malaga)?\b": "malaga",
+    r"\bbaloncesto malaga\b": "malaga",
 }
 
 # 3-Letter and 4-Letter Acronym Tokens allowed even if short
