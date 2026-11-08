@@ -463,6 +463,7 @@ class DaddyLiveAPI:
         soup = BeautifulSoup(html_str, "html.parser")
         sections = soup.find_all("section")
         matches: List[Dict[str, Any]] = []
+        seen_matches_by_id: Dict[str, Dict[str, Any]] = {}
         now_ms = int(time.time() * 1000)
 
         for sec in sections:
@@ -579,7 +580,17 @@ class DaddyLiveAPI:
                     if is_youth:
                         match_dict["is_youth"] = True
 
-                    matches.append(match_dict)
+                    if match_id not in seen_matches_by_id:
+                        seen_matches_by_id[match_id] = match_dict
+                        matches.append(match_dict)
+                    else:
+                        # Append any unique new channels to the existing match
+                        existing = seen_matches_by_id[match_id]
+                        existing_src_ids = {str(s.get("id")) for s in existing.get("sources", []) if isinstance(s, dict)}
+                        for s in sources:
+                            if isinstance(s, dict) and str(s.get("id")) not in existing_src_ids:
+                                existing_src_ids.add(str(s.get("id")))
+                                existing.setdefault("sources", []).append(s)
 
         return matches
 

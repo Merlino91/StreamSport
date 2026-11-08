@@ -37,6 +37,13 @@ from app.services.mandrakodi_service import mandrakodi_service
 from app.services.spon_service import spon_service
 from app.services.italian_epg_service import italian_epg_service
 from app.services.diretta_service import diretta_service
+from app.services.provider_normalizers import (
+    clean_daddylive_event,
+    clean_fctv33_event,
+    clean_streamed_event,
+    clean_mandrakodi_event,
+    clean_spon_event,
+)
 from app.services.team_matching import extract_team_name, clean_team_name
 from app.services.canonical_competition_service import (
     detect_canonical_competition,
@@ -141,21 +148,44 @@ class CatalogService:
 
     def reconcile_mandrakodi_live_matches(self, mandrakodi_matches: List[Dict[str, Any]]) -> None:
         """
-        Merges newly discovered Mandrakodi live/OTT matches into the catalog in memory
+        Attaches newly discovered Mandrakodi live/OTT streams to certified matches in memory
         and resets the background sync timer.
         """
         if not mandrakodi_matches:
             return
+        from app.services.team_matching import calculate_match_score
+
+        clean_mk = [clean_mandrakodi_event(m) for m in mandrakodi_matches]
         if self._cached_matches:
-            merged = self.merge_and_deduplicate_by_silos(self._cached_matches, mandrakodi_matches)
-            # Standalone uncertified Mandrakodi matches cannot create new orphan cards
-            self._cached_matches = [
-                m for m in merged
-                if not (str(m.get("id", "")).startswith("mandrakodi:") and not m.get("_diretta_matched"))
-            ]
+            claimed = set()
+            for off in self._cached_matches:
+                off_silo = off.get("_silo") or self.get_canonical_silo(off)
+                off_date = off.get("date") or 0
+                for cand in clean_mk:
+                    if cand.get("id") in claimed:
+                        continue
+                    if abs((cand.get("date") or 0) - off_date) <= 60 * 60 * 1000:
+                        score_res = calculate_match_score(
+                            cand,
+                            off,
+                            phase="phase1_diretta",
+                            max_time_diff_min=60.0
+                        )
+                        if score_res.get("matched") and score_res.get("score", 0) >= 0.75:
+                            existing_src_ids = {str(s.get("id")) for s in off.get("sources", []) if isinstance(s, dict)}
+                            for src in cand.get("sources", []):
+                                if isinstance(src, dict) and str(src.get("id")) not in existing_src_ids:
+                                    existing_src_ids.add(str(src.get("id")))
+                                    off.setdefault("sources", []).append(src)
+                            claimed.add(cand.get("id"))
+                            break
+            # Standalone solo matches certified by Diretta are also admitted
+            for m in clean_mk:
+                if m.get("_diretta_matched") and m.get("id") not in claimed:
+                    self._cached_matches.append(m)
         else:
             self._cached_matches = [
-                m for m in mandrakodi_matches
+                m for m in clean_mk
                 if m.get("_diretta_matched")
             ]
 
@@ -873,73 +903,104 @@ class CatalogService:
 
         return all_merged
 
-    def link_official_schedule_to_provider_clusters(
+    def link_official_schedule_to_providers(
         self,
         official_schedule: List[Dict[str, Any]],
-        provider_clusters: List[Dict[str, Any]],
-        time_window_minutes: float = 90.0,
+        providers: Dict[str, List[Dict[str, Any]]],
+        time_window_minutes: float = 60.0,
     ) -> List[Dict[str, Any]]:
         """
-        Links official Diretta/Flashscore schedule entries to deduplicated provider streaming clusters.
-        Matching is partitioned strictly by sport silo, within an accepted 90-minute time window,
-        using bilateral team fuzzy matching and trait protection (youth/women).
+        Direct Top-Down Linking: Official Diretta/Flashscore entries directly query each
+        provider's candidate list. For each provider, the candidate with the HIGHEST score
+        (>= 0.75) within the sport silo and time window (default 60m) is selected and claimed.
         """
         from collections import defaultdict
         from app.services.team_matching import calculate_match_score
 
-        clusters_by_silo = defaultdict(list)
-        for c in provider_clusters:
-            silo = self.get_canonical_silo(c)
-            clusters_by_silo[silo].append(c)
+        # Pre-index provider candidates by silo for fast lookups
+        indexed_providers: Dict[str, Dict[str, List[Dict[str, Any]]]] = {}
+        for prov_name, match_list in providers.items():
+            by_silo = defaultdict(list)
+            for m in match_list:
+                silo = self.get_canonical_silo(m)
+                by_silo[silo].append(m)
+            indexed_providers[prov_name] = by_silo
 
-        claimed_cluster_ids = set()
+        claimed_ids: Dict[str, Set[str]] = {p: set() for p in providers.keys()}
         linked_schedule: List[Dict[str, Any]] = []
 
         for off in official_schedule:
             off_copy = dict(off)
-            silo = off_copy.get("_silo") or self.get_canonical_silo(off_copy)
-            candidates = clusters_by_silo.get(silo, [])
+            off_copy.setdefault("sources", [])
+            off_silo = off_copy.get("_silo") or self.get_canonical_silo(off_copy)
             off_date = off_copy.get("date") or 0
 
-            # Time proximity: strictly within time_window_minutes (default 90m) in the same silo
-            time_filtered = [
-                c for c in candidates
-                if c.get("id") not in claimed_cluster_ids
-                and abs((c.get("date") or 0) - off_date) <= time_window_minutes * 60 * 1000
-            ]
+            # Prioritize Flashscore.com English metadata as primary for matching against providers
+            off_copy["clean_home"] = off_copy.get("alt_home") or off_copy.get("home") or ""
+            off_copy["clean_away"] = off_copy.get("alt_away") or off_copy.get("away") or ""
 
-            best_cand = None
-            best_score = 0.0
-            for cand in time_filtered:
-                score_res = calculate_match_score(cand, off_copy, phase="phase1_diretta")
-                if score_res["matched"] and score_res["score"] > best_score:
-                    best_score = score_res["score"]
-                    best_cand = cand
-                    if best_score >= 0.95:
-                        break
+            # Query EACH provider independently (strictly within the same canonical sport silo)
+            for prov_name, silo_map in indexed_providers.items():
+                candidates = silo_map.get(off_silo, [])
 
-            if best_cand and best_score >= 0.75:
-                # Inherit sources from deduplicated provider cluster
-                cand_sources = list(best_cand.get("sources", []))
-                off_copy["sources"] = cand_sources
-                off_copy["_matched_cluster_id"] = best_cand.get("id")
-                if best_cand.get("_fctv33_id"):
-                    off_copy["_fctv33_id"] = best_cand["_fctv33_id"]
-                if best_cand.get("_sport_type"):
-                    off_copy["_sport_type"] = best_cand["_sport_type"]
-                # Preserve any alternate titles from the provider
-                if best_cand.get("raw_titles"):
-                    existing_raw = set(off_copy.get("raw_titles", []))
-                    for rt in best_cand["raw_titles"]:
-                        if rt not in existing_raw:
-                            off_copy.setdefault("raw_titles", []).append(rt)
-                claimed_cluster_ids.add(best_cand.get("id"))
-            else:
-                off_copy.setdefault("sources", [])
+                time_filtered = [
+                    c for c in candidates
+                    if c.get("id") not in claimed_ids[prov_name]
+                    and (
+                        not off_date
+                        or not c.get("date")
+                        or abs((c.get("date") or 0) - off_date) <= time_window_minutes * 60 * 1000
+                    )
+                ]
+
+                best_cand = None
+                best_score = 0.0
+
+                for cand in time_filtered:
+                    score_res = calculate_match_score(
+                        cand,
+                        off_copy,
+                        phase="phase1_diretta",
+                        max_time_diff_min=time_window_minutes,
+                    )
+                    score = score_res.get("score", 0.0)
+                    if score_res.get("matched") and score > best_score:
+                        best_score = score
+                        best_cand = cand
+                        if best_score >= 0.98:
+                            break  # Optimal exact match
+
+                if best_cand and best_score >= 0.75:
+                    # Inherit all stream sources from this provider's winning event
+                    existing_src_ids = {str(s.get("id")) for s in off_copy["sources"] if isinstance(s, dict)}
+                    for src in best_cand.get("sources", []):
+                        if isinstance(src, dict) and str(src.get("id")) not in existing_src_ids:
+                            existing_src_ids.add(str(src.get("id")))
+                            off_copy["sources"].append(src)
+
+                    claimed_ids[prov_name].add(best_cand.get("id"))
+                    off_copy["_matched_cluster_id"] = best_cand.get("id")
+                    if best_cand.get("_fctv33_id"):
+                        off_copy["_fctv33_id"] = best_cand["_fctv33_id"]
+                    if best_cand.get("_sport_type"):
+                        off_copy["_sport_type"] = best_cand["_sport_type"]
 
             linked_schedule.append(off_copy)
 
         return linked_schedule
+
+    def link_official_schedule_to_provider_clusters(
+        self,
+        official_schedule: List[Dict[str, Any]],
+        provider_clusters: List[Dict[str, Any]],
+        time_window_minutes: float = 60.0,
+    ) -> List[Dict[str, Any]]:
+        """Backwards-compatible wrapper delegating to direct provider linking."""
+        return self.link_official_schedule_to_providers(
+            official_schedule,
+            {"clusters": provider_clusters},
+            time_window_minutes=time_window_minutes,
+        )
 
     @classmethod
     def is_real_match(cls, m: Dict[str, Any]) -> bool:
@@ -1094,14 +1155,20 @@ class CatalogService:
                 mandrakodi_matches = [m for m in mandrakodi_raw if self.is_real_match(m)]
                 spon_matches = [m for m in spon_raw if self.is_real_match(m)]
 
-                # Merge streamed and daddylive matches silo-by-silo into combined fresh
-                combined_fresh = self.merge_and_deduplicate_by_silos(streamed_matches, daddylive_matches)
-                if fctv33_matches:
-                    combined_fresh = self.merge_and_deduplicate_by_silos(combined_fresh, fctv33_matches)
-                if mandrakodi_matches:
-                    combined_fresh = self.merge_and_deduplicate_by_silos(combined_fresh, mandrakodi_matches)
-                if spon_matches:
-                    combined_fresh = self.merge_and_deduplicate_by_silos(combined_fresh, spon_matches)
+                # Clean each provider's matches with its dedicated normalizer
+                clean_dl = [clean_daddylive_event(m) for m in daddylive_matches]
+                clean_fc = [clean_fctv33_event(m) for m in fctv33_matches]
+                clean_st = [clean_streamed_event(m) for m in streamed_matches]
+                clean_mk = [clean_mandrakodi_event(m) for m in mandrakodi_matches]
+                clean_sp = [clean_spon_event(m) for m in spon_matches]
+
+                providers_map = {
+                    "daddylive": clean_dl,
+                    "fctv33": clean_fc,
+                    "streamed": clean_st,
+                    "mandrakodi": clean_mk,
+                    "spon": clean_sp,
+                }
 
                 # Ingest certified multicourt tournament sessions and simulcasts from Italian EPG (Sky/Tivùsat)
                 epg_certified_sessions = [
@@ -1133,9 +1200,6 @@ class CatalogService:
                         or is_simulcast_event(m.get("title", ""))
                     )
                 ]
-                if epg_certified_sessions:
-                    combined_fresh = self.merge_and_deduplicate_by_silos(combined_fresh, epg_certified_sessions)
-
                 # Pull all active matches from DB to retain existing enriched posters
                 all_db_matches = [m for m in await db_service.get_active_matches_async() if self.is_real_match(m)]
                 db_posters = {}
@@ -1154,11 +1218,13 @@ class CatalogService:
                     if tok:
                         db_posters_by_tokens[tok] = p
 
-                # 2. TOP-DOWN INVERTED LINKING:
+                # 2. TOP-DOWN DIRECT LINKING:
                 # Official Diretta/Flashscore schedule is primary.
-                # It links to deduplicated provider clusters in combined_fresh.
+                # It links directly to each provider's candidate list within a strict 60m window.
                 if official_schedule:
-                    linked_schedule = self.link_official_schedule_to_provider_clusters(official_schedule, combined_fresh)
+                    linked_schedule = self.link_official_schedule_to_providers(
+                        official_schedule, providers_map, time_window_minutes=60.0
+                    )
                     if epg_certified_sessions:
                         orphan_epg = []
                         for ep in epg_certified_sessions:
@@ -1167,7 +1233,7 @@ class CatalogService:
                             already_covered = False
                             for off in linked_schedule:
                                 off_silo = (off.get("_silo") or off.get("category") or "").lower()
-                                if off_silo == ep_silo and abs((off.get("date") or 0) - ep_date) <= (90 * 60 * 1000):
+                                if off_silo == ep_silo and abs((off.get("date") or 0) - ep_date) <= (60 * 60 * 1000):
                                     if ep_silo == "motor-sports":
                                         from app.services.thesportsdb_service import TheSportsDBService
                                         m_ser = TheSportsDBService.get_motorsport_series_key(off.get("title", ""))
@@ -1175,25 +1241,23 @@ class CatalogService:
                                         if m_ser and e_ser and m_ser == e_ser:
                                             already_covered = True
                                             break
+                                    else:
+                                        already_covered = True
+                                        break
                             if not already_covered:
                                 orphan_epg.append(ep)
                         linked_schedule.extend(orphan_epg)
                     all_matches = linked_schedule
-                    logger.info("Top-Down Pipeline: linked %d official matches to provider stream clusters.", len(all_matches))
+                    logger.info("Top-Down Pipeline: linked %d official matches directly to providers.", len(all_matches))
                 else:
-                    logger.warning("Diretta sliding schedule unavailable; falling back to provider bottom-up pipeline.")
-                    fresh_ids = {m.get("id") for m in combined_fresh if m.get("id")}
-                    all_db_matches = [
-                        m for m in all_db_matches
-                        if m.get("id") not in fresh_ids and not str(m.get("id", "")).startswith("mandrakodi:")
-                    ]
-                    all_matches = self.merge_and_deduplicate_by_silos(combined_fresh, all_db_matches) if all_db_matches else combined_fresh
-                    if diretta_service.is_healthy:
-                        diretta_service.reconcile_matches(all_matches)
+                    logger.warning("Diretta sliding schedule unavailable; falling back to cached active matches in SQLite.")
+                    cached_db = [m for m in all_db_matches if self.is_real_match(m)]
+                    if cached_db:
+                        all_matches = self.link_official_schedule_to_providers(
+                            cached_db, providers_map, time_window_minutes=60.0
+                        )
                     else:
-                        espn_events = await espn_service.get_official_events()
-                        if espn_events:
-                            espn_service.reconcile_matches(all_matches, espn_events, self._clean_tokens, self._get_teams_key)
+                        all_matches = []
 
                 # Reconcile motorsport events against official Orange Cat Blacktop session registry
                 if ocb_sessions:

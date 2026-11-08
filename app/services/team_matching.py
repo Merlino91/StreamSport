@@ -35,6 +35,8 @@ MASTER_CLUB_ALIASES: Dict[str, str] = {
     r"\bathletic bilbao\b": "athletic club",
     r"\bstade rennais\b": "rennes",
     r"\bofi crete\b": "ofi",
+    r"\bnec nijmegen\b": "nec",
+    r"\bnijmegen\b": "nec",
 
     # 3. Premier League / English Clubs (short colloquial names)
     r"\bmanchester city\b": "man city",
@@ -76,7 +78,7 @@ MASTER_CLUB_ALIASES: Dict[str, str] = {
 # 3-Letter and 4-Letter Acronym Tokens allowed even if short
 LEGIT_SHORT_ACRONYMS: Set[str] = {
     "lafc", "nycfc", "rbny", "psg", "bvb", "mufc", "mcfc",
-    "psv", "az", "ofi", "aek", "paok", "f1", "f2", "f3", "fe",
+    "psv", "az", "nec", "ofi", "aek", "paok", "f1", "f2", "f3", "fe",
     "nba", "nfl", "nhl", "mlb", "mls", "ufc", "wec", "dtm",
 }
 
@@ -230,10 +232,11 @@ def calculate_match_score(
     match: Dict[str, Any],
     candidate: Dict[str, Any],
     phase: str = "phase1_diretta",
+    max_time_diff_min: float = 60.0,
 ) -> Dict[str, Any]:
     """
     Calculates unified match score tailored for linking stream clusters to the official Diretta/Flashscore schedule:
-    - phase1_diretta: Team similarity is primary (>= 0.75). Time is plausibility guard (<= 90m).
+    - phase1_diretta: Team similarity is primary (>= 0.75). Time is plausibility guard (<= 60m).
                       Competition is never penalized if missing; veto only on hard conflict (Youth/Women).
     """
     result = {
@@ -250,10 +253,10 @@ def calculate_match_score(
     # FASE 1: CONVALIDATORE DIRETTA.IT
     # --------------------------------------------------------------------------
     if phase == "phase1_diretta":
-        # 1. Time Proximity Guard: must be within 90 minutes if dates exist
+        # 1. Time Proximity Guard: must be within max_time_diff_min (default 60m) if dates exist
         if m_date > 0 and c_date > 0:
             diff_min = abs(m_date - c_date) / 60000.0
-            if diff_min > 90.0:
+            if diff_min > max_time_diff_min:
                 result["reason"] = f"time_exceeded_{diff_min:.0f}m"
                 return result
 
@@ -298,9 +301,12 @@ def calculate_match_score(
                     return result
 
         # 2. Extract Home & Away
-        m_teams = match.get("teams") or {}
-        m_h = extract_team_name(m_teams.get("home")) if isinstance(m_teams, dict) else ""
-        m_a = extract_team_name(m_teams.get("away")) if isinstance(m_teams, dict) else ""
+        m_h = match.get("clean_home") or match.get("home") or ""
+        m_a = match.get("clean_away") or match.get("away") or ""
+        if not m_h or not m_a:
+            m_teams = match.get("teams") or {}
+            m_h = m_h or (extract_team_name(m_teams.get("home")) if isinstance(m_teams, dict) else "")
+            m_a = m_a or (extract_team_name(m_teams.get("away")) if isinstance(m_teams, dict) else "")
         if not m_h or not m_a:
             t = match.get("title") or ""
             clean_t = re.sub(r"^[0-9:\s-]+(?:\s*:\s*)?", "", t)
@@ -315,8 +321,8 @@ def calculate_match_score(
                 parts = _SPLIT_V_REGEX.split(clean_t, maxsplit=1)
                 m_h, m_a = parts[0].strip(), parts[1].strip()
 
-        c_h = candidate.get("home") or ""
-        c_a = candidate.get("away") or ""
+        c_h = candidate.get("clean_home") or candidate.get("home") or ""
+        c_a = candidate.get("clean_away") or candidate.get("away") or ""
         if not c_h or not c_a:
             c_teams = candidate.get("teams") or {}
             if isinstance(c_teams, dict):
@@ -375,44 +381,58 @@ def calculate_match_score(
 
         # 4. Bilateral Team Similarity Score (SequenceMatcher ponderato)
         h_score, a_score, is_inv = compare_teams_fuzzy(m_h, m_a, c_h, c_a, allow_inverted=True)
-        # Check alternate English names if available on candidate
+        # Check alternate English names if available on candidate or match
         c_alt_h = candidate.get("alt_home") or ""
         c_alt_a = candidate.get("alt_away") or ""
+        m_alt_h = match.get("alt_home") or ""
+        m_alt_a = match.get("alt_away") or ""
+
         if c_alt_h and c_alt_a:
             alt_h, alt_a, alt_inv = compare_teams_fuzzy(m_h, m_a, c_alt_h, c_alt_a, allow_inverted=True)
             if (alt_h + alt_a) > (h_score + a_score):
                 h_score, a_score, is_inv = alt_h, alt_a, alt_inv
+        elif m_alt_h and m_alt_a:
+            alt_h, alt_a, alt_inv = compare_teams_fuzzy(m_alt_h, m_alt_a, c_h, c_a, allow_inverted=True)
+            if (alt_h + alt_a) > (h_score + a_score):
+                h_score, a_score, is_inv = alt_h, alt_a, alt_inv
 
-        avg_score = max(0.0, (h_score + a_score) / 2.0 - trait_penalty)
+        # 5. Competition Modifier: Canonical slug or text bonus/conflict
+        comp_mod = 0.0
+        c1 = match.get("canonical_competition")
+        c2 = candidate.get("canonical_competition")
+        if c1 and c2:
+            if c1 == c2:
+                comp_mod = 0.05
+            else:
+                from app.services.canonical_competition_service import is_competition_conflict
+                if is_competition_conflict(c1, c2):
+                    comp_mod = -0.20
+        elif m_comp and c_comp:
+            if m_comp in c_comp or c_comp in m_comp:
+                comp_mod = 0.04
+
+        final_score = min(1.0, max(0.0, (h_score + a_score) / 2.0 - trait_penalty + comp_mod))
 
         # Strict bilateral threshold: both teams must have acceptable similarity
-        # (each >= 0.65 and average >= 0.75, or one exact >= 0.95 and other >= 0.60 and average >= 0.75)
-        is_matched = (h_score >= 0.65 and a_score >= 0.65 and avg_score >= 0.75) or (
-            max(h_score, a_score) >= 0.95 and min(h_score, a_score) >= 0.60 and avg_score >= 0.75
+        # (each >= 0.65 and final_score >= 0.75, or one exact >= 0.95 and other >= 0.60 and final_score >= 0.75)
+        is_matched = (h_score >= 0.65 and a_score >= 0.65 and final_score >= 0.75) or (
+            max(h_score, a_score) >= 0.95 and min(h_score, a_score) >= 0.60 and final_score >= 0.75
         )
 
-        # 5. Flashscore Match ID Bridge: gentle +0.05 bonus on ID match, -0.05 penalty on mismatch
-        m_fs_id = match.get("_flashscore_id")
+        # 6. Flashscore Match ID Bridge: gentle +0.05 bonus on ID match, -0.05 penalty on mismatch
+        m_fs_id = match.get("_flashscore_id") or match.get("flashscore_id")
         c_fs_id = candidate.get("flashscore_id") or candidate.get("id")
         if m_fs_id and c_fs_id:
             m_clean = str(m_fs_id).replace("diretta-", "").strip()
             c_clean = str(c_fs_id).replace("diretta-", "").strip()
             if m_clean == c_clean:
-                avg_score = min(1.0, avg_score + 0.05)
+                final_score = min(1.0, final_score + 0.05)
                 if (h_score >= 0.60 and a_score >= 0.60):
                     is_matched = True
             else:
-                avg_score = max(0.0, avg_score - 0.05)
-                if avg_score < 0.75:
+                final_score = max(0.0, final_score - 0.05)
+                if final_score < 0.75:
                     is_matched = False
-
-        # Optional Competition Bonus: if both have competition and they match, add small bonus
-        bonus = 0.0
-        if m_comp and c_comp:
-            if m_comp in c_comp or c_comp in m_comp:
-                bonus = 0.05
-
-        final_score = min(1.0, avg_score + bonus)
         result["matched"] = is_matched
         result["score"] = final_score
         result["is_inverted"] = is_inv

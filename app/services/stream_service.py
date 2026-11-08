@@ -386,7 +386,7 @@ class StreamService:
         cls,
         target_match: Dict[str, Any],
         candidate_matches: List[Dict[str, Any]],
-        time_window_minutes: float = 90.0,
+        time_window_minutes: float = 60.0,
     ) -> Optional[Dict[str, Any]]:
         """
         Fuzzy-matches a target match against a candidate provider match list using
@@ -401,7 +401,7 @@ class StreamService:
         target_silo = catalog_service.get_canonical_silo(target_match)
         target_date = target_match.get("date") or 0
 
-        # 1. Filter candidates by compatible sport silo and time window (<= 90 min)
+        # 1. Filter candidates by compatible sport silo and time window (<= 60 min)
         candidates = []
         for cand in candidate_matches:
             if not isinstance(cand, dict):
@@ -422,7 +422,12 @@ class StreamService:
         best_cand = None
         best_score = 0.0
         for cand in candidates:
-            score_res = calculate_match_score(cand, target_match, phase="phase1_diretta")
+            score_res = calculate_match_score(
+                cand,
+                target_match,
+                phase="phase1_diretta",
+                max_time_diff_min=time_window_minutes,
+            )
             if score_res.get("matched") and score_res.get("score", 0.0) > best_score:
                 best_score = score_res["score"]
                 best_cand = cand
