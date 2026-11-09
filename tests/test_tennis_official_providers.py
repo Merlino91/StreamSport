@@ -124,7 +124,7 @@ class TennisOfficialProvidersTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(db_service.get_tennis_athlete(slug))
 
     def test_player_match_verification(self):
-        """Tests that _is_player_match prevents false-positive surname collisions while supporting abbreviations."""
+        """Tests that _is_player_match prevents false-positive surname collisions while supporting abbreviations and compound names."""
         is_match = tennis_poster_service._is_player_match
         self.assertTrue(is_match("Leo Borg", "Leo Borg"))
         self.assertTrue(is_match("Bolelli S.", "Simone Bolelli"))
@@ -132,9 +132,28 @@ class TennisOfficialProvidersTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(is_match("Alex De Minaur", "Alex De Minaur"))
         self.assertTrue(is_match("De Minaur A.", "Alex De Minaur"))
         self.assertTrue(is_match("Struff J.", "Jan-Lennard Struff"))
+        # Doubles multi-initials & Spanish compound names
+        self.assertTrue(is_match("Herbert P.H.", "Pierre-Hugues Herbert"))
+        self.assertTrue(is_match("Harrison C.", "Christian Harrison"))
+        self.assertTrue(is_match("Balaji N. S.", "N.Sriram Balaji"))
+        self.assertTrue(is_match("King E.", "Evan King"))
+        self.assertTrue(is_match("Johnson L.", "L. Johnson"))
+        self.assertTrue(is_match("Garfia Carlos Alcaraz", "Carlos Alcaraz"))
+        self.assertTrue(is_match("Montes De Inaki Montes-De La Torre", "Inaki Montes-De La Torre"))
+        # Strict collision rejection
+        self.assertFalse(is_match("Janice Tjen", "Jonas Luetjen"))
         self.assertFalse(is_match("Test Fake Male", "Alastair Male"))
         self.assertFalse(is_match("Toby Samuel", "Blessing Samuel"))
         self.assertFalse(is_match("Jannik Sinner", "Carlos Alcaraz"))
+
+    def test_italian_tournament_stage_detection(self):
+        """Tests that Italian stage announcements (Finale, Semifinale, etc.) generate stage posters, not fake players."""
+        st = tennis_poster_service.is_stage_placeholder("ATP Masters 1000 Parigi: Finale")
+        self.assertIsNotNone(st)
+        self.assertEqual(st["stage"], "FINAL")
+
+        st2 = tennis_poster_service.is_stage_placeholder("ATP 250 Stoccolma: 2a Giornata Sessione Diurna")
+        self.assertIsNotNone(st2)
 
 
 if __name__ == "__main__":

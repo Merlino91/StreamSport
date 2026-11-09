@@ -55,13 +55,14 @@ KNOWN_COUNTRIES = {
 CIRCUIT_NAMES = {"atp", "wta", "itf", "challenger", "davis cup", "bjk cup", "united cup", "laver cup"}
 
 STAGE_REGEX = re.compile(
-    r"((?:couples?\s+)?1/[248]\s*final(?:\s*\d+)?|quarter[- ]?finals?(?:\s*\d+)?|semi[- ]?finals?(?:\s*\d+)?|\bfinal\b|\bfinals\b|round of \d+|round \d+|r\d{1,2}\b|singles|doubles|qualification|qualifying|day \d+|session \d+|warmup|warm[- ]up|\batp\s*(?:&|and|\+)\s*wta\b|\bwta\s*(?:&|and|\+)\s*atp\b)",
+    r"((?:couples?\s+)?1/[248]\s*final[ei]?(?:\s*\d+)?|quarter[- ]?finals?(?:\s*\d+)?|semi[- ]?finals?(?:\s*\d+)?|\bsemifinal[ei]\b|\bquarti(?:\s+di\s+finale)?\b|\bfinal\b|\bfinals\b|\bfinale\b|\bfinali\b|round of \d+|round \d+|r\d{1,2}\b|singles|doubles|qualification|qualifying|day \d+|giornata \d+|session \d+|sessione \d+|warmup|warm[- ]up|\batp\s*(?:&|and|\+)\s*wta\b|\bwta\s*(?:&|and|\+)\s*atp\b)",
     re.I
 )
 
 TOURNAMENT_STAGE_WORDS = {
     "atp", "wta", "itf", "challenger", "tour", "open", "finals", "final",
-    "semi-final", "quarter-final", "round", "day", "session", "singles",
+    "finale", "finali", "semi-final", "semifinale", "semifinali", "quarter-final",
+    "quarti", "round", "day", "giornata", "session", "sessione", "singles",
     "doubles", "qualifying", "qualification", "warmup", "r16", "r32", "r64",
 }
 
@@ -338,8 +339,9 @@ class TennisPosterService:
         """
         Validates that an API candidate matches the searched player query:
         - Exact match or surname containment.
-        - Prevents false-positive surname collision (e.g. 'Test Fake Male' vs 'Alastair Male').
-        - Supports abbreviations ('Bolelli S.' vs 'Simone Bolelli', 'De Minaur A.' vs 'Alex De Minaur').
+        - Prevents false-positive surname collision (e.g. 'Test Fake Male' vs 'Alastair Male', 'Janice Tjen' vs 'Jonas Luetjen').
+        - Supports abbreviations & initials ('Bolelli S.' vs 'Simone Bolelli', 'Herbert P.H.' vs 'Pierre-Hugues Herbert', 'Harrison C.' vs 'Christian Harrison').
+        - Supports compound names & reversed tokens ('Garfia Carlos Alcaraz' vs 'Carlos Alcaraz', 'Alex De Minaur' vs 'De Minaur Alex').
         """
         q = re.sub(r"[\(\)\[\]]", "", query or "").strip().lower()
         c = (candidate_name or "").strip().lower()
@@ -348,40 +350,59 @@ class TennisPosterService:
         if q == c:
             return True
 
-        q_parts = [p.replace(".", "").replace("-", " ") for p in q.split() if p.replace(".", "")]
-        q_tokens = []
-        for p in q_parts:
-            q_tokens.extend(p.split())
-
-        c_parts = [p.replace(".", "").replace("-", " ") for p in c.split() if p.replace(".", "")]
-        c_tokens = []
-        for p in c_parts:
-            c_tokens.extend(p.split())
-
+        q_tokens = [t for t in re.split(r"[\s\.\-]+", q) if t]
+        c_tokens = [t for t in re.split(r"[\s\.\-]+", c) if t]
         if not q_tokens or not c_tokens:
             return False
 
-        if len(q_tokens) == 1:
-            return q_tokens[0] in c_tokens
+        q_initials = [t[0] for t in q_tokens if len(t) == 1]
+        q_words = [t for t in q_tokens if len(t) > 1]
 
-        # Query has first name/initial and surname
-        if len(q_tokens[-1]) == 1:
-            q_initial = q_tokens[-1]
-            q_surname = " ".join(q_tokens[:-1])
-        elif len(q_tokens[0]) == 1:
-            q_initial = q_tokens[0]
-            q_surname = " ".join(q_tokens[1:])
-        else:
-            q_initial = q_tokens[0][0]
-            q_surname = " ".join(q_tokens[1:])
+        c_initials = [t[0] for t in c_tokens if len(t) == 1]
+        c_words = [t for t in c_tokens if len(t) > 1]
 
-        c_initial = c_tokens[0][0]
-        c_surname = " ".join(c_tokens[1:])
+        if not q_words or not c_words:
+            return False
 
-        sur_match = (c_surname == q_surname) or (c_tokens[-1] == q_tokens[-1]) or (" ".join(c_tokens[-len(q_tokens)+1:]) == q_surname)
-        init_match = (c_initial == q_initial) or (c_tokens[-1][0] == q_initial and len(c_tokens) > 1 and c_tokens[0] == q_surname)
+        particles = {"de", "la", "del", "da", "di", "van", "von", "der"}
+        q_sig_words = [w for w in q_words if w not in particles]
+        c_sig_words = [w for w in c_words if w not in particles]
 
-        return sur_match and init_match
+        # 1. Exact set match (e.g. 'Alex De Minaur' vs 'De Minaur Alex')
+        if set(q_sig_words) == set(c_sig_words):
+            return True
+
+        # 2. Subset containment for compound names (e.g. 'Carlos Alcaraz' in 'Garfia Carlos Alcaraz')
+        if len(c_sig_words) >= 2 and set(c_sig_words).issubset(set(q_sig_words)):
+            return True
+        if len(q_sig_words) >= 2 and set(q_sig_words).issubset(set(c_sig_words)):
+            return True
+
+        # 3. Surname check:
+        # Trailing initials e.g. 'Herbert P.H.' -> surname is first word
+        # Standard order e.g. 'Pierre-Hugues Herbert' -> surname is last word
+        q_sur = q_words[0] if (q_tokens and len(q_tokens[-1]) == 1) else q_words[-1]
+        c_sur = c_words[0] if (c_tokens and len(c_tokens[-1]) == 1) else c_words[-1]
+
+        sur_ok = (q_sur in c_words) or (c_sur in q_words)
+        if not sur_ok:
+            return False
+
+        # 4. Initials check:
+        if q_initials:
+            c_given_initials = [t[0] for t in c_tokens if t != c_sur]
+            if q_initials[0] not in c_given_initials:
+                return False
+        elif len(q_words) > 1:
+            q_given = [t for t in q_words if t != q_sur]
+            c_given = [t for t in c_words if t != c_sur]
+            if q_given and c_given:
+                q_given_inits = {t[0] for t in q_given}
+                c_given_inits = {t[0] for t in c_given}
+                if not q_given_inits.intersection(c_given_inits):
+                    return False
+
+        return True
 
     def extract_tournament_and_stage(self, title: str, genre: str) -> Tuple[str, str]:
         """Extracts tournament name (e.g. 'WTA 500 SINGAPORE') and stage (e.g. 'QUARTER FINALS')."""
@@ -411,8 +432,13 @@ class TennisPosterService:
         m = STAGE_REGEX.search(t)
         if m:
             raw_stage = m.group(1).upper()
-            raw_stage = re.sub(r"1/4\s*FINAL", "QUARTER FINAL", raw_stage)
-            raw_stage = re.sub(r"1/2\s*FINAL", "SEMI FINAL", raw_stage)
+            raw_stage = re.sub(r"1/4\s*FINAL[EI]?", "QUARTER FINAL", raw_stage)
+            raw_stage = re.sub(r"1/2\s*FINAL[EI]?", "SEMI FINAL", raw_stage)
+            raw_stage = re.sub(r"\bSEMIFINAL[EI]\b", "SEMI FINAL", raw_stage)
+            raw_stage = re.sub(r"\bQUARTI(?:\s+DI\s+FINALE)?\b", "QUARTER FINAL", raw_stage)
+            raw_stage = re.sub(r"\bFINAL[EI]\b", "FINAL", raw_stage)
+            raw_stage = re.sub(r"\bGIORNATA\b", "DAY", raw_stage)
+            raw_stage = re.sub(r"\bSESSIONE\b", "SESSION", raw_stage)
             raw_stage = re.sub(r"COUPLES?\s*", "DOUBLES ", raw_stage).strip()
             if any(k in raw_stage.lower() for k in ("atp & wta", "atp and wta", "wta & atp", "wta and atp")):
                 raw_stage = "LIVE BROADCAST"
@@ -634,6 +660,12 @@ class TennisPosterService:
                 surname = self._extract_single_player_surname(clean_full)
                 if surname and len(surname) >= 3 and surname.lower() != clean_full.lower():
                     search_terms.append(surname.capitalize())
+                # For compound names, also try significant individual name tokens (>= 4 chars)
+                parts = [p.strip() for p in re.split(r"[\s\.\-]+", clean_full) if len(p.strip()) >= 4 and p.strip().isalpha()]
+                for p in parts:
+                    cap = p.capitalize()
+                    if cap not in search_terms:
+                        search_terms.append(cap)
 
                 for term in search_terms:
                     encoded = urllib.parse.quote(term.strip())
@@ -644,6 +676,9 @@ class TennisPosterService:
                     items = res.json().get("items") or []
                     if not items:
                         continue
+
+                    q_toks = [t for t in re.split(r"[\s\.\-]+", clean_full.lower()) if t]
+                    q_inits = [t[0] for t in q_toks if len(t) == 1]
 
                     def _score_item(it: dict) -> int:
                         key = (it.get("Key") or "").lower()
@@ -657,6 +692,14 @@ class TennisPosterService:
                             score += 70
                         elif q_low in key:
                             score += 40
+
+                        # Match initial for doubles partners (e.g. 'C.' in 'Harrison C.' -> 'Christian Harrison')
+                        if q_inits:
+                            k_toks = [t for t in re.split(r"[\s\.\-]+", key) if t]
+                            k_inits = [t[0] for t in k_toks]
+                            if q_inits[0] in k_inits:
+                                score += 50
+
                         m_id = re.search(r"/players/[^/]+/([a-z0-9]+)/", val)
                         if m_id:
                             pid = m_id.group(1)
@@ -667,7 +710,7 @@ class TennisPosterService:
                         return score
 
                     sorted_items = sorted(items, key=_score_item, reverse=True)
-                    for item in sorted_items[:3]:
+                    for item in sorted_items:
                         cand_name = item.get("Key", "")
                         if not self._is_player_match(clean_full, cand_name):
                             continue
@@ -683,6 +726,9 @@ class TennisPosterService:
                         for c_url in candidates:
                             r_img = curl_requests.get(c_url, impersonate="chrome120", timeout=4.0)
                             if r_img.status_code == 200:
+                                # Reject ATP default empty grey silhouette (exactly 4729 bytes)
+                                if len(r_img.content) == 4729:
+                                    continue
                                 ct = (r_img.headers.get("content-type") or "").lower()
                                 if "image" in ct or r_img.content.startswith(b"\x89PNG"):
                                     img = Image.open(io.BytesIO(r_img.content)).convert("RGBA")
