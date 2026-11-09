@@ -13,6 +13,7 @@ from app.config import (
     SPON_FALLBACK_URL,
     SPON_CACHE_TTL,
 )
+from app.services.doh_client import doh_client
 
 logger = logging.getLogger("streamsport.spon")
 
@@ -66,23 +67,39 @@ class SPONService:
                 return self._cache
 
     async def _fetch_prog_text(self) -> Optional[str]:
-        """Tries to download prog.txt from the primary URL, then fallback mirror."""
-        urls = [SPON_PRIMARY_URL, SPON_FALLBACK_URL]
+        """
+        Tries to download prog.txt from the primary URL, then fallback mirrors using DoH.
+        Bypasses Italian ISP DNS blocks (AGCOM Piracy Shield 172.16.0.2) via DoHClient
+        while preserving valid TLS SNI negotiation for Cloudflare-protected domains.
+        """
+        urls: List[str] = []
+        for candidate in (SPON_PRIMARY_URL, SPON_FALLBACK_URL):
+            if candidate and candidate not in urls:
+                urls.append(candidate)
+
+        transport = doh_client.create_transport(verify=False)
         for url in urls:
             try:
-                async with httpx.AsyncClient(timeout=10.0, follow_redirects=True, verify=False, headers=self.headers) as client:
+                async with httpx.AsyncClient(
+                    transport=transport,
+                    timeout=10.0,
+                    follow_redirects=True,
+                    headers=self.headers,
+                ) as client:
                     resp = await client.get(url)
                     if resp.status_code == 200:
-                        text = resp.text
+                        text = resp.text.lstrip("\ufeff")
                         if "LAST UPDATE" in text or any(day in text for day in WEEKDAYS):
+                            logger.info("Successfully fetched Sportzonline schedule via DoH from %s (%d chars)", url, len(text))
                             return text
             except Exception as e:
-                logger.debug("Failed to fetch Sportzonline prog from %s: %s", url, e)
+                logger.debug("Failed to fetch Sportzonline prog from %s via DoH: %s", url, e)
+        logger.warning("Could not fetch Sportzonline prog.txt from any mirror via DoH.")
         return None
 
     def parse_prog(self, raw_text: str) -> List[Dict[str, Any]]:
         """Parses prog.txt content into canonical StreamSport match dictionaries."""
-        lines = [line.strip() for line in raw_text.splitlines() if line.strip()]
+        lines = [line.strip() for line in raw_text.lstrip("\ufeff").splitlines() if line.strip()]
 
         # 1. Determine base reference date (from 'LAST UPDATE: DD-MM-YY' or today)
         london_tz = ZoneInfo("Europe/London")

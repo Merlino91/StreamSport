@@ -3,7 +3,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import unittest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, patch, MagicMock
 import datetime
 import time
 from zoneinfo import ZoneInfo
@@ -179,6 +179,32 @@ class SPONServiceTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertIn("ep.bluccoj.com/proxy/manifest.m3u8", s["url"])
         self.assertIn("url=https%3A%2F%2Fww1.sportsonnline.click%2Fchannels%2Fhd%2Fhd7.php", s["url"])
         self.assertIn("api_password=secret_password", s["url"])
+
+    async def test_fetch_prog_text_doh_mirror_fallback(self):
+        """Verifies DoH mirror failover and rejection of AGCOM block pages."""
+        # 1. Primary returns AGCOM block page (HTTP 200 with illegale title), fallback returns valid prog
+        agcom_block_resp = MagicMock()
+        agcom_block_resp.status_code = 200
+        agcom_block_resp.text = "<title>Sito Illegale - AGCOM</title>"
+
+        valid_resp = MagicMock()
+        valid_resp.status_code = 200
+        valid_resp.text = SAMPLE_PROG_TXT
+
+        with patch("httpx.AsyncClient.get", side_effect=[agcom_block_resp, valid_resp]):
+            text = await self.service._fetch_prog_text()
+            self.assertIsNotNone(text)
+            self.assertIn("LAST UPDATE", text)
+
+    async def test_fetch_prog_text_all_mirrors_fail(self):
+        """Verifies that _fetch_prog_text safely returns None when all mirrors fail."""
+        failing_resp = MagicMock()
+        failing_resp.status_code = 503
+        failing_resp.text = "Service Unavailable"
+
+        with patch("httpx.AsyncClient.get", return_value=failing_resp):
+            text = await self.service._fetch_prog_text()
+            self.assertIsNone(text)
 
 
 if __name__ == "__main__":

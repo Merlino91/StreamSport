@@ -6,7 +6,8 @@ import socket
 import ssl
 import time
 import urllib.parse
-from typing import Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
+import httpcore
 import httpx
 
 logger = logging.getLogger("easysports.doh")
@@ -429,6 +430,37 @@ class DoHClient:
 
         return None, None
 
+    def create_transport(self, verify: bool = False, **kwargs) -> "DoHAsyncHTTPTransport":
+        """Creates a DoHAsyncHTTPTransport attached to this DoHClient."""
+        ssl_ctx = self._ssl_context if not verify else True
+        return DoHAsyncHTTPTransport(verify=ssl_ctx, limits=self._limits, doh_resolver=self, **kwargs)
+
+    async def get_text(
+        self,
+        url: str,
+        headers: Optional[Dict[str, str]] = None,
+        timeout: float = 10.0,
+        follow_redirects: bool = True,
+    ) -> Optional[str]:
+        """
+        Fetches text content from URL with full DoH bypass, SNI preservation,
+        and automatic redirect following.
+        """
+        transport = self.create_transport(verify=False)
+        try:
+            async with httpx.AsyncClient(
+                transport=transport,
+                follow_redirects=follow_redirects,
+                timeout=timeout,
+            ) as client:
+                resp = await client.get(url, headers=headers)
+                if resp.status_code == 200:
+                    return resp.text.lstrip("\ufeff")
+                logger.warning("DoH get_text for %s returned status %d", url, resp.status_code)
+        except Exception as e:
+            logger.error("DoH get_text failed for %s: %s", url, e)
+        return None
+
     async def proxy_image(self, url: str) -> Tuple[Optional[bytes], Optional[str]]:
         """Proxies an image URL and returns (content_bytes, content_type) with anti-SSRF validation."""
         is_safe, reason = await self.is_safe_image_target_async(url)
@@ -446,5 +478,53 @@ class DoHClient:
             return content, content_type
 
         return None, None
+
+
+class DoHNetworkBackend(httpcore.AnyIOBackend):
+    """
+    Asynchronous network backend that intercepts connect_tcp to resolve
+    hostnames via DoHClient before opening TCP sockets. Preserves TLS SNI
+    and Host headers across reverse proxies and CDNs (e.g. Cloudflare).
+    """
+
+    def __init__(self, doh_resolver: Optional["DoHClient"] = None):
+        super().__init__()
+        self._doh_resolver = doh_resolver
+
+    async def connect_tcp(
+        self,
+        host: str,
+        port: int,
+        timeout: Optional[float] = None,
+        local_address: Optional[str] = None,
+        socket_options: Any = None,
+    ) -> httpcore.AsyncNetworkStream:
+        resolver = self._doh_resolver or doh_client
+        try:
+            resolved_ip = await resolver.resolve(host)
+        except Exception:
+            resolved_ip = None
+
+        target_host = resolved_ip if resolved_ip else host
+        return await super().connect_tcp(
+            target_host,
+            port,
+            timeout=timeout,
+            local_address=local_address,
+            socket_options=socket_options,
+        )
+
+
+class DoHAsyncHTTPTransport(httpx.AsyncHTTPTransport):
+    """
+    HTTPX Async Transport backed by DoHNetworkBackend.
+    Ensures all TCP connections bypass ISP DNS blocking while keeping
+    valid TLS SNI negotiation for Cloudflare / DDOS-guarded domains.
+    """
+
+    def __init__(self, *args, doh_resolver: Optional["DoHClient"] = None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._pool._network_backend = DoHNetworkBackend(doh_resolver=doh_resolver)
+
 
 doh_client = DoHClient()

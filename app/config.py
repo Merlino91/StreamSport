@@ -70,8 +70,8 @@ ENABLE_MANDRAKODI_SOCCERON = os.getenv("ENABLE_MANDRAKODI_SOCCERON", "true").low
 
 # Sportzonline (SPON) Provider Settings
 ENABLE_SPON = os.getenv("ENABLE_SPON", "true").lower() in ("true", "1", "yes")
-SPON_PRIMARY_URL = os.getenv("SPON_PRIMARY_URL", "https://sportsonline.cx/prog.txt")
-SPON_FALLBACK_URL = os.getenv("SPON_FALLBACK_URL", "https://sportsonline.st/prog.txt")
+SPON_PRIMARY_URL = os.getenv("SPON_PRIMARY_URL", "https://sportsonline.st/prog.txt")
+SPON_FALLBACK_URL = os.getenv("SPON_FALLBACK_URL", "https://sportsonline.cx/prog.txt")
 SPON_CACHE_TTL = int(os.getenv("SPON_CACHE_TTL", "7200"))  # 2 hours (in seconds)
 
 
