@@ -800,7 +800,8 @@ class MandrakodiService:
                 # Mandrakodi dynamic events only specify HH:MM, implicitly assuming today's date in Rome.
                 # If Diretta/LiveSport does not have a confirmed match for the CURRENT DAY,
                 # the match is discarded as null/ghost/stale replay (e.g. yesterday's matches).
-                from app.services.diretta_service import diretta_service, extract_team_words
+                from app.services.diretta_service import diretta_service
+                from app.services.team_matching import extract_team_words
 
                 now_rome = datetime.datetime.now(ROME_TZ)
                 start_today_ms = datetime.datetime(now_rome.year, now_rome.month, now_rome.day, 0, 0, 0, tzinfo=ROME_TZ).timestamp() * 1000

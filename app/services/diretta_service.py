@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 import httpx
 
 from app.services.canonical_competition_service import detect_canonical_competition, get_canonical_display_name
-from app.services.team_matching import calculate_match_score
+from app.services.team_matching import calculate_match_score, extract_team_words
 from app.services.tvvoo_service import tvvoo_service
 from app.utils.demographics import extract_demographics
 
