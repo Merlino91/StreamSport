@@ -585,11 +585,22 @@ class TennisPosterService:
         def _fetch_sync():
             try:
                 from curl_cffi import requests as curl_requests
-                res = curl_requests.get(url, impersonate="chrome120", timeout=3.5)
-                if res.status_code == 200:
-                    ct = (res.headers.get("content-type") or "").lower()
-                    if "image" in ct or res.content.startswith(b"\x89PNG") or res.content.startswith(b"\xff\xd8"):
-                        return res.content
+                headers = {
+                    "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+                    "Accept-Language": "en-US,en;q=0.9",
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                }
+                if "atptour.com" in url:
+                    headers["Referer"] = "https://www.atptour.com/en/players"
+                with curl_requests.Session(impersonate="chrome120") as s:
+                    res = s.get(url, headers=headers, timeout=5.0)
+                    if res.status_code == 200:
+                        # Reject ATP default empty grey silhouette (exactly 4729 bytes)
+                        if len(res.content) == 4729:
+                            return None
+                        ct = (res.headers.get("content-type") or "").lower()
+                        if "image" in ct or res.content.startswith(b"\x89PNG") or res.content.startswith(b"\xff\xd8"):
+                            return res.content
             except Exception as e:
                 logger.debug("Active validation fetch error for %s: %s", url, e)
             return None
@@ -657,86 +668,115 @@ class TennisPosterService:
             try:
                 from curl_cffi import requests as curl_requests
                 clean_full = self.clean_player_name(search_query)
-                search_terms = [clean_full]
                 surname = self._extract_single_player_surname(clean_full)
-                if surname and len(surname) >= 3 and surname.lower() != clean_full.lower():
-                    search_terms.append(surname.capitalize())
-                # For compound names, also try significant individual name tokens (>= 4 chars)
-                parts = [p.strip() for p in re.split(r"[\s\.\-]+", clean_full) if len(p.strip()) >= 4 and p.strip().isalpha()]
+
+                # Search terms generation:
+                # 1. Full surname (e.g. 'Sinner', 'Alcaraz', 'Halys', 'Hanfmann', 'Etcheverry')
+                # 2. Significant individual alphabetic tokens (length >= 3)
+                # 3. Clean full name (unless it contains trailing initials like 'P.H.' or 'Q.')
+                search_terms: List[str] = []
+                if surname and len(surname) >= 3:
+                    search_terms.append(surname)
+                parts = [p.strip() for p in re.split(r"[\s\.\-]+", clean_full) if len(p.strip()) >= 3 and p.strip().isalpha()]
                 for p in parts:
-                    cap = p.capitalize()
-                    if cap not in search_terms:
-                        search_terms.append(cap)
+                    if p.upper() != (surname or "").upper() and p not in search_terms:
+                        search_terms.append(p)
+                if clean_full not in search_terms and not any(clean_full.endswith(f" {x}") for x in ["S.", "P.H.", "C.", "N.", "M.", "A.", "J.", "E.", "Q."]):
+                    search_terms.append(clean_full)
 
-                for term in search_terms:
-                    encoded = urllib.parse.quote(term.strip())
-                    search_url = f"https://www.atptour.com/-/ajax/playersearch/PlayerUrlSearch?SearchTerm={encoded}"
-                    res = curl_requests.get(search_url, impersonate="chrome120", timeout=4.5)
-                    if res.status_code != 200:
-                        continue
-                    items = res.json().get("items") or []
-                    if not items:
-                        continue
+                headers = {
+                    "Accept": "application/json, text/plain, */*",
+                    "Accept-Language": "en-US,en;q=0.9,it;q=0.8",
+                    "Referer": "https://www.atptour.com/en/players",
+                    "X-Requested-With": "XMLHttpRequest",
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                }
 
-                    q_toks = [t for t in re.split(r"[\s\.\-]+", clean_full.lower()) if t]
-                    q_inits = [t[0] for t in q_toks if len(t) == 1]
+                proxies = None
+                proxy_url = os.getenv("STREAMSPORT_ATP_PROXY") or os.getenv("ALL_PROXY") or os.getenv("HTTPS_PROXY")
+                if proxy_url:
+                    if proxy_url.startswith("https://"):
+                        proxy_url = "http://" + proxy_url[8:]
+                    proxies = {"http": proxy_url, "https": proxy_url}
 
-                    def _score_item(it: dict) -> int:
-                        key = (it.get("Key") or "").lower()
-                        q_low = clean_full.lower()
-                        sur_low = (surname or "").lower()
-                        val = (it.get("Value") or "").lower()
-                        score = 0
-                        if key == q_low:
-                            score += 100
-                        elif sur_low and (key.endswith(" " + sur_low) or key == sur_low):
-                            score += 70
-                        elif q_low in key:
-                            score += 40
+                with curl_requests.Session(impersonate="chrome120", proxies=proxies) as session:
+                    session.headers.update(headers)
+                    found_player = None
 
-                        # Match initial for doubles partners (e.g. 'C.' in 'Harrison C.' -> 'Christian Harrison')
-                        if q_inits:
-                            k_toks = [t for t in re.split(r"[\s\.\-]+", key) if t]
-                            k_inits = [t[0] for t in k_toks]
-                            if q_inits[0] in k_inits:
-                                score += 50
+                    for term in search_terms:
+                        encoded = urllib.parse.quote(term.strip().lower())
+                        api_url = f"https://www.atptour.com/en/-/www/players/find/byname/{encoded}/en"
+                        try:
+                            res = session.get(api_url, timeout=5.0)
+                            if res.status_code != 200:
+                                continue
+                            data = res.json()
+                            if not isinstance(data, list) or not data:
+                                continue
 
-                        m_id = re.search(r"/players/[^/]+/([a-z0-9]+)/", val)
-                        if m_id:
-                            pid = m_id.group(1)
-                            if len(pid) >= 2 and pid[1] == '0':
-                                score += 20
-                            elif len(pid) == 4 and pid[:2].isalpha():
-                                score += 15
-                        return score
+                            q_toks = [t for t in re.split(r"[\s\.\-]+", clean_full.lower()) if t]
+                            q_inits = [t[0] for t in q_toks if len(t) == 1]
 
-                    sorted_items = sorted(items, key=_score_item, reverse=True)
-                    for item in sorted_items:
-                        cand_name = item.get("Key", "")
-                        if not self._is_player_match(clean_full, cand_name):
-                            continue
-                        val = item.get("Value", "")
-                        m = re.search(r"/players/[^/]+/([a-z0-9]+)/", val, re.I)
-                        if not m:
-                            continue
-                        atp_id = m.group(1).lower()
-                        candidates = [
-                            f"https://www.atptour.com/-/media/alias/player-gladiator-headshot/{atp_id}",
-                            f"https://www.atptour.com/-/media/alias/player-headshot/{atp_id}",
-                        ]
-                        for c_url in candidates:
-                            r_img = curl_requests.get(c_url, impersonate="chrome120", timeout=4.0)
+                            def _score_item(it: dict) -> int:
+                                fn = (it.get("FirstName") or "").strip()
+                                ln = (it.get("LastName") or "").strip()
+                                full = f"{fn} {ln}".lower()
+                                active = it.get("Active") == "A"
+                                score = 0
+                                if active:
+                                    score += 50
+                                if full == clean_full.lower():
+                                    score += 100
+                                elif surname and ln.lower() == surname.lower():
+                                    score += 60
+                                if q_inits and fn:
+                                    if fn[0].lower() in q_inits:
+                                        score += 30
+                                return score
+
+                            sorted_items = sorted(data, key=_score_item, reverse=True)
+                            for item in sorted_items:
+                                fn = (item.get("FirstName") or "").strip()
+                                ln = (item.get("LastName") or "").strip()
+                                cand_full = f"{fn} {ln}".strip()
+                                if not self._is_player_match(clean_full, cand_full):
+                                    continue
+                                found_player = item
+                                break
+
+                            if found_player:
+                                break
+                        except Exception as e:
+                            logger.debug("ATP byname search error for '%s' (term '%s'): %s", search_query, term, e)
+
+                    if not found_player:
+                        return None
+
+                    atp_id = (found_player.get("PlayerId") or "").strip().lower()
+                    if not atp_id:
+                        return None
+
+                    # Preference 1: Gladiator headshot. Preference 2: Classic headshot
+                    candidates = [
+                        f"https://www.atptour.com/-/media/alias/player-gladiator-headshot/{atp_id}",
+                        f"https://www.atptour.com/-/media/alias/player-headshot/{atp_id}",
+                    ]
+                    for c_url in candidates:
+                        try:
+                            r_img = session.get(c_url, timeout=5.0)
                             if r_img.status_code == 200:
                                 # Reject ATP default empty grey silhouette (exactly 4729 bytes)
                                 if len(r_img.content) == 4729:
                                     continue
                                 ct = (r_img.headers.get("content-type") or "").lower()
-                                if "image" in ct or r_img.content.startswith(b"\x89PNG"):
+                                if "image" in ct or r_img.content.startswith(b"\x89PNG") or r_img.content.startswith(b"\xff\xd8"):
                                     img = Image.open(io.BytesIO(r_img.content)).convert("RGBA")
                                     if img.width >= 100 and img.height >= 100:
                                         return img, c_url
+                        except Exception:
+                            pass
             except Exception as e:
-                logger.debug("ATP search error for '%s': %s", search_query, e)
+                logger.warning("ATP search error for '%s': %s", search_query, e)
             return None
 
         return await asyncio.to_thread(_search_sync)
