@@ -95,6 +95,23 @@ class DoHClient:
         self._client = httpx.AsyncClient(transport=self._transport, timeout=httpx.Timeout(8.0, connect=4.0))
         self._client_loop: Optional[asyncio.AbstractEventLoop] = None
         self._resolve_lock: asyncio.Lock = asyncio.Lock()
+        self._host_locks: Dict[str, asyncio.Lock] = {}
+        self._host_locks_loop: Optional[asyncio.AbstractEventLoop] = None
+
+    def _get_host_lock(self, hostname: str) -> asyncio.Lock:
+        """Returns a per-hostname asyncio.Lock attached to the current running event loop."""
+        try:
+            current_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            current_loop = None
+
+        if self._host_locks_loop != current_loop:
+            self._host_locks.clear()
+            self._host_locks_loop = current_loop
+
+        if hostname not in self._host_locks:
+            self._host_locks[hostname] = asyncio.Lock()
+        return self._host_locks[hostname]
 
     def _ensure_doh_client(self) -> httpx.AsyncClient:
         """Returns the active DoH client, recreating it if the previous event loop was closed."""
@@ -147,14 +164,24 @@ class DoHClient:
             await self._client.aclose()
 
     async def resolve(self, hostname: str) -> Optional[str]:
-        """Resolves hostname to IPv4 using DoH resolvers with TTL caching and concurrency lock."""
+        """Resolves hostname to IPv4 using DoH resolvers with TTL caching and per-hostname lock."""
+        if not hostname:
+            return None
+
+        # Immediate bypass for IP literals (IPv4, IPv6)
+        parsed_ip = parse_ip_safe(hostname)
+        if parsed_ip is not None:
+            ip_str = str(parsed_ip)
+            return None if is_ip_private_or_reserved(ip_str) else ip_str
+
         now = time.time()
         if hostname in self._dns_cache:
             ip, expire_at = self._dns_cache[hostname]
             if now < expire_at:
                 return ip
 
-        async with self._resolve_lock:
+        host_lock = self._get_host_lock(hostname)
+        async with host_lock:
             # Re-check cache after acquiring lock
             now = time.time()
             if hostname in self._dns_cache:

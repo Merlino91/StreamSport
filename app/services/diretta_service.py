@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 import httpx
 
 from app.services.canonical_competition_service import detect_canonical_competition, get_canonical_display_name
-from app.services.team_matching import calculate_match_score, extract_team_words
+from app.services.team_matching import calculate_match_score
 from app.services.tvvoo_service import tvvoo_service
 from app.utils.demographics import extract_demographics
 
@@ -35,7 +35,6 @@ FS_SUPPORTED_SPORTS: Dict[int, Tuple[str, str]] = {
 
 FS_IT_SPORTS: Dict[int, Tuple[str, str]] = FS_SUPPORTED_SPORTS
 FS_EN_SPORTS: Dict[int, Tuple[str, str]] = FS_SUPPORTED_SPORTS
-FS_SPORTS: Dict[int, Tuple[str, str]] = FS_SUPPORTED_SPORTS
 
 class DirettaService:
     """
@@ -58,14 +57,6 @@ class DirettaService:
         "Origin": "https://www.flashscore.com"
     }
 
-
-    GENERIC_TERMS: Set[str] = {
-        "fc", "ac", "cf", "sc", "as", "the", "club", "calcio", "basket", "u19", "u20", "u21", "u23", "vs", "at"
-    }
-
-    CONTINENTAL_AREAS: Set[str] = {
-        "EUROPA", "MONDO", "ASIA", "SUD AMERICA", "NORD E CENTRO AMERICA", "AFRICA"
-    }
 
     OTT_EXCLUDE: Tuple[str, ...] = (
         "now tv", "sky go", "amazon prime", "prime video", "como tv",
@@ -140,7 +131,7 @@ class DirettaService:
         current_country = ""
         raw_za = ""
         current_session = ""
-        motorsport_session_emitted = False
+        emitted_motorsport_keys: Set[str] = set()
 
         blocks = raw_text.split("~")
         for block in blocks:
@@ -162,7 +153,7 @@ class DirettaService:
                     current_league = raw_za[len(current_country) + 1:].strip()
                 else:
                     current_league = raw_za
-                motorsport_session_emitted = False
+                emitted_motorsport_keys.clear()
                 continue
 
             # Match block: starts with AA (Match ID)
@@ -188,10 +179,15 @@ class DirettaService:
                             pass
 
                 # Special handling for motor-sports non-1v1 session cards (e.g. F1, MotoGP, NASCAR)
+                # Flashscore lists each individual driver (20+ drivers) as separate AA blocks under the session header.
+                # Deduplicate by (raw_za, session, time) to emit exactly one session card instead of 20+ driver duplicates.
                 if silo_name == "motor-sports":
-                    if not motorsport_session_emitted and date_ms > 0 and raw_za:
-                        motorsport_session_emitted = True
+                    sess_name = fields.get("ZAE", "").strip() or current_session
+                    sess_key = f"{raw_za}_{sess_name}_{time_epoch}"
+                    if date_ms > 0 and raw_za and m_id and sess_key not in emitted_motorsport_keys:
+                        emitted_motorsport_keys.add(sess_key)
                         comp_name = current_league.strip() if current_league else (current_country or sport_name)
+                        sess_title = f"{raw_za} - {sess_name}" if sess_name and sess_name.lower() not in raw_za.lower() else raw_za
                         matches.append({
                             "id": f"diretta-{m_id}",
                             "flashscore_id": m_id,
@@ -200,12 +196,12 @@ class DirettaService:
                             "country": current_country,
                             "league": current_league,
                             "competition": comp_name,
-                            "session": current_session,
+                            "session": sess_name,
                             "home": "",
                             "away": "",
                             "full_home": "",
                             "full_away": "",
-                            "title": raw_za,
+                            "title": sess_title,
                             "date": date_ms,
                             "tv_channels": tv_channels,
                         })

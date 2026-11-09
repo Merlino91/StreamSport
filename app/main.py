@@ -22,8 +22,6 @@ from app.config import (
     ADDON_NAME,
     ADDON_VERSION,
     CATALOG_DEFINITIONS,
-    CATALOG_ID,
-    CATALOG_NAME,
     CATALOG_TYPE,
     HOST,
     ID_PREFIXES,
@@ -33,6 +31,7 @@ from app.config import (
     POSTERS_DIR,
     PUBLIC_URL,
     SPORT_GENRES,
+    TIMEZONE,
     STREAMED_API_HOST,
     TIMEZONE,
 )
@@ -387,7 +386,7 @@ async def unconfigured_catalog(
         genre_filter=actual_genre,
         search_query=search,
         skip=skip,
-        user_tz="Europe/Rome",
+        user_tz=TIMEZONE,
         base_url=base_url,
         is_nuvio=is_nuvio,
     )
@@ -438,7 +437,7 @@ async def configured_catalog(
 @app.get("/nuvio/meta/{type}/{id}.json")
 async def unconfigured_meta(request: Request, type: str, id: str):
     base_url = get_base_url(request)
-    meta = await catalog_service.get_meta_detail(id, user_tz="Europe/Rome", base_url=base_url)
+    meta = await catalog_service.get_meta_detail(id, user_tz=TIMEZONE, base_url=base_url)
     if not meta:
         raise HTTPException(status_code=404, detail="Meta not found")
     return JSONResponse(
@@ -466,7 +465,7 @@ async def configured_meta(request: Request, config: str, type: str, id: str):
 async def unconfigured_stream(request: Request, type: str, id: str):
     base_url = get_base_url(request)
     try:
-        streams = await stream_service.get_streams_for_event(id, ep_url=None, user_tz="UTC", base_url=base_url)
+        streams = await stream_service.get_streams_for_event(id, ep_url=None, user_tz=TIMEZONE, base_url=base_url)
     except Exception as e:
         logger.error("Error generating streams for %s: %s", id, e, exc_info=True)
         streams = []

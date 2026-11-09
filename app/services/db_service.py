@@ -168,10 +168,6 @@ class DBService:
                     )
                 """)
                 cursor.execute("CREATE INDEX IF NOT EXISTS idx_tennis_athletes_slug ON tennis_athletes_cache(slug)")
-                # Complete purge of legacy/contaminated tennis athletes cache to guarantee zero stale WTA banners
-                cursor.execute("DELETE FROM tennis_athletes_cache")
-                # Reset tennis match posters so that catalog and banner generator rebuild fresh from zero
-                cursor.execute("UPDATE matches SET poster = NULL WHERE poster LIKE '%/posters/tennis_%' AND poster NOT LIKE '%_v4.jpg'")
                 conn.commit()
         except Exception as e:
             logger.error("Failed to ensure database schema at %s: %s", target, e)

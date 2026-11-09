@@ -208,13 +208,6 @@ class GenreClassifier:
     _EPL_EXPLICIT_REGEX = re.compile(r"\b(english\s*premier\s*league|epl|premier-league)\b|\((?:🏆\s*)?premier\s*league\)|(?:^|:\s*)premier\s*league\b", re.I)
     _EPL_KEYWORDS_REGEX = re.compile(r"\b(premier\s*league|epl|fa\s*cup|carabao|efl\s*cup)\b", re.I)
 
-    @staticmethod
-    def _normalize_name(name: str) -> str:
-        s = name.lower()
-        s = re.sub(r'^(?:a\.s\.|as|a\.c\.|ac|ssc|s\.s\.c\.|ss|u\.s\.|us|u\.c\.|uc|f\.c\.|fc)\s+', '', s)
-        s = re.sub(r'\b(cfc|fc|bc|sc|afc)\b', '', s)
-        return s.strip()
-
     def classify(self, match: Dict[str, Any]) -> Tuple[str, str]:
         """
         Classifies a match dictionary into (catalog_id, genre).
@@ -446,15 +439,13 @@ class GenreClassifier:
         if self._TENNIS_DAVIS_BJK_REGEX.search(eval_text):
             return "tennis", "Coppa Davis e BJK Cup"
         comp_text = (match.get("competition") or match.get("_competition") or match.get("league") or "").lower()
-        if "atp" in comp_text:
-            return "tennis", "ATP"
+        if self._TENNIS_CHALLENGER_REGEX.search(eval_text) or self._TENNIS_CHALLENGER_REGEX.search(comp_text):
+            return "tennis", "Challenger e Altri"
         if is_women or "wta" in comp_text or "wta" in eval_text:
             return "tennis", "WTA"
-        if "atp" in eval_text:
+        if "atp" in comp_text or "atp" in eval_text:
             return "tennis", "ATP"
-        if self._TENNIS_CHALLENGER_REGEX.search(eval_text):
-            return "tennis", "Challenger e Altri"
-        return "tennis", "ATP"
+        return "tennis", "Challenger e Altri"
 
     def _classify_motorsport(self, match: Dict[str, Any], eval_text: str) -> Tuple[str, str]:
         if self._F1_REGEX.search(eval_text):

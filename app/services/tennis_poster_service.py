@@ -149,8 +149,10 @@ class TennisPosterService:
             if not bg_src.exists() or not logo_src.exists():
                 return
             try:
-                bg = Image.open(bg_src).convert("RGBA")
-                logo = Image.open(logo_src).convert("RGBA")
+                with Image.open(bg_src) as loaded_bg:
+                    bg = loaded_bg.convert("RGBA")
+                with Image.open(logo_src) as loaded_logo:
+                    logo = loaded_logo.convert("RGBA")
                 if force_white:
                     logo = _make_white_logo(logo)
                 aspect = logo.width / logo.height
@@ -556,7 +558,8 @@ class TennisPosterService:
             ):
                 if p.exists():
                     try:
-                        self._unknown_female_cache = Image.open(p).convert("RGBA")
+                        with Image.open(p) as loaded:
+                            self._unknown_female_cache = loaded.convert("RGBA")
                         return self._unknown_female_cache
                     except Exception as e:
                         logger.warning("Failed loading unknown female cutout from %s: %s", p, e)
@@ -571,7 +574,8 @@ class TennisPosterService:
             ):
                 if p.exists():
                     try:
-                        self._unknown_male_cache = Image.open(p).convert("RGBA")
+                        with Image.open(p) as loaded:
+                            self._unknown_male_cache = loaded.convert("RGBA")
                         return self._unknown_male_cache
                     except Exception as e:
                         logger.warning("Failed loading unknown male cutout from %s: %s", p, e)
@@ -585,7 +589,8 @@ class TennisPosterService:
         ):
             if p.exists():
                 try:
-                    return Image.open(p).convert("RGBA")
+                    with Image.open(p) as loaded:
+                        return loaded.convert("RGBA")
                 except Exception:
                     pass
         return None
@@ -625,7 +630,9 @@ class TennisPosterService:
         content = await asyncio.to_thread(_fetch_sync)
         if content:
             try:
-                img = Image.open(io.BytesIO(content)).convert("RGBA")
+                with io.BytesIO(content) as bio:
+                    with Image.open(bio) as loaded:
+                        img = loaded.convert("RGBA")
                 if img.width >= 50 and img.height >= 50:
                     return img
             except Exception as e:
@@ -673,7 +680,9 @@ class TennisPosterService:
                                     if img_url.startswith("http"):
                                         img_res = await client.get(img_url)
                                         if img_res.status_code == 200:
-                                            img = Image.open(io.BytesIO(img_res.content)).convert("RGBA")
+                                            with io.BytesIO(img_res.content) as bio:
+                                                with Image.open(bio) as loaded:
+                                                    img = loaded.convert("RGBA")
                                             return img, img_url
                 except Exception as e:
                     logger.debug("ESPN athlete search error for '%s' (candidate '%s'): %s", search_query, q, e)
@@ -787,7 +796,9 @@ class TennisPosterService:
                                     continue
                                 ct = (r_img.headers.get("content-type") or "").lower()
                                 if "image" in ct or r_img.content.startswith(b"\x89PNG") or r_img.content.startswith(b"\xff\xd8"):
-                                    img = Image.open(io.BytesIO(r_img.content)).convert("RGBA")
+                                    with io.BytesIO(r_img.content) as bio:
+                                        with Image.open(bio) as loaded:
+                                            img = loaded.convert("RGBA")
                                     if img.width >= 100 and img.height >= 100:
                                         return img, c_url
                         except Exception:
@@ -856,7 +867,9 @@ class TennisPosterService:
                         if r_img.status_code == 200:
                             ct = (r_img.headers.get("content-type") or "").lower()
                             if "image" in ct or r_img.content.startswith(b"\x89PNG"):
-                                img = Image.open(io.BytesIO(r_img.content)).convert("RGBA")
+                                with io.BytesIO(r_img.content) as bio:
+                                    with Image.open(bio) as loaded:
+                                        img = loaded.convert("RGBA")
                                 if img.width >= 100 and img.height >= 100:
                                     return img, clean_url
             except Exception as e:
@@ -1007,7 +1020,8 @@ class TennisPosterService:
             bg_path = BACKGROUNDS_DIR / bg_name
 
         if bg_path.exists():
-            canvas = Image.open(bg_path).convert("RGBA")
+            with Image.open(bg_path) as loaded:
+                canvas = loaded.convert("RGBA")
         else:
             logger.warning(
                 "Background template not found: '%s' (searched '%s' and '%s'). Using fallback.",

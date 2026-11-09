@@ -130,15 +130,16 @@ class CatalogService:
 
     def get_current_sync_interval(self) -> int:
         """
-        Dynamic sync interval based on Rome time:
-        - 12:00 to 23:59: 3600 seconds (1 hour) for afternoon/evening sports coverage.
-        - 00:00 to 11:59: 14400 seconds (4 hours) for overnight/morning (00:00, 04:00, 08:00, 12:00).
+        Dynamic sync interval based on Rome time, scaled by CATALOG_SYNC_INTERVAL:
+        - 12:00 to 23:59: CATALOG_SYNC_INTERVAL (default 3600 seconds) for afternoon/evening sports coverage.
+        - 00:00 to 11:59: max(CATALOG_SYNC_INTERVAL * 2, 14400) for overnight/morning (or CATALOG_SYNC_INTERVAL * 2 if custom).
         """
         tz = get_safe_timezone("Europe/Rome")
         now_rome = datetime.datetime.now(tz)
+        base = max(CATALOG_SYNC_INTERVAL, 300)
         if 12 <= now_rome.hour <= 23:
-            return 3600
-        return 14400
+            return base
+        return max(base * 2, 14400) if base == 3600 else base * 2
 
     def reset_sync_timer(self) -> None:
         """Resets the background catalog sync timer to postpone the next scheduled sync by a full interval."""
@@ -455,14 +456,15 @@ class CatalogService:
             desc_parts.append("⭐ In Evidenza")
 
         description = " • ".join(desc_parts)
-        stremio_id = f"streamsport:{match_id}"
+        raw_mid = str(match_id or "unknown")
+        clean_match_id = raw_mid.split(":", 1)[1] if raw_mid.startswith("streamsport:") else raw_mid
+        stremio_id = f"streamsport:{clean_match_id}"
 
         has_tvvoo = any(
             isinstance(s, dict) and s.get("source") == "tvvoo"
             for s in match.get("sources", [])
         )
 
-        clean_match_id = match_id or "unknown"
         poster_endpoint = f"/poster/{clean_match_id}.jpg?s={banner_status}"
         if banner_time:
             poster_endpoint += f"&t={urllib.parse.quote(banner_time)}"
@@ -1230,25 +1232,73 @@ class CatalogService:
                     if epg_certified_sessions:
                         orphan_epg = []
                         for ep in epg_certified_sessions:
+                            ep_title = (ep.get("title") or "").strip()
                             ep_silo = (ep.get("_silo") or ep.get("category") or "").lower()
                             ep_date = ep.get("date", 0)
+                            is_simulcast = is_simulcast_event(ep_title)
                             already_covered = False
+
                             for off in linked_schedule:
+                                off_title = (off.get("title") or "").strip()
                                 off_silo = (off.get("_silo") or off.get("category") or "").lower()
-                                if off_silo == ep_silo and abs((off.get("date") or 0) - ep_date) <= (60 * 60 * 1000):
-                                    if ep_silo == "motor-sports":
-                                        from app.services.thesportsdb_service import TheSportsDBService
-                                        m_ser = TheSportsDBService.get_motorsport_series_key(off.get("title", ""))
-                                        e_ser = TheSportsDBService.get_motorsport_series_key(ep.get("title", ""))
-                                        if m_ser and e_ser and m_ser == e_ser:
-                                            already_covered = True
-                                            break
-                                    else:
+                                time_diff = abs((off.get("date") or 0) - ep_date)
+
+                                if off_silo != ep_silo or time_diff > (60 * 60 * 1000):
+                                    continue
+
+                                # Simulcast events (e.g. "Diretta Gol", "NFL RedZone") are never covered by a single match
+                                if is_simulcast:
+                                    if is_simulcast_event(off_title) and ep_title.lower() == off_title.lower():
                                         already_covered = True
                                         break
+                                    continue
+
+                                if ep_silo == "motor-sports":
+                                    from app.services.thesportsdb_service import TheSportsDBService
+                                    m_ser = TheSportsDBService.get_motorsport_series_key(off_title)
+                                    e_ser = TheSportsDBService.get_motorsport_series_key(ep_title)
+                                    if m_ser and e_ser and m_ser == e_ser:
+                                        off_sess = TheSportsDBService.normalize_motorsport_session_name(off_title)
+                                        ep_sess = TheSportsDBService.normalize_motorsport_session_name(ep_title)
+                                        if off_sess == ep_sess:
+                                            already_covered = True
+                                            break
+                                elif ep_silo == "tennis":
+                                    # Tennis multicourt/tournament channel sessions (e.g. "ATP 1000 - Sky Sport Tennis")
+                                    # are distinct from single 1v1 matches
+                                    if " vs " not in ep_title.lower() and " vs " in off_title.lower():
+                                        continue
+                                    if ep_title.lower() == off_title.lower():
+                                        already_covered = True
+                                        break
+                                else:
+                                    clean_ep = re.sub(r"[^a-zA-Z0-9]+", " ", ep_title.lower()).strip()
+                                    clean_off = re.sub(r"[^a-zA-Z0-9]+", " ", off_title.lower()).strip()
+                                    if clean_ep == clean_off or SequenceMatcher(None, clean_ep, clean_off).ratio() >= 0.75:
+                                        already_covered = True
+                                        break
+
                             if not already_covered:
                                 orphan_epg.append(ep)
                         linked_schedule.extend(orphan_epg)
+
+                    # Preserve historical replay-eligible matches from all_db_matches (between 6h and 72h ago)
+                    # that are no longer part of Diretta's forward-sliding schedule.
+                    if ENABLE_REPLAYS and all_db_matches:
+                        existing_ids = {m.get("id") for m in linked_schedule if m.get("id")}
+                        now_ms = time.time() * 1000
+                        historical_replays = [
+                            db_m for db_m in all_db_matches
+                            if db_m.get("id") not in existing_ids
+                            and self.is_real_match(db_m)
+                            and self.is_replay_eligible(db_m)
+                            and ((db_m.get("date") or 0) > 0)
+                            and (((db_m.get("date") or 0) - now_ms) / 60000 < -self.get_live_window_minutes(db_m))
+                        ]
+                        if historical_replays:
+                            linked_schedule.extend(historical_replays)
+                            logger.info("Preserved %d historical replay matches (6h-72h) from SQLite.", len(historical_replays))
+
                     all_matches = linked_schedule
                     logger.info("Top-Down Pipeline: linked %d official matches directly to providers.", len(all_matches))
                 else:
@@ -1328,7 +1378,6 @@ class CatalogService:
                     if not (
                         str(m.get("id", "")).startswith("mandrakodi:")
                         and not m.get("_diretta_matched")
-                        and not m.get("_espn_matched")
                     )
                 ]
 
@@ -1356,7 +1405,7 @@ class CatalogService:
                 # Matches with _tsdb_matched have competition set, enabling exact genre matching;
                 # Unmatched matches use the 5-layer heuristic fallback.
                 for m in all_matches:
-                    if not m.get("_espn_matched") and not m.get("_ocb_matched"):
+                    if not m.get("_ocb_matched"):
                         cat, genre = genre_classifier.classify(m)
                         m["_catalog"] = cat
                         m["_genre"] = genre
@@ -1594,8 +1643,7 @@ class CatalogService:
                 if q not in m_title and q not in home and q not in away:
                     continue
 
-            meta_item = self.build_meta_item(m, item_genre, user_tz=user_tz, base_url=base_url)
-            filtered.append(meta_item)
+            filtered.append((m, item_genre))
 
         # 5. Sort matches chronologically:
         # Priority 0: LIVE matches now (diff <= 0 and diff >= -live_window) -> ASCENDING DATE (12:00 before 12:15)
@@ -1604,12 +1652,13 @@ class CatalogService:
         # Priority 3: No date -> AT THE VERY END
         now_ms = time.time() * 1000
 
-        def sort_priority(item: Dict[str, Any]) -> Tuple[int, float]:
-            d = item.get("_date_ms") or 0
+        def sort_priority(item_pair: Tuple[Dict[str, Any], str]) -> Tuple[int, float]:
+            m = item_pair[0]
+            d = m.get("date") or 0
             if not d:
                 return (3, 0.0)
             diff = (d - now_ms) / 60000
-            live_window = item.get("_live_window", 240)
+            live_window = self.get_live_window_minutes(m)
             if -live_window <= diff <= 0:
                 return (0, float(d))   # Live now: chronological order (earliest kickoff first)
             elif diff > 0:
@@ -1621,20 +1670,24 @@ class CatalogService:
 
         # 6. Safety Deduplication: Guarantee 100% unique IDs for Android Jetpack Compose
         seen_ids = set()
-        unique_filtered = []
-        for meta_item in filtered:
-            mid = meta_item.get("id")
-            if mid and mid in seen_ids:
+        unique_filtered: List[Tuple[Dict[str, Any], str]] = []
+        for m, item_genre in filtered:
+            raw_mid = str(m.get("id") or "")
+            clean_id = raw_mid.split(":", 1)[1] if raw_mid.startswith("streamsport:") else raw_mid
+            stremio_id = f"streamsport:{clean_id}"
+            if stremio_id in seen_ids:
                 continue
-            seen_ids.add(mid)
-            unique_filtered.append(meta_item)
-        filtered = unique_filtered
+            seen_ids.add(stremio_id)
+            unique_filtered.append((m, item_genre))
 
-        # 7. Pagination & Schema Cleanup
-        page = filtered[skip : skip + limit]
-        for item in page:
-            item.pop("_date_ms", None)
-            item.pop("_live_window", None)
+        # 7. Pagination & Build Meta Only for Paged Items (Massive CPU & String Allocation Optimization)
+        page_slice = unique_filtered[skip : skip + limit]
+        page: List[Dict[str, Any]] = []
+        for m, item_genre in page_slice:
+            meta_item = self.build_meta_item(m, item_genre, user_tz=user_tz, base_url=base_url)
+            meta_item.pop("_date_ms", None)
+            meta_item.pop("_live_window", None)
+            page.append(meta_item)
 
         return page
 
@@ -1681,6 +1734,8 @@ class CatalogService:
             _, genre = genre_classifier.classify(match)
         meta = self.build_meta_item(match, genre, user_tz=user_tz, base_url=base_url)
         meta["background"] = meta.get("poster")
+        meta.pop("_date_ms", None)
+        meta.pop("_live_window", None)
         return meta
 
     def get_cached_match(self, match_id: str) -> Optional[Dict[str, Any]]:

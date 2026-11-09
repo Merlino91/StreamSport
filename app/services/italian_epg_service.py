@@ -21,6 +21,12 @@ from app.services.canonical_competition_service import (
     get_simulcast_info,
 )
 
+try:
+    from zoneinfo import ZoneInfo
+    ROME_TZ = ZoneInfo("Europe/Rome")
+except Exception:
+    ROME_TZ = datetime.timezone(datetime.timedelta(hours=1))
+
 logger = logging.getLogger("streamsport.italian_epg_service")
 
 
@@ -90,8 +96,10 @@ class ItalianEPGService:
         "9096": {"name": "Sky Sport F1", "lcn": 207, "default_silo": "motor-sports", "default_cat": "motori"},
         "9102": {"name": "Sky Sport MotoGP", "lcn": 208, "default_silo": "motor-sports", "default_cat": "motori"},
         "10254": {"name": "Sky Sport Golf", "lcn": 209, "default_silo": "golf", "default_cat": "altri_sport"},
-        "11910": {"name": "Sky Sport Legend", "lcn": 210, "default_silo": None},
-        "11909": {"name": "Sky Sport Mix", "lcn": 211, "default_silo": None},
+        "9108": {"name": "Eurosport 1", "lcn": 210, "default_silo": None},
+        "9109": {"name": "Eurosport 2", "lcn": 211, "default_silo": None},
+        "11910": {"name": "Eurosport 1", "lcn": 210, "default_silo": None},
+        "11909": {"name": "Eurosport 2", "lcn": 211, "default_silo": None},
         "6000": {"name": "SuperTennis HD", "lcn": 212, "default_silo": "tennis", "default_cat": "tennis"},
         "10013": {"name": "Sky Sport 4K", "lcn": 213, "default_silo": None},
         "11402": {"name": "DAZN 1", "lcn": 214, "default_silo": None},
@@ -1165,10 +1173,7 @@ class ItalianEPGService:
         """Queries Tivùsat Guida TV API for sport channels across today and tomorrow."""
         matches: List[Dict[str, Any]] = []
         all_tivu_channels = {**self.TIVUSAT_SPORTS_CHANNELS, **self.TIVUSAT_GENERALIST_CHANNELS}
-        try:
-            tz_rome = ZoneInfo("Europe/Rome")
-        except Exception:
-            tz_rome = datetime.timezone(datetime.timedelta(hours=2))
+        tz_rome = ROME_TZ
 
         async def fetch_one(ch_id: str, meta: Dict[str, Any], date_str: str):
             url = f"https://services.tivulaguida.it/api/epg/channels/{ch_id}/date/{date_str}"
@@ -1508,9 +1513,12 @@ class ItalianEPGService:
             iso_from = dt_from.strftime("%Y-%m-%dT%H:%M:%SZ")
             iso_to = dt_tomorrow.strftime("%Y-%m-%dT23:59:59Z")
 
+            # Tivùsat API requires local Italian dates (Europe/Rome) in URL path
+            dt_now_rome = datetime.datetime.now(ROME_TZ)
+            dt_tomorrow_rome = dt_now_rome + datetime.timedelta(days=1)
             target_dates = [
-                dt_now.strftime("%Y-%m-%d"),
-                dt_tomorrow.strftime("%Y-%m-%d"),
+                dt_now_rome.strftime("%Y-%m-%d"),
+                dt_tomorrow_rome.strftime("%Y-%m-%d"),
             ]
 
             headers = {

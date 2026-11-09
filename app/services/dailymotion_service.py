@@ -1,4 +1,5 @@
 import asyncio
+from collections import OrderedDict
 import logging
 import time
 import urllib.parse
@@ -17,7 +18,7 @@ class DailymotionService:
     def __init__(self):
         self._api_base = "https://api.dailymotion.com"
         # In-memory cache for resolved stream URLs (video_id -> (timestamp, stream_url))
-        self._manifest_cache: Dict[str, Tuple[float, str]] = {}
+        self._manifest_cache: OrderedDict[str, Tuple[float, str]] = OrderedDict()
         # Concurrency semaphore to prevent thread pool exhaustion from parallel yt-dlp executions
         self._semaphore: asyncio.Semaphore = asyncio.Semaphore(4)
 
@@ -95,6 +96,10 @@ class DailymotionService:
         async with self._semaphore:
             stream_url = await asyncio.to_thread(self._extract_dm_stream_sync, video_id)
         if stream_url:
+            if video_id in self._manifest_cache:
+                self._manifest_cache.move_to_end(video_id)
+            elif len(self._manifest_cache) >= 200:
+                self._manifest_cache.popitem(last=False)
             self._manifest_cache[video_id] = (now, stream_url)
 
         return stream_url

@@ -1,4 +1,5 @@
 import asyncio
+from collections import OrderedDict
 import json
 import logging
 import re
@@ -39,7 +40,7 @@ class YouTubeService:
             "Accept-Language": "it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7",
         }
         # In-memory cache for resolved stream manifests (video_id -> (timestamp, content, redirect))
-        self._manifest_cache: Dict[str, Tuple[float, Optional[str], Optional[str]]] = {}
+        self._manifest_cache: OrderedDict[str, Tuple[float, Optional[str], Optional[str]]] = OrderedDict()
         # Concurrency semaphore to prevent thread pool exhaustion from parallel yt-dlp executions
         self._semaphore: asyncio.Semaphore = asyncio.Semaphore(4)
 
@@ -365,6 +366,10 @@ class YouTubeService:
         async with self._semaphore:
             content, redirect = await asyncio.to_thread(self._extract_master_m3u8_sync, video_id)
         if content or redirect:
+            if video_id in self._manifest_cache:
+                self._manifest_cache.move_to_end(video_id)
+            elif len(self._manifest_cache) >= 200:
+                self._manifest_cache.popitem(last=False)
             self._manifest_cache[video_id] = (now, content, redirect)
 
         return content, redirect

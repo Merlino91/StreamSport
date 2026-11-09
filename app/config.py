@@ -43,7 +43,7 @@ ENABLE_REPLAYS = os.getenv("ENABLE_REPLAYS", "false").lower() in ("true", "1", "
 ENABLE_THESPORTSDB = os.getenv("ENABLE_THESPORTSDB", "true").lower() in ("true", "1", "yes")
 THESPORTSDB_USER = os.getenv("THESPORTSDB_USER", "")
 THESPORTSDB_PASS = os.getenv("THESPORTSDB_PASS", "")
-THESPORTSDB_API_KEY = os.getenv("THESPORTSDB_API_KEY", "123")
+# THESPORTSDB_API_KEY is legacy/unused; service authenticates via user/pass
 THESPORTSDB_CALENDAR_INTERVAL = int(os.getenv("THESPORTSDB_CALENDAR_INTERVAL", "43200"))  # 12 hours
 
 # TvVoo (Vavoo) Provider and Italian EPG TV Guide Settings (Sky & Tivùsat)
@@ -214,6 +214,7 @@ CATALOG_DEFINITIONS = [
     },
 ]
 
+# Legacy lookup map (kept for backwards compatibility if needed)
 CATALOG_MAP = {c["id"]: c for c in CATALOG_DEFINITIONS}
 SPORT_GENRES = [g for c in CATALOG_DEFINITIONS for g in c["genres"]]
 

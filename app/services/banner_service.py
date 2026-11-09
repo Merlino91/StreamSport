@@ -195,7 +195,8 @@ class BannerService:
             for p in (local_p, fallback_p):
                 if p.exists():
                     try:
-                        return Image.open(p).convert("RGB")
+                        with Image.open(p) as loaded:
+                            return loaded.convert("RGB")
                     except Exception:
                         pass
 
@@ -204,7 +205,9 @@ class BannerService:
             try:
                 content, _ = await doh_client.proxy_image(url)
                 if content:
-                    return Image.open(io.BytesIO(content)).convert("RGB")
+                    with io.BytesIO(content) as bio:
+                        with Image.open(bio) as loaded:
+                            return loaded.convert("RGB")
             except Exception as e:
                 logger.debug("Failed to fetch base poster %s: %s", url, e)
 
@@ -270,9 +273,9 @@ class BannerService:
             self._draw_tvvoo_bookmark(draw)
 
         # Encode as progressive JPEG with quality=88
-        out_buf = io.BytesIO()
-        im.save(out_buf, format="JPEG", quality=88, optimize=True)
-        return out_buf.getvalue()
+        with io.BytesIO() as out_buf:
+            im.save(out_buf, format="JPEG", quality=88, optimize=True)
+            return out_buf.getvalue()
 
     def _create_dark_canvas(self, match: Dict[str, Any]) -> Image.Image:
         """Creates an elegant dark canvas with centered match title and competition subtitle, free of emojis."""

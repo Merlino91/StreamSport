@@ -50,23 +50,6 @@ THESPORTSDB_SPORT_TO_SILO = {
     "cycling": "altri_sport",
 }
 
-CATEGORY_SPORT_MAP = {
-    "football": {"soccer", "football"},
-    "soccer": {"soccer", "football"},
-    "basketball": {"basketball"},
-    "baseball": {"baseball"},
-    "hockey": {"ice hockey", "hockey"},
-    "american-football": {"american football"},
-    "motor-sports": {"motorsport", "racing"},
-    "tennis": {"tennis"},
-    "fight": {"mma", "boxing", "wrestling"},
-    "rugby": {"rugby"},
-    "cricket": {"cricket"},
-    "golf": {"golf"},
-    "darts": {"darts"},
-    "handball": {"handball"},
-}
-
 SILO_TO_TSDB_SPORT = {
     "football": "football",
     "calcio_italiano": "football",
@@ -119,6 +102,7 @@ class TheSportsDBService:
         self._is_logged_in: bool = False
         self._calendar_cache: List[Dict[str, Any]] = []
         self._calendar_by_silo: Dict[str, List[Dict[str, Any]]] = {}
+        self._memory_cache: Dict[str, str] = {}
         self._last_calendar_fetch: float = 0.0
         self._calendar_lock = asyncio.Lock()
 
@@ -634,9 +618,9 @@ class TheSportsDBService:
                 cal_thumb = best_match.get("thumb")
                 if cal_thumb and (not m.get("poster") or "nostream" in m.get("poster", "") or not str(m.get("poster")).startswith("http")):
                     m["poster"] = cal_thumb
-                    db_service.update_match_poster(m["id"], cal_thumb)
+                    # Fast in-memory cache update; SQLite persistence is handled in batch by save_matches_async
                     q_key = f"{best_match['home']} vs {best_match['away']}"
-                    db_service.save_poster_to_cache(q_key, cal_thumb, "found")
+                    self._memory_cache[q_key] = cal_thumb
 
                 # 2. Official competition assignment ONLY if missing on match
                 cal_comp = best_match.get("competition")
@@ -825,7 +809,6 @@ class TheSportsDBService:
                 m["poster"] = chosen_thumb
                 m["background"] = chosen_thumb
                 m["_tsdb_matched"] = True
-                db_service.update_match_poster(m["id"], chosen_thumb)
 
                 if not m.get("competition") and best_cal and best_cal.get("competition"):
                     m["competition"] = best_cal["competition"]
