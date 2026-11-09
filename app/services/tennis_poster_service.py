@@ -37,7 +37,7 @@ STATIC_ASSETS_DIR = STATIC_DIR / "assets"
 
 CANVAS_WIDTH = 1225
 CANVAS_HEIGHT = 700
-TENNIS_POSTER_VERSION = 1
+TENNIS_POSTER_VERSION = 2
 
 KNOWN_COUNTRIES = {
     "italy", "italia", "china", "cina", "usa", "united states", "spain", "spagna",
