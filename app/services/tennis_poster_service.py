@@ -494,50 +494,54 @@ class TennisPosterService:
                     pass
         return None
 
-    async def get_player_cutout(self, player_name: str) -> Optional[Image.Image]:
+    async def _fetch_and_validate_image(self, url: str) -> Optional[Image.Image]:
         """
-        Retrieves transparent headshot/cutout PNG for an individual player.
-        Checks local cache first, then ESPN Search API, then TheSportsDB cutout fallback.
-        Strictly enforces sport == 'tennis' and cutout only (rejects hockey, soccer, jersey renders).
-        Does not persist .missing markers on disk, ensuring future tournament re-queries.
+        Actively validates that a cached image URL is live (HTTP 200, Content-Type image/*)
+        and loads it into a PIL RGBA Image in volatile RAM without saving to disk.
+        Returns None if expired, 404/403, broken, or not an image (triggering auto-invalidation).
         """
-        search_query = (player_name or "").strip()
-        if not search_query or len(search_query) < 3:
+        if not url or not url.startswith("http"):
             return None
 
-        slug = re.sub(r"[^a-zA-Z0-9]+", "_", search_query.lower()).strip("_")
-        cached_file = ATHLETES_DIR / f"{slug}.png"
-
-        if cached_file.exists():
+        def _fetch_sync():
             try:
-                return Image.open(cached_file).convert("RGBA")
-            except Exception:
-                pass
-
-        if slug in self._missing_athletes:
+                from curl_cffi import requests as curl_requests
+                res = curl_requests.get(url, impersonate="chrome120", timeout=3.5)
+                if res.status_code == 200:
+                    ct = (res.headers.get("content-type") or "").lower()
+                    if "image" in ct or res.content.startswith(b"\x89PNG") or res.content.startswith(b"\xff\xd8"):
+                        return res.content
+            except Exception as e:
+                logger.debug("Active validation fetch error for %s: %s", url, e)
             return None
 
-        headers = {
-            "User-Agent": "curl/8.4.0",
-            "Accept": "*/*",
-        }
+        content = await asyncio.to_thread(_fetch_sync)
+        if content:
+            try:
+                img = Image.open(io.BytesIO(content)).convert("RGBA")
+                if img.width >= 50 and img.height >= 50:
+                    return img
+            except Exception as e:
+                logger.debug("Failed opening validated image from %s: %s", url, e)
+        return None
 
-        # Generate candidate permutations for multi-word or inverted Spanish/Portuguese names
-        # e.g. "Garfia Carlos Alcaraz" -> ["Garfia Carlos Alcaraz", "Carlos Alcaraz", "Garfia Carlos"]
+    async def _search_espn(self, search_query: str) -> Optional[Tuple[Image.Image, str]]:
+        """Level 1: Searches ESPN Search API for tennis athlete cutout."""
         def _get_query_candidates(name: str) -> List[str]:
             cands = [name]
             parts = name.split()
             if len(parts) >= 3:
-                cands.append(" ".join(parts[1:]))      # e.g. "Carlos Alcaraz"
-                cands.append(" ".join(parts[:2]))      # e.g. "Leylah Annie"
-                cands.append(f"{parts[0]} {parts[-1]}") # e.g. "Carlos Alcaraz" if middle maternal
+                cands.append(" ".join(parts[1:]))
+                cands.append(" ".join(parts[:2]))
+                cands.append(f"{parts[0]} {parts[-1]}")
             cleaned_parts = [p for p in parts if not p.isdigit() and len(p) > 1]
             if 1 < len(cleaned_parts) < len(parts):
                 cands.append(" ".join(cleaned_parts))
             return list(dict.fromkeys(cands))
 
-        async with httpx.AsyncClient(timeout=8.0, headers=headers) as client:
-            candidates = _get_query_candidates(search_query)
+        candidates = _get_query_candidates(search_query)
+        headers = {"User-Agent": "curl/8.4.0", "Accept": "*/*"}
+        async with httpx.AsyncClient(timeout=6.0, headers=headers) as client:
             for q in candidates:
                 try:
                     espn_url = f"https://site.web.api.espn.com/apis/search/v2?query={urllib.parse.quote(q)}"
@@ -549,33 +553,210 @@ class TennisPosterService:
                                 for item in r.get("contents", []):
                                     sport = str(item.get("sport") or "").lower()
                                     desc = str(item.get("description") or "").lower()
-                                    is_tennis = (sport == "tennis") or ("tennis" in desc) or ("/tennis/" in (item.get("image") or {}).get("default", "").lower())
+                                    img_url = (item.get("image") or {}).get("default") or ""
+                                    is_tennis = (sport == "tennis") or ("tennis" in desc) or ("/tennis/" in img_url.lower())
                                     if not is_tennis:
                                         continue
-
-                                    img_url = (item.get("image") or {}).get("default") or ""
-                                    # Reject generic placeholder logos
                                     if any(ph in img_url.lower() for ph in ["default-player-logo", "silhouette", "placeholder"]):
                                         continue
-
                                     if img_url.startswith("http"):
                                         img_res = await client.get(img_url)
                                         if img_res.status_code == 200:
                                             img = Image.open(io.BytesIO(img_res.content)).convert("RGBA")
-                                            img.save(cached_file, "PNG")
-                                            # Also cache under resolved canonical display name if different
-                                            disp_name = item.get("displayName")
-                                            if disp_name:
-                                                disp_slug = re.sub(r"[^a-zA-Z0-9]+", "_", disp_name.lower()).strip("_")
-                                                if disp_slug and disp_slug != slug:
-                                                    alt_file = ATHLETES_DIR / f"{disp_slug}.png"
-                                                    if not alt_file.exists():
-                                                        img.save(alt_file, "PNG")
-                                            return img
+                                            return img, img_url
                 except Exception as e:
                     logger.debug("ESPN athlete search error for '%s' (candidate '%s'): %s", search_query, q, e)
+        return None
 
-        # Immediate silhouette fallback without slow 13s TheSportsDB sleeps
+    async def _search_atp(self, search_query: str) -> Optional[Tuple[Image.Image, str]]:
+        """Level 2 (Maschile): Searches ATP Tour official directory via curl_cffi for gladiator/headshot cutout."""
+        def _search_sync():
+            try:
+                from curl_cffi import requests as curl_requests
+                search_terms = [search_query]
+                parts = search_query.split()
+                if len(parts) > 1:
+                    search_terms.append(parts[-1])
+
+                for term in search_terms:
+                    encoded = urllib.parse.quote(term.strip())
+                    search_url = f"https://www.atptour.com/-/ajax/playersearch/PlayerUrlSearch?SearchTerm={encoded}"
+                    res = curl_requests.get(search_url, impersonate="chrome120", timeout=4.5)
+                    if res.status_code != 200:
+                        continue
+                    items = res.json().get("items") or []
+                    if not items:
+                        continue
+
+                    def _score_item(it: dict) -> int:
+                        key = (it.get("Key") or "").lower()
+                        q_low = search_query.lower()
+                        val = (it.get("Value") or "").lower()
+                        score = 0
+                        if key == q_low:
+                            score += 100
+                        elif key.endswith(" " + q_low):
+                            score += 70
+                        elif key.startswith(q_low + " "):
+                            score += 50
+                        elif q_low in key or any(p.lower() in key for p in parts):
+                            score += 30
+                        m_id = re.search(r"/players/[^/]+/([a-z0-9]+)/", val)
+                        if m_id:
+                            pid = m_id.group(1)
+                            if len(pid) >= 2 and pid[1] == '0':
+                                score += 20
+                            elif len(pid) == 4 and pid[:2].isalpha():
+                                score += 15
+                        return score
+
+                    sorted_items = sorted(items, key=_score_item, reverse=True)
+                    for item in sorted_items[:3]:
+                        val = item.get("Value", "")
+                        m = re.search(r"/players/[^/]+/([a-z0-9]+)/", val, re.I)
+                        if not m:
+                            continue
+                        atp_id = m.group(1).lower()
+                        candidates = [
+                            f"https://www.atptour.com/-/media/alias/player-gladiator-headshot/{atp_id}",
+                            f"https://www.atptour.com/-/media/alias/player-headshot/{atp_id}",
+                        ]
+                        for c_url in candidates:
+                            r_img = curl_requests.get(c_url, impersonate="chrome120", timeout=4.0)
+                            if r_img.status_code == 200:
+                                ct = (r_img.headers.get("content-type") or "").lower()
+                                if "image" in ct or r_img.content.startswith(b"\x89PNG"):
+                                    img = Image.open(io.BytesIO(r_img.content)).convert("RGBA")
+                                    if img.width >= 100 and img.height >= 100:
+                                        return img, c_url
+            except Exception as e:
+                logger.debug("ATP search error for '%s': %s", search_query, e)
+            return None
+
+        return await asyncio.to_thread(_search_sync)
+
+    async def _search_wta(self, search_query: str) -> Optional[Tuple[Image.Image, str]]:
+        """Level 2 (Femminile): Searches WTA Tour official directory for torso cutout on photoresources CloudFront."""
+        headers = {"User-Agent": "curl/8.4.0", "Accept": "*/*"}
+        async with httpx.AsyncClient(timeout=6.0, headers=headers) as client:
+            try:
+                encoded = urllib.parse.quote(search_query.strip())
+                api_url = f"https://api.wtatennis.com/tennis/players?name={encoded}"
+                res = await client.get(api_url)
+                content = []
+                if res.status_code == 200:
+                    content = res.json().get("content") or []
+
+                parts = search_query.strip().split()
+                if not content and len(parts) > 1:
+                    encoded_last = urllib.parse.quote(parts[-1])
+                    res_last = await client.get(f"https://api.wtatennis.com/tennis/players?name={encoded_last}")
+                    if res_last.status_code == 200:
+                        content = res_last.json().get("content") or []
+
+                if not content:
+                    return None
+
+                def _score_wta(item: dict) -> int:
+                    full = (item.get("fullName") or "").lower()
+                    last = (item.get("lastName") or "").lower()
+                    q = search_query.strip().lower()
+                    if full == q: return 100
+                    if last == q: return 80
+                    if q in full: return 50
+                    return 10
+
+                sorted_players = sorted(content, key=_score_wta, reverse=True)
+                for player in sorted_players[:3]:
+                    pid = player.get("id")
+                    if not pid:
+                        continue
+                    profile_url = f"https://www.wtatennis.com/players/{pid}/x"
+                    r_prof = await client.get(profile_url, follow_redirects=True)
+                    if r_prof.status_code != 200:
+                        continue
+
+                    m = re.search(r'(https://photoresources\.wtatennis\.com/photo-resources/[^"\'\s>]+-Torso_[^"\'\s>]+)', r_prof.text)
+                    if not m:
+                        m = re.search(r'(https://photoresources\.wtatennis\.com/photo-resources/[^"\'\s>]+\.png(?:\?[^"\'\s>]+)?)', r_prof.text)
+                    if m:
+                        raw_url = m.group(1).split(',')[0].strip()
+                        clean_url = re.sub(r'\?.*$', '', raw_url) + "?height=600"
+                        r_img = await client.get(clean_url)
+                        if r_img.status_code == 200:
+                            ct = (r_img.headers.get("content-type") or "").lower()
+                            if "image" in ct or r_img.content.startswith(b"\x89PNG"):
+                                img = Image.open(io.BytesIO(r_img.content)).convert("RGBA")
+                                if img.width >= 100 and img.height >= 100:
+                                    return img, clean_url
+            except Exception as e:
+                logger.debug("WTA search error for '%s': %s", search_query, e)
+        return None
+
+    async def get_player_cutout(self, player_name: str, is_female: bool = False) -> Optional[Image.Image]:
+        """
+        Retrieves transparent headshot/cutout PNG for an individual tennis player.
+        1. Checks database URL cache (tennis_athletes_cache). Actively validates URL (status 200, image/*).
+           If broken or expired, auto-invalidates and purges the cached entry immediately.
+        2. Level 1: ESPN Search API.
+        3. Level 2: Official circuits: WTA Tour for female events, ATP Tour for male events (with cross-fallback).
+        4. Keeps athlete images strictly in volatile memory (RAM), saving only URLs to SQLite.
+        5. Level 3 fallback: None (caller falls back to neutral silhouette Unknow_male/Unknow_female).
+        """
+        search_query = (player_name or "").strip()
+        if not search_query or len(search_query) < 3:
+            return None
+
+        slug = re.sub(r"[^a-zA-Z0-9]+", "_", search_query.lower()).strip("_")
+
+        # 1. In-memory session negative cache
+        if slug in self._missing_athletes:
+            return None
+
+        # 2. Check SQLite URL cache with Active Validation
+        cached = db_service.get_tennis_athlete(slug)
+        if cached and cached.get("image_url"):
+            valid_img = await self._fetch_and_validate_image(cached["image_url"])
+            if valid_img is not None:
+                return valid_img
+            # URL is broken, expired or not an image: Auto-Invalidation!
+            logger.info("Tennis athlete cached URL invalid for '%s' (%s). Auto-invalidation triggered.", slug, cached.get("image_url"))
+            db_service.delete_tennis_athlete(slug)
+
+        # 3. Live Waterfall Search
+        # Level 1: ESPN
+        espn_res = await self._search_espn(search_query)
+        if espn_res:
+            img, img_url = espn_res
+            gender_str = "female" if is_female else "male"
+            db_service.save_tennis_athlete(slug, "espn", img_url, gender_str)
+            return img
+
+        # Level 2: Official Circuits (WTA if female, ATP if male, with graceful cross-fallback)
+        if is_female:
+            wta_res = await self._search_wta(search_query)
+            if wta_res:
+                img, img_url = wta_res
+                db_service.save_tennis_athlete(slug, "wta", img_url, "female")
+                return img
+            atp_res = await self._search_atp(search_query)
+            if atp_res:
+                img, img_url = atp_res
+                db_service.save_tennis_athlete(slug, "atp", img_url, "male")
+                return img
+        else:
+            atp_res = await self._search_atp(search_query)
+            if atp_res:
+                img, img_url = atp_res
+                db_service.save_tennis_athlete(slug, "atp", img_url, "male")
+                return img
+            wta_res = await self._search_wta(search_query)
+            if wta_res:
+                img, img_url = wta_res
+                db_service.save_tennis_athlete(slug, "wta", img_url, "female")
+                return img
+
+        # Level 3: Not found on any provider -> Negative cache and return None (caller uses silhouette)
         self._missing_athletes.add(slug)
         return None
 
@@ -675,8 +856,8 @@ class TennisPosterService:
 
         if not is_doubles:
             target_h = 510
-            p1_task = self.get_player_cutout(p1_name)
-            p2_task = self.get_player_cutout(p2_name) if p2_name else asyncio.sleep(0, result=None)
+            p1_task = self.get_player_cutout(p1_name, is_female=is_female)
+            p2_task = self.get_player_cutout(p2_name, is_female=is_female) if p2_name else asyncio.sleep(0, result=None)
             p1_img, p2_img = await asyncio.gather(p1_task, p2_task)
 
             # Player 1 (Left)
@@ -701,10 +882,10 @@ class TennisPosterService:
             p2_b_name = team2[1] if len(team2) > 1 else ""
 
             tasks = [
-                self.get_player_cutout(p1_a_name) if p1_a_name else asyncio.sleep(0, result=None),
-                self.get_player_cutout(p1_b_name) if p1_b_name else asyncio.sleep(0, result=None),
-                self.get_player_cutout(p2_a_name) if p2_a_name else asyncio.sleep(0, result=None),
-                self.get_player_cutout(p2_b_name) if p2_b_name else asyncio.sleep(0, result=None),
+                self.get_player_cutout(p1_a_name, is_female=is_female) if p1_a_name else asyncio.sleep(0, result=None),
+                self.get_player_cutout(p1_b_name, is_female=is_female) if p1_b_name else asyncio.sleep(0, result=None),
+                self.get_player_cutout(p2_a_name, is_female=is_female) if p2_a_name else asyncio.sleep(0, result=None),
+                self.get_player_cutout(p2_b_name, is_female=is_female) if p2_b_name else asyncio.sleep(0, result=None),
             ]
             t1_a_img, t1_b_img, t2_a_img, t2_b_img = await asyncio.gather(*tasks)
 

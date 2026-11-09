@@ -158,6 +158,17 @@ class DBService:
                     )
                 """)
                 cursor.execute("CREATE INDEX IF NOT EXISTS idx_thesportsdb_status ON thesportsdb_cache(status)")
+
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS tennis_athletes_cache (
+                        slug TEXT PRIMARY KEY,
+                        provider TEXT NOT NULL,
+                        image_url TEXT NOT NULL,
+                        gender TEXT NOT NULL,
+                        updated_at INTEGER NOT NULL
+                    )
+                """)
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_tennis_athletes_slug ON tennis_athletes_cache(slug)")
                 conn.commit()
         except Exception as e:
             logger.error("Failed to ensure database schema at %s: %s", target, e)
@@ -523,5 +534,47 @@ class DBService:
             d["is_youth"] = True
 
         return d
+
+    def get_tennis_athlete(self, slug: str) -> Optional[Dict[str, Any]]:
+        """Retrieves cached image URL metadata for a tennis player."""
+        try:
+            with self._get_connection() as conn:
+                row = conn.execute(
+                    "SELECT slug, provider, image_url, gender, updated_at FROM tennis_athletes_cache WHERE slug = ?",
+                    (slug,)
+                ).fetchone()
+                if row:
+                    return dict(row)
+        except Exception as e:
+            logger.warning("Error fetching cached tennis athlete '%s': %s", slug, e)
+        return None
+
+    def save_tennis_athlete(self, slug: str, provider: str, image_url: str, gender: str = "unknown"):
+        """Saves or updates image URL for a tennis player."""
+        try:
+            with self._get_connection() as conn:
+                conn.execute(
+                    """
+                    INSERT INTO tennis_athletes_cache (slug, provider, image_url, gender, updated_at)
+                    VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT(slug) DO UPDATE SET
+                        provider = excluded.provider,
+                        image_url = excluded.image_url,
+                        gender = excluded.gender,
+                        updated_at = excluded.updated_at
+                    """,
+                    (slug, provider, image_url, gender, int(time.time()))
+                )
+        except Exception as e:
+            logger.warning("Error saving tennis athlete '%s': %s", slug, e)
+
+    def delete_tennis_athlete(self, slug: str):
+        """Removes a broken or obsolete athlete image URL from cache."""
+        try:
+            with self._get_connection() as conn:
+                conn.execute("DELETE FROM tennis_athletes_cache WHERE slug = ?", (slug,))
+        except Exception as e:
+            logger.warning("Error deleting tennis athlete '%s': %s", slug, e)
+
 
 db_service = DBService()
