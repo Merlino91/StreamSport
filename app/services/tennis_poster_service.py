@@ -333,6 +333,56 @@ class TennisPosterService:
         last = " ".join(parts[1:]).upper()
         return f"{initial}. {last}"
 
+    @classmethod
+    def _is_player_match(cls, query: str, candidate_name: str) -> bool:
+        """
+        Validates that an API candidate matches the searched player query:
+        - Exact match or surname containment.
+        - Prevents false-positive surname collision (e.g. 'Test Fake Male' vs 'Alastair Male').
+        - Supports abbreviations ('Bolelli S.' vs 'Simone Bolelli', 'De Minaur A.' vs 'Alex De Minaur').
+        """
+        q = re.sub(r"[\(\)\[\]]", "", query or "").strip().lower()
+        c = (candidate_name or "").strip().lower()
+        if not q or not c:
+            return False
+        if q == c:
+            return True
+
+        q_parts = [p.replace(".", "").replace("-", " ") for p in q.split() if p.replace(".", "")]
+        q_tokens = []
+        for p in q_parts:
+            q_tokens.extend(p.split())
+
+        c_parts = [p.replace(".", "").replace("-", " ") for p in c.split() if p.replace(".", "")]
+        c_tokens = []
+        for p in c_parts:
+            c_tokens.extend(p.split())
+
+        if not q_tokens or not c_tokens:
+            return False
+
+        if len(q_tokens) == 1:
+            return q_tokens[0] in c_tokens
+
+        # Query has first name/initial and surname
+        if len(q_tokens[-1]) == 1:
+            q_initial = q_tokens[-1]
+            q_surname = " ".join(q_tokens[:-1])
+        elif len(q_tokens[0]) == 1:
+            q_initial = q_tokens[0]
+            q_surname = " ".join(q_tokens[1:])
+        else:
+            q_initial = q_tokens[0][0]
+            q_surname = " ".join(q_tokens[1:])
+
+        c_initial = c_tokens[0][0]
+        c_surname = " ".join(c_tokens[1:])
+
+        sur_match = (c_surname == q_surname) or c.endswith(q_surname) or (q_tokens[-1] == c_tokens[-1])
+        init_match = (c_initial == q_initial) or (c_tokens[-1][0] == q_initial and len(c_tokens) > 1 and c_tokens[0] == q_surname)
+
+        return sur_match and init_match
+
     def extract_tournament_and_stage(self, title: str, genre: str) -> Tuple[str, str]:
         """Extracts tournament name (e.g. 'WTA 500 SINGAPORE') and stage (e.g. 'QUARTER FINALS')."""
         t = title or ""
@@ -525,13 +575,17 @@ class TennisPosterService:
     async def _search_espn(self, search_query: str) -> Optional[Tuple[Image.Image, str]]:
         """Level 1: Searches ESPN Search API for tennis athlete cutout."""
         def _get_query_candidates(name: str) -> List[str]:
-            cands = [name]
-            parts = name.split()
+            clean_name = self.clean_player_name(name)
+            cands = [clean_name]
+            surname = self._extract_single_player_surname(clean_name)
+            if surname and len(surname) >= 3 and surname.lower() != clean_name.lower():
+                cands.append(surname.capitalize())
+            parts = clean_name.split()
             if len(parts) >= 3:
                 cands.append(" ".join(parts[1:]))
                 cands.append(" ".join(parts[:2]))
                 cands.append(f"{parts[0]} {parts[-1]}")
-            cleaned_parts = [p for p in parts if not p.isdigit() and len(p) > 1]
+            cleaned_parts = [p for p in parts if not p.isdigit() and len(p) > 1 and not p.endswith(".")]
             if 1 < len(cleaned_parts) < len(parts):
                 cands.append(" ".join(cleaned_parts))
             return list(dict.fromkeys(cands))
@@ -570,10 +624,11 @@ class TennisPosterService:
         def _search_sync():
             try:
                 from curl_cffi import requests as curl_requests
-                search_terms = [search_query]
-                parts = search_query.split()
-                if len(parts) > 1:
-                    search_terms.append(parts[-1])
+                clean_full = self.clean_player_name(search_query)
+                search_terms = [clean_full]
+                surname = self._extract_single_player_surname(clean_full)
+                if surname and len(surname) >= 3 and surname.lower() != clean_full.lower():
+                    search_terms.append(surname.capitalize())
 
                 for term in search_terms:
                     encoded = urllib.parse.quote(term.strip())
@@ -587,17 +642,16 @@ class TennisPosterService:
 
                     def _score_item(it: dict) -> int:
                         key = (it.get("Key") or "").lower()
-                        q_low = search_query.lower()
+                        q_low = clean_full.lower()
+                        sur_low = (surname or "").lower()
                         val = (it.get("Value") or "").lower()
                         score = 0
                         if key == q_low:
                             score += 100
-                        elif key.endswith(" " + q_low):
+                        elif sur_low and (key.endswith(" " + sur_low) or key == sur_low):
                             score += 70
-                        elif key.startswith(q_low + " "):
-                            score += 50
-                        elif q_low in key or any(p.lower() in key for p in parts):
-                            score += 30
+                        elif q_low in key:
+                            score += 40
                         m_id = re.search(r"/players/[^/]+/([a-z0-9]+)/", val)
                         if m_id:
                             pid = m_id.group(1)
@@ -609,6 +663,9 @@ class TennisPosterService:
 
                     sorted_items = sorted(items, key=_score_item, reverse=True)
                     for item in sorted_items[:3]:
+                        cand_name = item.get("Key", "")
+                        if not self._is_player_match(clean_full, cand_name):
+                            continue
                         val = item.get("Value", "")
                         m = re.search(r"/players/[^/]+/([a-z0-9]+)/", val, re.I)
                         if not m:
@@ -637,19 +694,20 @@ class TennisPosterService:
         headers = {"User-Agent": "curl/8.4.0", "Accept": "*/*"}
         async with httpx.AsyncClient(timeout=6.0, headers=headers) as client:
             try:
-                encoded = urllib.parse.quote(search_query.strip())
-                api_url = f"https://api.wtatennis.com/tennis/players?name={encoded}"
-                res = await client.get(api_url)
-                content = []
-                if res.status_code == 200:
-                    content = res.json().get("content") or []
+                clean_full = self.clean_player_name(search_query)
+                surname = self._extract_single_player_surname(clean_full)
 
-                parts = search_query.strip().split()
-                if not content and len(parts) > 1:
-                    encoded_last = urllib.parse.quote(parts[-1])
-                    res_last = await client.get(f"https://api.wtatennis.com/tennis/players?name={encoded_last}")
-                    if res_last.status_code == 200:
-                        content = res_last.json().get("content") or []
+                content = []
+                for term in [clean_full, surname]:
+                    if not term or len(term) < 3:
+                        continue
+                    encoded = urllib.parse.quote(term.strip())
+                    api_url = f"https://api.wtatennis.com/tennis/players?name={encoded}"
+                    res = await client.get(api_url)
+                    if res.status_code == 200:
+                        content = res.json().get("content") or []
+                        if content:
+                            break
 
                 if not content:
                     return None
@@ -657,14 +715,18 @@ class TennisPosterService:
                 def _score_wta(item: dict) -> int:
                     full = (item.get("fullName") or "").lower()
                     last = (item.get("lastName") or "").lower()
-                    q = search_query.strip().lower()
+                    q = clean_full.lower()
+                    sur = (surname or "").lower()
                     if full == q: return 100
-                    if last == q: return 80
+                    if last == sur and sur: return 80
                     if q in full: return 50
                     return 10
 
                 sorted_players = sorted(content, key=_score_wta, reverse=True)
                 for player in sorted_players[:3]:
+                    cand_name = player.get("fullName", "")
+                    if not self._is_player_match(clean_full, cand_name):
+                        continue
                     pid = player.get("id")
                     if not pid:
                         continue
@@ -673,11 +735,13 @@ class TennisPosterService:
                     if r_prof.status_code != 200:
                         continue
 
+                    # STRICT: Accept ONLY official transparent -Torso_ cutouts!
+                    # Completely reject generic PNGs, site banners, social share cards (Home-Share), or UI logos.
                     m = re.search(r'(https://photoresources\.wtatennis\.com/photo-resources/[^"\'\s>]+-Torso_[^"\'\s>]+)', r_prof.text)
-                    if not m:
-                        m = re.search(r'(https://photoresources\.wtatennis\.com/photo-resources/[^"\'\s>]+\.png(?:\?[^"\'\s>]+)?)', r_prof.text)
                     if m:
                         raw_url = m.group(1).split(',')[0].strip()
+                        if any(bad in raw_url.lower() for bad in ["home-share", "share", "logo", "banner", "tile", "placeholder"]):
+                            continue
                         clean_url = re.sub(r'\?.*$', '', raw_url) + "?height=600"
                         r_img = await client.get(clean_url)
                         if r_img.status_code == 200:
@@ -694,9 +758,11 @@ class TennisPosterService:
         """
         Retrieves transparent headshot/cutout PNG for an individual tennis player.
         1. Checks database URL cache (tennis_athletes_cache). Actively validates URL (status 200, image/*).
-           If broken or expired, auto-invalidates and purges the cached entry immediately.
-        2. Level 1: ESPN Search API.
-        3. Level 2: Official circuits: WTA Tour for female events, ATP Tour for male events (with cross-fallback).
+           If broken, expired, or holding a blacklisted asset, auto-invalidates and purges immediately.
+        2. Level 1: ESPN Search API (both ATP & WTA via fast JSON API).
+        3. Level 2: Official circuits strictly partitioned by gender (ZERO cross-fallback):
+           - ATP Tour for male events
+           - WTA Tour for female events
         4. Keeps athlete images strictly in volatile memory (RAM), saving only URLs to SQLite.
         5. Level 3 fallback: None (caller falls back to neutral silhouette Unknow_male/Unknow_female).
         """
@@ -713,15 +779,20 @@ class TennisPosterService:
         # 2. Check SQLite URL cache with Active Validation
         cached = db_service.get_tennis_athlete(slug)
         if cached and cached.get("image_url"):
-            valid_img = await self._fetch_and_validate_image(cached["image_url"])
-            if valid_img is not None:
-                return valid_img
-            # URL is broken, expired or not an image: Auto-Invalidation!
-            logger.info("Tennis athlete cached URL invalid for '%s' (%s). Auto-invalidation triggered.", slug, cached.get("image_url"))
-            db_service.delete_tennis_athlete(slug)
+            cached_url = cached["image_url"]
+            # Auto-purge any historical contaminated logo/banner URLs
+            if any(bad in cached_url.lower() for bad in ["home-share", "logo", "banner"]):
+                db_service.delete_tennis_athlete(slug)
+            else:
+                valid_img = await self._fetch_and_validate_image(cached_url)
+                if valid_img is not None:
+                    return valid_img
+                # URL is broken, expired or not an image: Auto-Invalidation!
+                logger.info("Tennis athlete cached URL invalid for '%s' (%s). Auto-invalidation triggered.", slug, cached_url)
+                db_service.delete_tennis_athlete(slug)
 
         # 3. Live Waterfall Search
-        # Level 1: ESPN
+        # Level 1: ESPN (Fast JSON API for both ATP and WTA)
         espn_res = await self._search_espn(search_query)
         if espn_res:
             img, img_url = espn_res
@@ -729,17 +800,12 @@ class TennisPosterService:
             db_service.save_tennis_athlete(slug, "espn", img_url, gender_str)
             return img
 
-        # Level 2: Official Circuits (WTA if female, ATP if male, with graceful cross-fallback)
+        # Level 2: Official Circuits (Strict gender partition - ZERO cross-fallback!)
         if is_female:
             wta_res = await self._search_wta(search_query)
             if wta_res:
                 img, img_url = wta_res
                 db_service.save_tennis_athlete(slug, "wta", img_url, "female")
-                return img
-            atp_res = await self._search_atp(search_query)
-            if atp_res:
-                img, img_url = atp_res
-                db_service.save_tennis_athlete(slug, "atp", img_url, "male")
                 return img
         else:
             atp_res = await self._search_atp(search_query)
@@ -747,13 +813,8 @@ class TennisPosterService:
                 img, img_url = atp_res
                 db_service.save_tennis_athlete(slug, "atp", img_url, "male")
                 return img
-            wta_res = await self._search_wta(search_query)
-            if wta_res:
-                img, img_url = wta_res
-                db_service.save_tennis_athlete(slug, "wta", img_url, "female")
-                return img
 
-        # Level 3: Not found on any provider -> Negative cache and return None (caller uses silhouette)
+        # Level 3: Not found on official circuit -> Negative cache and return None (caller uses silhouette)
         self._missing_athletes.add(slug)
         return None
 
