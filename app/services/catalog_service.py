@@ -35,6 +35,7 @@ from app.services.tvvoo_service import tvvoo_service
 from app.services.fctv33_service import fctv33_service
 from app.services.mandrakodi_service import mandrakodi_service
 from app.services.spon_service import spon_service
+from app.services.streamfree_service import streamfree_service
 from app.services.italian_epg_service import italian_epg_service
 from app.services.diretta_service import diretta_service
 from app.services.provider_normalizers import (
@@ -43,6 +44,7 @@ from app.services.provider_normalizers import (
     clean_streamed_event,
     clean_mandrakodi_event,
     clean_spon_event,
+    clean_streamfree_event,
 )
 from app.services.team_matching import extract_team_name, clean_team_name
 from app.services.canonical_competition_service import (
@@ -1138,6 +1140,7 @@ class CatalogService:
                     fctv33_service.get_matches(force=True),
                     mandrakodi_service.get_matches(force=True),
                     spon_service.get_matches(force=True),
+                    streamfree_service.get_matches(force=True),
                 ]
                 results = await asyncio.gather(*tasks, return_exceptions=True)
                 streamed_raw = results[0] if isinstance(results[0], list) else []
@@ -1149,6 +1152,7 @@ class CatalogService:
                 fctv33_raw = results[6] if isinstance(results[6], list) else []
                 mandrakodi_raw = results[7] if isinstance(results[7], list) else []
                 spon_raw = results[8] if isinstance(results[8], list) else []
+                streamfree_raw = results[9] if isinstance(results[9], list) else []
 
                 streamed_matches = [m for m in streamed_raw if self.is_real_match(m)]
                 daddylive_matches = [m for m in daddylive_raw if self.is_real_match(m)]
@@ -1156,6 +1160,7 @@ class CatalogService:
                 fctv33_matches = [m for m in fctv33_raw if self.is_real_match(m)]
                 mandrakodi_matches = [m for m in mandrakodi_raw if self.is_real_match(m)]
                 spon_matches = [m for m in spon_raw if self.is_real_match(m)]
+                streamfree_matches = [m for m in streamfree_raw if self.is_real_match(m)]
 
                 # Clean each provider's matches with its dedicated normalizer
                 clean_dl = [clean_daddylive_event(m) for m in daddylive_matches]
@@ -1163,6 +1168,7 @@ class CatalogService:
                 clean_st = [clean_streamed_event(m) for m in streamed_matches]
                 clean_mk = [clean_mandrakodi_event(m) for m in mandrakodi_matches]
                 clean_sp = [clean_spon_event(m) for m in spon_matches]
+                clean_sf = [clean_streamfree_event(m) for m in streamfree_matches]
 
                 providers_map = {
                     "daddylive": clean_dl,
@@ -1170,6 +1176,7 @@ class CatalogService:
                     "streamed": clean_st,
                     "mandrakodi": clean_mk,
                     "spon": clean_sp,
+                    "streamfree": clean_sf,
                 }
 
                 # Ingest certified multicourt tournament sessions and simulcasts from Italian EPG (Sky/Tivùsat)

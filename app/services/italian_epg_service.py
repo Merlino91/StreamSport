@@ -14,6 +14,7 @@ from app.config import (
 from app.services.tvvoo_service import tvvoo_service
 from app.services.mandrakodi_service import mandrakodi_service
 from app.services.daddylive_api import daddylive_api
+from app.services.streamfree_service import streamfree_service
 from app.services.team_matching import extract_team_name
 from app.utils.demographics import extract_demographics
 from app.services.canonical_competition_service import (
@@ -1079,6 +1080,10 @@ class ItalianEPGService:
                         existing_dl_keys.add(key)
                         sources.append(dict(st))
 
+                sf_streams = streamfree_service.get_channel_streams(canonical) if canonical else []
+                for st in sf_streams:
+                    sources.append(dict(st))
+
                 # Contiguous session block merging on the same channel (e.g. 4 consecutive blocks of LIVE WTA 500 Tokyo)
                 if channel_matches and not teams_dict:
                     prev = channel_matches[-1]
@@ -1344,6 +1349,10 @@ class ItalianEPGService:
                     if key not in existing_dl_keys:
                         existing_dl_keys.add(key)
                         sources.append(dict(st))
+
+                sf_streams = streamfree_service.get_channel_streams(canonical) if canonical else []
+                for st in sf_streams:
+                    sources.append(dict(st))
 
                 # Contiguous session block merging on the same channel
                 if channel_matches and not teams_dict:

@@ -74,6 +74,14 @@ SPON_PRIMARY_URL = os.getenv("SPON_PRIMARY_URL", "https://sportsonline.st/prog.t
 SPON_FALLBACK_URL = os.getenv("SPON_FALLBACK_URL", "https://sportsonline.cx/prog.txt")
 SPON_CACHE_TTL = int(os.getenv("SPON_CACHE_TTL", "7200"))  # 2 hours (in seconds)
 
+# StreamFree Provider Settings
+ENABLE_STREAMFREE = os.getenv("ENABLE_STREAMFREE", "true").lower() in ("true", "1", "yes")
+STREAMFREE_DIRECTORY_URL = os.getenv("STREAMFREE_DIRECTORY_URL", "https://strmfree.link/api/domains")
+STREAMFREE_PRIMARY_MIRROR = os.getenv("STREAMFREE_PRIMARY_MIRROR", "strmfree.pk")
+STREAMFREE_FALLBACK_MIRRORS = ["strmfree.pk", "strmfree.st", "streamfree.top"]
+STREAMFREE_CACHE_TTL = int(os.getenv("STREAMFREE_CACHE_TTL", "3600"))  # 1 hour (same as DaddyLive)
+
+
 
 
 # Addon Metadata

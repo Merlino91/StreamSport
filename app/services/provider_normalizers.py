@@ -276,3 +276,44 @@ def clean_streamed_event(raw: Dict[str, Any]) -> Dict[str, Any]:
         "away": {"name": a}
     }
     return m
+
+
+
+def clean_streamfree_event(raw: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Cleans StreamFree event:
+    - Normalizes teams and title
+    - Extracts home and away names
+    - Prepares clean_home, clean_away, clean_title
+    - Preserves provider identity without touching posters
+    """
+    m = dict(raw)
+    raw_title = m.get("title") or ""
+    if "raw_title" not in m:
+        m["raw_title"] = raw_title
+
+    t = normalize_ascii_text(raw_title)
+
+    teams = m.get("teams") or {}
+    h = extract_team_name(teams.get("home")) if isinstance(teams, dict) else ""
+    a = extract_team_name(teams.get("away")) if isinstance(teams, dict) else ""
+
+    h = normalize_ascii_text(h)
+    a = normalize_ascii_text(a)
+
+    if (not h or not a) and _VS_SPLIT_REGEX.search(t):
+        parts = _VS_SPLIT_REGEX.split(t, maxsplit=1)
+        h = parts[0].strip()
+        a = parts[1].strip()
+
+    m["home"] = h
+    m["away"] = a
+    m["clean_home"] = clean_team_name(h)
+    m["clean_away"] = clean_team_name(a)
+    m["clean_title"] = f"{h} vs {a}" if (h and a) else t
+    m["teams"] = {
+        "home": {"name": h},
+        "away": {"name": a}
+    }
+    m["_provider"] = "streamfree"
+    return m

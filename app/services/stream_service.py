@@ -512,6 +512,16 @@ class StreamService:
                     match = m
                     break
 
+        # 8. Check StreamFree (fallback)
+        if not match:
+            from app.services.streamfree_service import streamfree_service
+            sf_matches = await streamfree_service.get_matches()
+            for m in sf_matches:
+                mid = str(m.get("id", ""))
+                if mid == slug_id or any(mid.endswith(f"{d}{slug_id}") for d in delimiters):
+                    match = m
+                    break
+
         if not match:
             return []
 
@@ -656,7 +666,7 @@ class StreamService:
         # If match has NO Streamed sources, search in-memory Streamed schedule by teams/silo
         has_streamed = any(
             isinstance(s, dict)
-            and s.get("source") not in ("dlhd", "tvvoo", "fctv33", "amstaff", "acestream", "socceron", "direct", "supertennis_ott", "sportsonline", "spon")
+            and s.get("source") not in ("dlhd", "tvvoo", "fctv33", "amstaff", "acestream", "socceron", "direct", "supertennis_ott", "sportsonline", "spon", "streamfree")
             and s.get("provider") != "mandrakodi"
             for s in sources
         )
@@ -668,7 +678,7 @@ class StreamService:
                     st_sources = [
                         s for s in matched_st["sources"]
                         if isinstance(s, dict)
-                        and s.get("source") not in ("dlhd", "tvvoo", "fctv33", "amstaff", "acestream", "socceron", "direct", "supertennis_ott", "sportsonline", "spon")
+                        and s.get("source") not in ("dlhd", "tvvoo", "fctv33", "amstaff", "acestream", "socceron", "direct", "supertennis_ott", "sportsonline", "spon", "streamfree")
                         and s.get("provider") != "mandrakodi"
                     ]
                     if st_sources:
@@ -676,7 +686,7 @@ class StreamService:
                             s for s in sources
                             if not (
                                 isinstance(s, dict)
-                                and s.get("source") not in ("dlhd", "tvvoo", "fctv33", "amstaff", "acestream", "socceron", "direct", "supertennis_ott", "sportsonline", "spon")
+                                and s.get("source") not in ("dlhd", "tvvoo", "fctv33", "amstaff", "acestream", "socceron", "direct", "supertennis_ott", "sportsonline", "spon", "streamfree")
                                 and s.get("provider") != "mandrakodi"
                             )
                         ]
@@ -1076,13 +1086,49 @@ class StreamService:
             # Sort Sportzonline streams: Italian channels first
             spon_streams.sort(key=lambda s: 0 if "🇮🇹" in s.get("name", "") else 1)
 
+        # 3c. Process StreamFree streams (FHD 1080p / SD 540p via EasyProxy)
+        streamfree_streams: List[Dict[str, Any]] = []
+        if ep_url:
+            from app.services.streamfree_service import streamfree_service
+            sf_sources = [s for s in sources if isinstance(s, dict) and s.get("source") == "streamfree"]
+            for s in sf_sources:
+                stream_key = s.get("id")
+                if not stream_key:
+                    continue
+                cat = s.get("category")
+                ch_name = s.get("channel") or s.get("name") or "StreamFree"
+                resolved_sf = await streamfree_service.resolve_stream_urls(stream_key, category=cat)
+                for r in resolved_sf:
+                    m3u8_url = r.get("m3u8_url")
+                    if not m3u8_url:
+                        continue
+                    qual = r.get("quality", "1080p FHD")
+                    referer = r.get("referer", "https://strmfree.st/")
+                    origin = r.get("origin", "https://strmfree.st")
+
+                    stream_url = (
+                        f"{ep_url.rstrip('/')}/proxy/manifest.m3u8?"
+                        f"url={urllib.parse.quote_plus(m3u8_url)}"
+                        f"&h_referer={urllib.parse.quote(referer, safe='')}"
+                        f"&h_origin={urllib.parse.quote(origin, safe='')}"
+                    )
+                    if ep_pass:
+                        stream_url += f"&api_password={urllib.parse.quote(ep_pass, safe='')}"
+
+                    streamfree_streams.append({
+                        "name": f"🇬🇧 [StreamFree] {ch_name} [{qual}]",
+                        "title": f"🇬🇧 Fonte: StreamFree • Qualità: {qual}\n🌐 Audio: Inglese • Risoluzione nativa via EasyProxy",
+                        "url": stream_url,
+                        "behaviorHints": {"isLive": True, "notWebReady": False},
+                    })
+
         # 4. Process Streamed upstream sources (hotel, delta, etc.)
         streamed_streams: List[Dict[str, Any]] = []
         if ep_url:
             other_sources = [
                 (s.get("source"), s.get("id"))
                 for s in sources
-                if s.get("source") not in ("dlhd", "tvvoo", "fctv33", "amstaff", "acestream", "socceron", "direct", "sportsonline", "spon")
+                if s.get("source") not in ("dlhd", "tvvoo", "fctv33", "amstaff", "acestream", "socceron", "direct", "sportsonline", "spon", "streamfree")
                 and s.get("provider") != "mandrakodi"
                 and s.get("source")
                 and s.get("id")
@@ -1139,22 +1185,24 @@ class StreamService:
         # 1. TvVoo (No-Freeze)
         # 2. Mandrakodi (OTT Nativo ClearKey / Direct CDN / Socceron)
         # 3. Sportzonline (720p Real HD con audio italiano)
-        # 4. DaddyLive (Capped at 6)
-        # 5. FCTV33
-        # 6. Streamed
-        # 7. AceStream (P2P external player)
+        # 4. DaddyLive (Capped at 30)
+        # 5. StreamFree (1080p FHD / 540p SD)
+        # 6. FCTV33
+        # 7. Streamed
+        # 8. AceStream (P2P external player)
         final_streams = (
             tvvoo_streams
             + mandrakodi_streams
             + spon_streams
             + dlhd_streams
+            + streamfree_streams
             + fctv33_streams
             + streamed_streams
             + acestream_streams
         )
 
         if not final_streams:
-            if not ep_url and any(s.get("source") in ("dlhd", "fctv33", "streamed", "amstaff", "sportsonline", "spon") for s in sources):
+            if not ep_url and any(s.get("source") in ("dlhd", "fctv33", "streamed", "amstaff", "sportsonline", "spon", "streamfree") for s in sources):
                 return [
                     {
                         "name": "⚠️ EasyProxy non configurato",
