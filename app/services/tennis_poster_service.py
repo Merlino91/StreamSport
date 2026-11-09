@@ -99,9 +99,9 @@ class TennisPosterService:
             except Exception:
                 pass
 
-        # Purge legacy v1/v2 posters to free space and invalidate stale client caches
+        # Purge legacy v1/v2/v3 posters to free space and invalidate stale client caches
         for old_file in POSTERS_DIR.glob("tennis_*.jpg"):
-            if not old_file.name.endswith("_v3.jpg"):
+            if not old_file.name.endswith("_v4.jpg"):
                 try:
                     old_file.unlink()
                 except Exception:
@@ -1106,7 +1106,7 @@ class TennisPosterService:
             return None
 
         clean_key = hashlib.md5(match_id.encode("utf-8")).hexdigest()[:12]
-        filename = f"tennis_{clean_key}_v3.jpg"
+        filename = f"tennis_{clean_key}_v4.jpg"
         target_path = POSTERS_DIR / filename
 
         if target_path.exists():
@@ -1158,7 +1158,7 @@ class TennisPosterService:
             and (
                 not m.get("poster")
                 or "nostream" in str(m.get("poster"))
-                or (str(m.get("poster")).startswith("/posters/tennis_") and not str(m.get("poster")).endswith("_v3.jpg"))
+                or (str(m.get("poster")).startswith("/posters/tennis_") and not str(m.get("poster")).endswith("_v4.jpg"))
             )
             and not any(k in str(m.get("poster", "")).lower() for k in ("guidatv.sky.it", "sky.it", "apid.sky.it", "tivulaguida", "thesportsdb"))
             and m.get("title")
@@ -1225,7 +1225,7 @@ class TennisPosterService:
             m_id = str(m.get("id", ""))
             if m_id:
                 clean_key = hashlib.md5(m_id.encode("utf-8")).hexdigest()[:12]
-                active_poster_filenames.add(f"tennis_{clean_key}_v3.jpg")
+                active_poster_filenames.add(f"tennis_{clean_key}_v4.jpg")
 
             title = m.get("title", "")
             p1_name, p2_name = self.parse_players(title)
@@ -1265,7 +1265,7 @@ class TennisPosterService:
 
         # 2. Clean POSTERS_DIR: remove stale tennis posters not in active catalog
         purged_posters = 0
-        for f in POSTERS_DIR.glob("tennis_*_v3.jpg"):
+        for f in POSTERS_DIR.glob("tennis_*_v4.jpg"):
             if f.name not in active_poster_filenames:
                 try:
                     f.unlink()

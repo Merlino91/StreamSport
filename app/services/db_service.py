@@ -168,6 +168,13 @@ class DBService:
                     )
                 """)
                 cursor.execute("CREATE INDEX IF NOT EXISTS idx_tennis_athletes_slug ON tennis_athletes_cache(slug)")
+                # Auto-purge any legacy banner/logo entries erroneously cached from WTA Open Graph or social placeholders
+                cursor.execute("""
+                    DELETE FROM tennis_athletes_cache 
+                    WHERE LOWER(image_url) LIKE '%home-share%' 
+                       OR LOWER(image_url) LIKE '%logo%' 
+                       OR LOWER(image_url) LIKE '%banner%'
+                """)
                 conn.commit()
         except Exception as e:
             logger.error("Failed to ensure database schema at %s: %s", target, e)
@@ -544,6 +551,19 @@ class DBService:
                 conn.execute("DELETE FROM tennis_athletes_cache WHERE slug = ?", (slug,))
         except Exception as e:
             logger.warning("Error deleting tennis athlete '%s': %s", slug, e)
+
+    def purge_contaminated_tennis_athletes(self):
+        """Purges any legacy banner/logo entries erroneously cached from WTA Open Graph or placeholders."""
+        try:
+            with self._get_connection() as conn:
+                conn.execute("""
+                    DELETE FROM tennis_athletes_cache 
+                    WHERE LOWER(image_url) LIKE '%home-share%' 
+                       OR LOWER(image_url) LIKE '%logo%' 
+                       OR LOWER(image_url) LIKE '%banner%'
+                """)
+        except Exception as e:
+            logger.warning("Error purging contaminated tennis athletes: %s", e)
 
 
 db_service = DBService()
