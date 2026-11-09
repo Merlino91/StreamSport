@@ -167,7 +167,7 @@ class BannerService:
                         pass
             except Exception as e:
                 # If primary directory failed to write, log cause and transparently switch to temp storage
-                logger.warning("Failed to save banner cache to primary %s: %s (attempting temp fallback)", cache_file, e, exc_info=True)
+                logger.warning("Failed to save banner cache to primary %s: %s (attempting temp fallback)", cache_file, e)
                 if "streamsport_data" not in str(self.banners_dir):
                     fallback_dir = Path(tempfile.gettempdir()) / "streamsport_data" / "posters" / "banners"
                     try:
@@ -176,9 +176,9 @@ class BannerService:
                         fallback_file = self.banners_dir / cache_file.name
                         fallback_file.write_bytes(poster_bytes)
                     except Exception as e2:
-                        logger.warning("Failed to save banner cache to fallback %s: %s (primary error: %s)", self.banners_dir, e2, e, exc_info=True)
+                        logger.warning("Failed to save banner cache to fallback %s: %s (primary error: %s)", self.banners_dir, e2, e)
                 else:
-                    logger.warning("Failed to save banner cache to %s: %s", cache_file, e, exc_info=True)
+                    logger.warning("Failed to save banner cache to %s: %s", cache_file, e)
             return poster_bytes
 
         return None
@@ -191,11 +191,13 @@ class BannerService:
         if url.startswith("/posters/") or url.startswith("posters/"):
             local_rel = url.lstrip("/")
             local_p = self.data_dir / local_rel
-            if local_p.exists():
-                try:
-                    return Image.open(local_p).convert("RGB")
-                except Exception:
-                    pass
+            fallback_p = Path(tempfile.gettempdir()) / "streamsport_data" / local_rel
+            for p in (local_p, fallback_p):
+                if p.exists():
+                    try:
+                        return Image.open(p).convert("RGB")
+                    except Exception:
+                        pass
 
         # Remote image via DoH proxy
         if url.startswith("http://") or url.startswith("https://"):

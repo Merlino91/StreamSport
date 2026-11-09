@@ -29,7 +29,7 @@ from app.services.genre_classifier import genre_classifier
 from app.services.ocblacktop_service import ocblacktop_service
 from app.services.streamed_api import streamed_api
 from app.services.banner_service import banner_service, BANNER_VERSION
-from app.services.tennis_poster_service import tennis_poster_service
+from app.services.tennis_poster_service import tennis_poster_service, TENNIS_POSTER_VERSION
 from app.services.thesportsdb_service import thesportsdb_service
 from app.services.tvvoo_service import tvvoo_service
 from app.services.fctv33_service import fctv33_service
@@ -1209,6 +1209,8 @@ class CatalogService:
                     p = m.get("poster")
                     if not p or "nostream" in str(p):
                         continue
+                    if str(p).startswith("/posters/tennis_") and not str(p).endswith(f"_v{TENNIS_POSTER_VERSION}.jpg"):
+                        continue
                     if m.get("id"):
                         db_posters[m["id"]] = p
                     tk = self._get_teams_key(m)
@@ -1265,8 +1267,12 @@ class CatalogService:
 
                 # Transfer existing DB posters to fresh matches if missing
                 for m in all_matches:
-                    if m.get("poster") and "nostream" not in str(m.get("poster")):
-                        continue
+                    p_val = str(m.get("poster") or "")
+                    if p_val and "nostream" not in p_val:
+                        if not (p_val.startswith("/posters/tennis_") and not p_val.endswith(f"_v{TENNIS_POSTER_VERSION}.jpg")):
+                            continue
+                        # Clear obsolete tennis poster so it will be freshly re-enriched
+                        m["poster"] = None
                     m_id = m.get("id")
                     if m_id and m_id in db_posters:
                         m["poster"] = db_posters[m_id]

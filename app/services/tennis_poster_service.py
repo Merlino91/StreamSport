@@ -6,6 +6,7 @@ import logging
 import os
 from pathlib import Path
 import re
+import tempfile
 import time
 import urllib.parse
 from typing import Any, Dict, List, Optional, Set, Tuple
@@ -80,10 +81,20 @@ class TennisPosterService:
     """
 
     def __init__(self):
-        POSTERS_DIR.mkdir(parents=True, exist_ok=True)
-        ATHLETES_DIR.mkdir(parents=True, exist_ok=True)
-        ASSETS_DIR.mkdir(parents=True, exist_ok=True)
-        BACKGROUNDS_DIR.mkdir(parents=True, exist_ok=True)
+        self.posters_dir = POSTERS_DIR
+        try:
+            POSTERS_DIR.mkdir(parents=True, exist_ok=True)
+            ATHLETES_DIR.mkdir(parents=True, exist_ok=True)
+            ASSETS_DIR.mkdir(parents=True, exist_ok=True)
+            BACKGROUNDS_DIR.mkdir(parents=True, exist_ok=True)
+        except Exception as e:
+            logger.warning("Primary POSTERS_DIR %s unavailable (%s). Switching to temp fallback.", POSTERS_DIR, e)
+            self.posters_dir = Path(tempfile.gettempdir()) / "streamsport_data" / "posters"
+            self.posters_dir.mkdir(parents=True, exist_ok=True)
+            (self.posters_dir / "athletes").mkdir(parents=True, exist_ok=True)
+            (self.posters_dir / "assets").mkdir(parents=True, exist_ok=True)
+            (self.posters_dir / "backgrounds").mkdir(parents=True, exist_ok=True)
+
         self._font_path = self._find_font()
         self._enrichment_task: Optional[asyncio.Task] = None
         self._is_enriching: bool = False
@@ -95,19 +106,25 @@ class TennisPosterService:
 
         # In-memory negative cache only (session-based). Clean any legacy .missing files from disk.
         self._missing_athletes: Set[str] = set()
-        for p in ATHLETES_DIR.glob("*.missing"):
-            try:
-                p.unlink()
-            except Exception:
-                pass
-
-        # Purge legacy posters to free space and invalidate stale client caches
-        for old_file in POSTERS_DIR.glob("tennis_*.jpg"):
-            if not old_file.name.endswith(f"_v{TENNIS_POSTER_VERSION}.jpg"):
+        try:
+            for p in ATHLETES_DIR.glob("*.missing"):
                 try:
-                    old_file.unlink()
+                    p.unlink()
                 except Exception:
                     pass
+        except Exception:
+            pass
+
+        # Purge legacy posters to free space and invalidate stale client caches
+        try:
+            for old_file in self.posters_dir.glob("tennis_*.jpg"):
+                if not old_file.name.endswith(f"_v{TENNIS_POSTER_VERSION}.jpg"):
+                    try:
+                        old_file.unlink()
+                    except Exception:
+                        pass
+        except Exception:
+            pass
 
     def _ensure_background_templates(self):
         """Pre-renders clean, minimal 16:9 backgrounds with official tournament logos centered at top."""
@@ -1213,9 +1230,10 @@ class TennisPosterService:
 
         clean_key = hashlib.md5(match_id.encode("utf-8")).hexdigest()[:12]
         filename = f"tennis_{clean_key}_v{TENNIS_POSTER_VERSION}.jpg"
-        target_path = POSTERS_DIR / filename
+        target_path = self.posters_dir / filename
+        fallback_path = Path(tempfile.gettempdir()) / "streamsport_data" / "posters" / filename
 
-        if target_path.exists():
+        if target_path.exists() or fallback_path.exists():
             return f"/posters/{filename}"
 
         theme = self.get_theme_palette(genre, title)
@@ -1247,10 +1265,25 @@ class TennisPosterService:
 
         # Save to disk as high-quality JPEG
         final_rgb = canvas.convert("RGB")
-        final_rgb.save(target_path, "JPEG", quality=90, optimize=True)
-        logger.info("Generated tennis poster: %s (%s)", filename, title)
+        saved = False
+        try:
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            final_rgb.save(target_path, "JPEG", quality=90, optimize=True)
+            saved = True
+        except Exception as e:
+            logger.warning("Failed saving tennis poster to primary %s: %s (attempting temp fallback)", target_path, e)
+            try:
+                fallback_path.parent.mkdir(parents=True, exist_ok=True)
+                final_rgb.save(fallback_path, "JPEG", quality=90, optimize=True)
+                self.posters_dir = fallback_path.parent
+                saved = True
+            except Exception as e2:
+                logger.error("Failed saving tennis poster to fallback %s: %s", fallback_path, e2)
 
-        return f"/posters/{filename}"
+        if saved:
+            logger.info("Generated tennis poster: %s (%s)", filename, title)
+            return f"/posters/{filename}"
+        return None
 
     def start_background_enrichment(self, matches: List[Dict[str, Any]]):
         """Asynchronously triggers poster generation for tennis matches lacking artwork."""

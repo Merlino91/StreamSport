@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import re
 import sys
+import tempfile
 from typing import Optional, Tuple
 import urllib.parse
 from fastapi import FastAPI, HTTPException, Request, Response
@@ -92,8 +93,13 @@ app.add_middleware(
 if STATIC_DIR.exists():
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
-POSTERS_DIR.mkdir(parents=True, exist_ok=True)
-app.mount("/posters", StaticFiles(directory=str(POSTERS_DIR)), name="posters")
+try:
+    POSTERS_DIR.mkdir(parents=True, exist_ok=True)
+    posters_mount_dir = POSTERS_DIR
+except Exception:
+    posters_mount_dir = Path(tempfile.gettempdir()) / "streamsport_data" / "posters"
+    posters_mount_dir.mkdir(parents=True, exist_ok=True)
+app.mount("/posters", StaticFiles(directory=str(posters_mount_dir)), name="posters")
 
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
@@ -663,25 +669,35 @@ async def get_dynamic_poster(
     if not match:
         match = await db_service.get_match_by_id_async(clean_id)
 
-    # JIT fallback: if tennis match is missing official artwork, generate on-demand before fallback
-    if match and not match.get("poster"):
+    # JIT fallback: if tennis match is missing official artwork or has an obsolete/dead version, generate on-demand before fallback
+    if match:
         cat = (match.get("category") or match.get("_catalog") or "").lower()
         silo = (match.get("_silo") or "").lower()
         if "tennis" in cat or "tennis" in silo:
-            try:
-                from app.services.tennis_poster_service import tennis_poster_service
-                genre = match.get("_genre")
-                if not genre:
-                    from app.services.genre_classifier import genre_classifier
-                    _, genre = genre_classifier.classify(match)
-                title = match.get("title", "")
-                poster_url = await tennis_poster_service.generate_poster(clean_id, title, genre, match=match)
-                if poster_url:
-                    match["poster"] = poster_url
-                    catalog_service.update_cached_match(match)
-                    await db_service.update_match_poster_async(clean_id, poster_url)
-            except Exception as e:
-                logger.debug("Failed on-demand tennis poster generation for %s: %s", clean_id, e)
+            poster_val = str(match.get("poster") or "").strip()
+            from app.services.tennis_poster_service import TENNIS_POSTER_VERSION, tennis_poster_service
+            file_name = poster_val.split("/posters/")[-1] if "/posters/" in poster_val else ""
+            file_exists = (POSTERS_DIR / file_name).exists() or (Path(tempfile.gettempdir()) / "streamsport_data" / "posters" / file_name).exists() if file_name else False
+            needs_poster = (
+                not poster_val
+                or "nostream" in poster_val
+                or (poster_val.startswith("/posters/tennis_") and not poster_val.endswith(f"_v{TENNIS_POSTER_VERSION}.jpg"))
+                or (poster_val.startswith("/posters/") and not file_exists)
+            )
+            if needs_poster:
+                try:
+                    genre = match.get("_genre")
+                    if not genre:
+                        from app.services.genre_classifier import genre_classifier
+                        _, genre = genre_classifier.classify(match)
+                    title = match.get("title", "")
+                    poster_url = await tennis_poster_service.generate_poster(clean_id, title, genre, match=match)
+                    if poster_url:
+                        match["poster"] = poster_url
+                        catalog_service.update_cached_match(match)
+                        await db_service.update_match_poster_async(clean_id, poster_url)
+                except Exception as e:
+                    logger.debug("Failed on-demand tennis poster generation for %s: %s", clean_id, e)
 
     content = await banner_service.get_or_create_poster(
         match=match,
