@@ -91,6 +91,9 @@ class TennisOfficialProvidersTestCase(unittest.IsolatedAsyncioTestCase):
         Tests strict gender isolation: ATP male matches never query WTA
         and never receive WTA Home-Share banners.
         """
+        tennis_poster_service._missing_athletes.discard("leo_borg")
+        db_service.delete_tennis_athlete("leo_borg")
+
         # Leo Borg should be found via ATP gladiator headshot, never WTA
         leo_img = await tennis_poster_service.get_player_cutout("Leo Borg", is_female=False)
         self.assertIsNotNone(leo_img)

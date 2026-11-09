@@ -26,7 +26,7 @@ logger = logging.getLogger("streamsport.banner")
 
 CANVAS_WIDTH = 889
 CANVAS_HEIGHT = 500
-BANNER_VERSION = 7
+BANNER_VERSION = 8
 
 
 class BannerService:
@@ -53,6 +53,17 @@ class BannerService:
                 logger.info("BannerService: switched to fallback banner cache directory in temp storage: %s", self.banners_dir)
             except Exception as e:
                 logger.warning("BannerService: could not initialize fallback banner directory: %s", e)
+
+        # Invalidate legacy banner caches to force fresh rendering with v8 badges and clean posters
+        try:
+            for old_banner in self.banners_dir.glob('*.jpg'):
+                if not old_banner.name.endswith(f'_v{BANNER_VERSION}.jpg'):
+                    try:
+                        old_banner.unlink()
+                    except Exception:
+                        pass
+        except Exception:
+            pass
 
         self._font_bold_path = self._find_font(bold=True)
         self._font_regular_path = self._find_font(bold=False)

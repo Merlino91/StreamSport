@@ -675,7 +675,7 @@ async def get_dynamic_poster(
                     from app.services.genre_classifier import genre_classifier
                     _, genre = genre_classifier.classify(match)
                 title = match.get("title", "")
-                poster_url = await tennis_poster_service.generate_poster(clean_id, title, genre)
+                poster_url = await tennis_poster_service.generate_poster(clean_id, title, genre, match=match)
                 if poster_url:
                     match["poster"] = poster_url
                     catalog_service.update_cached_match(match)

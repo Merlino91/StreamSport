@@ -378,7 +378,7 @@ class TennisPosterService:
         c_initial = c_tokens[0][0]
         c_surname = " ".join(c_tokens[1:])
 
-        sur_match = (c_surname == q_surname) or c.endswith(q_surname) or (q_tokens[-1] == c_tokens[-1])
+        sur_match = (c_surname == q_surname) or (c_tokens[-1] == q_tokens[-1]) or (" ".join(c_tokens[-len(q_tokens)+1:]) == q_surname)
         init_match = (c_initial == q_initial) or (c_tokens[-1][0] == q_initial and len(c_tokens) > 1 and c_tokens[0] == q_surname)
 
         return sur_match and init_match
@@ -486,12 +486,17 @@ class TennisPosterService:
         return False
 
     @staticmethod
-    def is_female_competition(title: str, genre: str = "") -> bool:
+    def is_female_competition(title: str, genre: str = "", match: Optional[Dict[str, Any]] = None) -> bool:
         """Determines if a match belongs to a women's tournament or circuit."""
-        if genre and "wta" in genre.lower():
+        if match and match.get("is_women"):
+            return True
+        comp = (match.get("competition") or "") if match else ""
+        canon = (match.get("canonical_competition") or "") if match else ""
+        combined = f"{genre} {title} {comp} {canon}".lower()
+        if any(w in combined for w in ("wta", "bjk", "billie jean", "femminile", "women", "donne", "ladies")):
             return True
         from app.utils.demographics import extract_demographics
-        is_w, _ = extract_demographics(f"{genre} {title}")
+        is_w, _ = extract_demographics(combined)
         return is_w
 
     def _get_unknown_cutout(self, is_female: bool = False) -> Optional[Image.Image]:
@@ -779,16 +784,28 @@ class TennisPosterService:
         # 2. Check SQLite URL cache with Active Validation
         cached = db_service.get_tennis_athlete(slug)
         if cached and cached.get("image_url"):
-            cached_url = cached["image_url"]
-            # Auto-purge any historical contaminated logo/banner URLs
-            if any(bad in cached_url.lower() for bad in ["home-share", "logo", "banner"]):
+            cached_url = cached["image_url"].lower()
+            prov = (cached.get("provider") or "").lower()
+            # Strict integrity check:
+            # - WTA entries MUST be transparent '-torso_' cutouts
+            # - ATP entries MUST be from atptour.com
+            # - ESPN entries MUST be from espncdn.com
+            is_valid_prov = (
+                (prov == "wta" and "-torso_" in cached_url)
+                or (prov == "atp" and "atptour.com" in cached_url)
+                or (prov == "espn" and "espncdn.com" in cached_url)
+            )
+            is_blacklisted = any(bad in cached_url for bad in ["home-share", "share", "logo", "banner", "tile", "placeholder", "finals"])
+
+            if not is_valid_prov or is_blacklisted:
                 db_service.delete_tennis_athlete(slug)
             else:
-                valid_img = await self._fetch_and_validate_image(cached_url)
-                if valid_img is not None:
+                valid_img = await self._fetch_and_validate_image(cached["image_url"])
+                # Athlete cutout must NOT be a landscape banner/tile
+                if valid_img is not None and valid_img.width <= int(valid_img.height * 1.5):
                     return valid_img
-                # URL is broken, expired or not an image: Auto-Invalidation!
-                logger.info("Tennis athlete cached URL invalid for '%s' (%s). Auto-invalidation triggered.", slug, cached_url)
+                # URL is broken, expired or landscape banner: Auto-Invalidation!
+                logger.info("Tennis athlete cached URL invalid for '%s' (%s). Auto-invalidation triggered.", slug, cached["image_url"])
                 db_service.delete_tennis_athlete(slug)
 
         # 3. Live Waterfall Search
@@ -1097,7 +1114,9 @@ class TennisPosterService:
 
         return canvas
 
-    async def generate_poster(self, match_id: str, title: str, genre: str) -> Optional[str]:
+    async def generate_poster(
+        self, match_id: str, title: str, genre: str, match: Optional[Dict[str, Any]] = None
+    ) -> Optional[str]:
         """
         Creates and saves an 888x500 landscape poster for a tennis match.
         Returns the relative web path (e.g. '/posters/tennis_xyz.jpg').
@@ -1127,7 +1146,7 @@ class TennisPosterService:
             if not p1_name:
                 return None
 
-            is_fem = self.is_female_competition(title, genre)
+            is_fem = self.is_female_competition(title, genre, match=match)
 
             # 2. Check if Country match (Davis Cup / BJK Cup / 'Italy vs China')
             if self.is_country_match(title, p1_name, p2_name, genre):
@@ -1191,7 +1210,7 @@ class TennisPosterService:
                     from app.services.genre_classifier import genre_classifier
                     _, genre = genre_classifier.classify(m)
                 try:
-                    rel_poster = await self.generate_poster(m_id, title, genre)
+                    rel_poster = await self.generate_poster(m_id, title, genre, match=m)
                     if rel_poster:
                         m["poster"] = rel_poster
                         await db_service.save_matches_async([m])

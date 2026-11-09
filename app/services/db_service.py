@@ -168,13 +168,10 @@ class DBService:
                     )
                 """)
                 cursor.execute("CREATE INDEX IF NOT EXISTS idx_tennis_athletes_slug ON tennis_athletes_cache(slug)")
-                # Auto-purge any legacy banner/logo entries erroneously cached from WTA Open Graph or social placeholders
-                cursor.execute("""
-                    DELETE FROM tennis_athletes_cache 
-                    WHERE LOWER(image_url) LIKE '%home-share%' 
-                       OR LOWER(image_url) LIKE '%logo%' 
-                       OR LOWER(image_url) LIKE '%banner%'
-                """)
+                # Complete purge of legacy/contaminated tennis athletes cache to guarantee zero stale WTA banners
+                cursor.execute("DELETE FROM tennis_athletes_cache")
+                # Reset tennis match posters so that catalog and banner generator rebuild fresh from zero
+                cursor.execute("UPDATE matches SET poster = NULL WHERE poster LIKE '%/posters/tennis_%' AND poster NOT LIKE '%_v4.jpg'")
                 conn.commit()
         except Exception as e:
             logger.error("Failed to ensure database schema at %s: %s", target, e)
