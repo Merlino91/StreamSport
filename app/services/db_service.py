@@ -8,9 +8,8 @@ import threading
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
-from app.config import DATA_DIR, DEFAULT_DATA_DIR, ENABLE_REPLAYS, PROJECT_DIR
+from app.config import DATA_DIR, DEFAULT_DATA_DIR, ENABLE_REPLAYS
 
-import os
 import tempfile
 
 logger = logging.getLogger("streamsport.db")
@@ -342,36 +341,6 @@ class DBService:
         except Exception as e:
             logger.warning("Failed to fetch match %s from DB: %s", match_id, e)
             return None
-
-    def get_concluded_matches(self, category_id: str = "all", max_age_hours: int = 72) -> List[Dict[str, Any]]:
-        """
-        Returns matches that started more than 4 hours ago, but less than max_age_hours ago.
-        """
-        now_ms = int(time.time() * 1000)
-        cutoff_recent = now_ms - (4 * 3600 * 1000)
-        cutoff_oldest = now_ms - (max_age_hours * 3600 * 1000)
-
-        query = """
-            SELECT * FROM matches
-            WHERE date > 0 AND date <= ? AND date >= ?
-        """
-        params: List[Any] = [cutoff_recent, cutoff_oldest]
-
-        if category_id != "all":
-            query += " AND category = ?"
-            params.append(category_id.lower())
-
-        query += " ORDER BY date DESC"
-
-        try:
-            with self._get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute(query, params)
-                rows = cursor.fetchall()
-                return [self._row_to_match(r) for r in rows]
-        except Exception as e:
-            logger.error("Failed to get concluded matches from DB: %s", e)
-            return []
 
     def save_matches(self, matches: List[Dict[str, Any]]):
         """Alias for upsert_matches."""

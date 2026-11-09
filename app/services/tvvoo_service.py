@@ -1313,10 +1313,6 @@ class TvVooService:
         d = domain or self._active_domain
         return f"https://{d}/mediahubmx-catalog.json"
 
-    def get_resolve_url(self, domain: Optional[str] = None) -> str:
-        d = domain or self._active_domain
-        return f"https://{d}/mediahubmx-resolve.json"
-
     @staticmethod
     def cleanup_channel_name(name: str) -> str:
         """Cleans and normalizes channel name string for dictionary matching."""

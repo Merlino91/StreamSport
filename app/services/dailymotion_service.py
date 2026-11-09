@@ -99,13 +99,6 @@ class DailymotionService:
 
         return stream_url
 
-    async def resolve_and_proxy_manifest(self, video_id: str) -> Tuple[Optional[bytes], Optional[str], Optional[str]]:
-        """Backward-compatible helper returning (content_bytes, media_type, target_url)."""
-        stream_url = await self.resolve_stream_url(video_id)
-        if stream_url:
-            return None, "application/vnd.apple.mpegurl", stream_url
-        return None, None, None
-
     async def get_highlight_streams(self, match_title: str, base_url: Optional[str] = None) -> List[Dict[str, Any]]:
         """
         Searches for highlight videos matching the match title, discards any video

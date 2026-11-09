@@ -85,9 +85,6 @@ class TennisPosterService:
         self._font_path = self._find_font()
         self._enrichment_task: Optional[asyncio.Task] = None
         self._is_enriching: bool = False
-        self._tsdb_lock = asyncio.Lock()
-        self._last_tsdb_call: float = 0.0
-        self._unknown_cutout_cache: Optional[Image.Image] = None
         self._unknown_male_cache: Optional[Image.Image] = None
         self._unknown_female_cache: Optional[Image.Image] = None
 

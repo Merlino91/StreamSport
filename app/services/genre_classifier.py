@@ -816,9 +816,4 @@ class GenreClassifier:
         # 10. AMERICHE E LEGHE EXTRA-UE
         return "calcio_estero", "Americhe e Leghe Extra-UE"
 
-    def classify_genre(self, match: Dict[str, Any]) -> str:
-        """Helper returning only the genre string for backward compatibility."""
-        _, genre = self.classify(match)
-        return genre
-
 genre_classifier = GenreClassifier()

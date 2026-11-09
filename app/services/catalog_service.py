@@ -1677,10 +1677,6 @@ class CatalogService:
         meta["background"] = meta.get("poster")
         return meta
 
-    def get_cached_matches(self) -> List[Dict[str, Any]]:
-        """Returns an immutable snapshot copy of cached matches."""
-        return list(self._cached_matches)
-
     def get_cached_match(self, match_id: str) -> Optional[Dict[str, Any]]:
         """Retrieves a match from the in-memory cache by ID with O(1) index and fallback."""
         if not match_id:

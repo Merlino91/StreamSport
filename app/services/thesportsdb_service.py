@@ -447,19 +447,6 @@ class TheSportsDBService:
     }
 
     @classmethod
-    def clean_competition_str(cls, s: str) -> str:
-        if not s:
-            return ""
-        t = s.lower()
-        t = unicodedata.normalize("NFKD", t).encode("ascii", "ignore").decode("utf-8")
-        # Strip sub-group designations like 'Girone B', 'Group 1', 'Division A', 'Zone 2'
-        t = re.sub(r"\b(girone|group|divisione|division|zone|zona|conference|conf)\s+[a-z0-9]+\b", " ", t)
-        # Strip matchdays, rounds, weeks
-        t = re.sub(r"\b\d+[\.\xAA\xBA]?\s*(?:giornata|matchday|round|settimana|week|jornada|spieltag)\b", " ", t)
-        t = re.sub(r"[^a-z0-9]+", " ", t)
-        return re.sub(r"\s+", " ", t).strip()
-
-    @classmethod
     def extract_country_token(cls, text: str) -> Optional[str]:
         words = re.sub(r"[^a-z0-9]+", " ", (text or "").lower()).split()
         for w in words:

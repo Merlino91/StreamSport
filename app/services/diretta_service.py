@@ -486,9 +486,6 @@ class DirettaService:
 
         return official_matches
 
-    def _clean_team_words(self, name: str) -> Set[str]:
-        return extract_team_words(name)
-
     def reconcile_matches(self, matches: List[Dict[str, Any]]) -> int:
         """
         Reconciles stream matches using a 2-pass Flashscore algorithm:

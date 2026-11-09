@@ -281,13 +281,6 @@ class YouTubeService:
 
         return []
 
-    async def search_highlight_video(self, match_title: str) -> Optional[Dict[str, str]]:
-        """Backward-compatible helper returning the single best highlight video."""
-        results = await self.search_highlight_videos(match_title, limit=1)
-        if results:
-            return {"video_id": results[0]["video_id"], "title": results[0]["title"]}
-        return None
-
     def _extract_master_m3u8_sync(self, video_id: str) -> Tuple[Optional[str], Optional[str]]:
         """
         Synchronous yt-dlp master HLS playlist generation executed in threadpool.

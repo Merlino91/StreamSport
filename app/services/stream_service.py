@@ -286,13 +286,6 @@ class StreamService:
         flag, label = STREAMED_LANG_MAP.get(raw_lower, ("", raw))
         return (flag, label)
 
-    def get_flag_for_language(self, lang_text: str) -> str:
-        """Finds flag emoji for a given language string."""
-        flag, _ = self.resolve_streamed_language(lang_text)
-        if flag:
-            return flag
-        return self.get_channel_flag(lang_text)
-
     def build_easyproxy_url(self, ep_url: str, ep_pass: Optional[str], host: str, destination_url: str) -> str:
         """
         Builds the target EasyProxy extractor URL:
