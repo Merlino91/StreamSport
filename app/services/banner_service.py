@@ -26,7 +26,7 @@ logger = logging.getLogger("streamsport.banner")
 
 CANVAS_WIDTH = 889
 CANVAS_HEIGHT = 500
-BANNER_VERSION = 8
+BANNER_VERSION = 1
 
 
 class BannerService:
@@ -54,7 +54,7 @@ class BannerService:
             except Exception as e:
                 logger.warning("BannerService: could not initialize fallback banner directory: %s", e)
 
-        # Invalidate legacy banner caches to force fresh rendering with v8 badges and clean posters
+        # Invalidate legacy banner caches to force fresh rendering with v1 clean posters
         try:
             for old_banner in self.banners_dir.glob('*.jpg'):
                 if not old_banner.name.endswith(f'_v{BANNER_VERSION}.jpg'):
