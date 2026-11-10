@@ -957,6 +957,7 @@ class TennisPosterService:
                 valid_img = await self._fetch_and_validate_image(cached["image_url"])
                 # Athlete cutout must NOT be a landscape banner/tile
                 if valid_img is not None and valid_img.width <= int(valid_img.height * 1.5):
+                    logger.info("Tennis cutout da cache SQLite [%s]: '%s' -> %s", prov.upper(), search_query, cached["image_url"])
                     return valid_img
                 # URL is broken, expired or landscape banner: Auto-Invalidation!
                 logger.info("Tennis athlete cached URL invalid for '%s' (%s). Auto-invalidation triggered.", slug, cached["image_url"])
@@ -968,6 +969,7 @@ class TennisPosterService:
         if espn_res:
             img, img_url = espn_res
             gender_str = "female" if is_female else "male"
+            logger.info("Tennis cutout trovato [ESPN]: '%s' -> %s", search_query, img_url)
             db_service.save_tennis_athlete(slug, "espn", img_url, gender_str)
             return img
 
@@ -976,16 +978,20 @@ class TennisPosterService:
             wta_res = await self._search_wta(search_query)
             if wta_res:
                 img, img_url = wta_res
+                logger.info("Tennis cutout trovato [WTA Tour]: '%s' -> %s", search_query, img_url)
                 db_service.save_tennis_athlete(slug, "wta", img_url, "female")
                 return img
         else:
+            logger.info("Ricerca ATP Tour per '%s' (fallback da ESPN)...", search_query)
             atp_res = await self._search_atp(search_query)
             if atp_res:
                 img, img_url = atp_res
+                logger.info("Tennis cutout trovato [ATP Tour]: '%s' -> %s", search_query, img_url)
                 db_service.save_tennis_athlete(slug, "atp", img_url, "male")
                 return img
 
         # Level 3: Not found on official circuit -> Negative cache and return None (caller uses silhouette)
+        logger.warning("Nessun cutout ufficiale trovato per '%s' (%s) -> Silhouette d'emergenza", search_query, "WTA" if is_female else "ATP")
         self._missing_athletes.add(slug)
         return None
 
