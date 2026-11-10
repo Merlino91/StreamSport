@@ -612,21 +612,20 @@ class TennisPosterService:
         def _fetch_sync():
             try:
                 from curl_cffi import requests as curl_requests
-                headers = {
-                    "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
-                    "Accept-Language": "en-US,en;q=0.9,it;q=0.8",
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                    "sec-ch-ua": '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
-                    "sec-ch-ua-mobile": "?0",
-                    "sec-ch-ua-platform": '"Windows"',
-                    "sec-fetch-dest": "image",
-                    "sec-fetch-mode": "no-cors",
-                    "sec-fetch-site": "cross-site",
-                }
                 if "atptour.com" in url:
-                    headers["Referer"] = "https://www.atptour.com/en/players"
-                    headers["sec-fetch-site"] = "same-origin"
-                with curl_requests.Session(impersonate="chrome120") as s:
+                    headers = {
+                        "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+                        "Accept-Language": "en-US,en;q=0.9",
+                        "Referer": "https://www.atptour.com/en/players",
+                    }
+                    imp = "safari15_5"
+                else:
+                    headers = {
+                        "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+                        "Accept-Language": "en-US,en;q=0.9,it;q=0.8",
+                    }
+                    imp = "chrome120"
+                with curl_requests.Session(impersonate=imp) as s:
                     s.headers.update(headers)
                     res = s.get(url, timeout=8.0)
                     if res.status_code == 200:
@@ -736,19 +735,12 @@ class TennisPosterService:
 
                 headers = {
                     "Accept": "application/json, text/plain, */*",
-                    "Accept-Language": "en-US,en;q=0.9,it;q=0.8",
+                    "Accept-Language": "en-US,en;q=0.9",
                     "Referer": "https://www.atptour.com/en/players",
                     "X-Requested-With": "XMLHttpRequest",
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                    "sec-ch-ua": '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
-                    "sec-ch-ua-mobile": "?0",
-                    "sec-ch-ua-platform": '"Windows"',
-                    "sec-fetch-dest": "empty",
-                    "sec-fetch-mode": "cors",
-                    "sec-fetch-site": "same-origin",
                 }
 
-                with curl_requests.Session(impersonate="chrome120") as session:
+                with curl_requests.Session(impersonate="safari15_5") as session:
                     session.headers.update(headers)
                     found_player = None
 
@@ -820,13 +812,6 @@ class TennisPosterService:
                         "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
                         "Accept-Language": "en-US,en;q=0.9",
                         "Referer": "https://www.atptour.com/en/players",
-                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                        "sec-ch-ua": '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
-                        "sec-ch-ua-mobile": "?0",
-                        "sec-ch-ua-platform": '"Windows"',
-                        "sec-fetch-dest": "image",
-                        "sec-fetch-mode": "no-cors",
-                        "sec-fetch-site": "same-origin",
                     }
                     for c_url in candidates:
                         try:
