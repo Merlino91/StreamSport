@@ -632,12 +632,15 @@ class TennisPosterService:
                     if res.status_code == 200:
                         # Reject ATP default empty grey silhouette (exactly 4729 bytes)
                         if len(res.content) == 4729:
+                            logger.info("Active validation: URL rifiutato (silhouette grigia ATP da 4729 byte): %s", url)
                             return None
                         ct = (res.headers.get("content-type") or "").lower()
                         if "image" in ct or res.content.startswith(b"\x89PNG") or res.content.startswith(b"\xff\xd8"):
                             return res.content
+                    else:
+                        logger.info("Active validation HTTP %d per URL: %s", res.status_code, url)
             except Exception as e:
-                logger.debug("Active validation fetch error for %s: %s", url, e)
+                logger.info("Active validation fetch error per %s: %s", url, e)
             return None
 
         content = await asyncio.to_thread(_fetch_sync)
@@ -757,8 +760,10 @@ class TennisPosterService:
                         try:
                             res = session.get(api_url, timeout=8.0)
                             if res.status_code != 200:
+                                logger.info("ATP API HTTP %d per termine '%s' (url: %s)", res.status_code, term, api_url)
                                 continue
                             if not res.content or not res.content.startswith(b"["):
+                                logger.info("ATP API risposta non-JSON per '%s': %d byte", term, len(res.content) if res.content else 0)
                                 continue
                             data = res.json()
                             if not isinstance(data, list) or not data:
@@ -797,7 +802,7 @@ class TennisPosterService:
                             if found_player:
                                 break
                         except Exception as e:
-                            logger.debug("ATP byname search error for '%s' (term '%s'): %s", search_query, term, e)
+                            logger.info("ATP search errore connessione per '%s' (term '%s'): %s", clean_full, term, e)
 
                     if not found_player:
                         return None
@@ -830,6 +835,7 @@ class TennisPosterService:
                             if r_img.status_code == 200:
                                 # Reject ATP default empty grey silhouette (exactly 4729 bytes)
                                 if len(r_img.content) == 4729:
+                                    logger.info("ATP candidate rifiutato (silhouette grigia 4729b): %s", c_url)
                                     continue
                                 ct = (r_img.headers.get("content-type") or "").lower()
                                 if "image" in ct or r_img.content.startswith(b"\x89PNG") or r_img.content.startswith(b"\xff\xd8"):
@@ -838,8 +844,10 @@ class TennisPosterService:
                                             img = loaded.convert("RGBA")
                                     if img.width >= 100 and img.height >= 100:
                                         return img, c_url
-                        except Exception:
-                            pass
+                            else:
+                                logger.info("ATP candidate HTTP %d per: %s", r_img.status_code, c_url)
+                        except Exception as e:
+                            logger.info("ATP candidate errore per %s: %s", c_url, e)
             except Exception as e:
                 logger.warning("ATP search error for '%s': %s", search_query, e)
             return None
@@ -1096,6 +1104,10 @@ class TennisPosterService:
             p2_task = self.get_player_cutout(p2_name, is_female=is_female) if p2_name else asyncio.sleep(0, result=None)
             p1_img, p2_img = await asyncio.gather(p1_task, p2_task)
 
+            src1 = "CUTOUT" if p1_img is not None else "SILHOUETTE_FALLBACK"
+            src2 = "CUTOUT" if p2_img is not None else "SILHOUETTE_FALLBACK"
+            logger.info("Tennis match compositing: '%s' [%s] vs '%s' [%s]", p1_name, src1, p2_name, src2)
+
             # Player 1 (Left)
             img1 = p1_img or unknown_cutout
             if img1:
@@ -1124,6 +1136,15 @@ class TennisPosterService:
                 self.get_player_cutout(p2_b_name, is_female=is_female) if p2_b_name else asyncio.sleep(0, result=None),
             ]
             t1_a_img, t1_b_img, t2_a_img, t2_b_img = await asyncio.gather(*tasks)
+
+            src1_a = "CUTOUT" if t1_a_img is not None else "SILHOUETTE_FALLBACK"
+            src1_b = "CUTOUT" if t1_b_img is not None else "SILHOUETTE_FALLBACK"
+            src2_a = "CUTOUT" if t2_a_img is not None else "SILHOUETTE_FALLBACK"
+            src2_b = "CUTOUT" if t2_b_img is not None else "SILHOUETTE_FALLBACK"
+            logger.info(
+                "Tennis doubles match compositing: Team 1 [%s: %s, %s: %s] vs Team 2 [%s: %s, %s: %s]",
+                p1_a_name, src1_a, p1_b_name, src1_b, p2_a_name, src2_a, p2_b_name, src2_b
+            )
 
             h_front = 400
             h_back = 350
