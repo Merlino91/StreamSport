@@ -358,13 +358,18 @@ class TennisPosterService:
     def _is_player_match(cls, query: str, candidate_name: str) -> bool:
         """
         Validates that an API candidate matches the searched player query:
-        - Exact match or surname containment.
+        - Exact match or surname containment (with accent normalization).
         - Prevents false-positive surname collision (e.g. 'Test Fake Male' vs 'Alastair Male', 'Janice Tjen' vs 'Jonas Luetjen').
         - Supports abbreviations & initials ('Bolelli S.' vs 'Simone Bolelli', 'Herbert P.H.' vs 'Pierre-Hugues Herbert', 'Harrison C.' vs 'Christian Harrison').
         - Supports compound names & reversed tokens ('Garfia Carlos Alcaraz' vs 'Carlos Alcaraz', 'Alex De Minaur' vs 'De Minaur Alex').
         """
-        q = re.sub(r"[\(\)\[\]]", "", query or "").strip().lower()
-        c = (candidate_name or "").strip().lower()
+        import unicodedata
+        def _unaccent(s: str) -> str:
+            nfkd = unicodedata.normalize("NFKD", s or "")
+            return "".join(ch for ch in nfkd if not unicodedata.combining(ch))
+
+        q = _unaccent(re.sub(r"[\(\)\[\]]", "", query or "")).strip().lower()
+        c = _unaccent(candidate_name or "").strip().lower()
         if not q or not c:
             return False
         if q == c:
@@ -609,13 +614,21 @@ class TennisPosterService:
                 from curl_cffi import requests as curl_requests
                 headers = {
                     "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
-                    "Accept-Language": "en-US,en;q=0.9",
+                    "Accept-Language": "en-US,en;q=0.9,it;q=0.8",
                     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                    "sec-ch-ua": '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+                    "sec-ch-ua-mobile": "?0",
+                    "sec-ch-ua-platform": '"Windows"',
+                    "sec-fetch-dest": "image",
+                    "sec-fetch-mode": "no-cors",
+                    "sec-fetch-site": "cross-site",
                 }
                 if "atptour.com" in url:
                     headers["Referer"] = "https://www.atptour.com/en/players"
+                    headers["sec-fetch-site"] = "same-origin"
                 with curl_requests.Session(impersonate="chrome120") as s:
-                    res = s.get(url, headers=headers, timeout=5.0)
+                    s.headers.update(headers)
+                    res = s.get(url, timeout=8.0)
                     if res.status_code == 200:
                         # Reject ATP default empty grey silhouette (exactly 4729 bytes)
                         if len(res.content) == 4729:
@@ -692,23 +705,31 @@ class TennisPosterService:
         """Level 2 (Maschile): Searches ATP Tour official directory via curl_cffi for gladiator/headshot cutout."""
         def _search_sync():
             try:
+                import time
+                import unicodedata
                 from curl_cffi import requests as curl_requests
+
                 clean_full = self.clean_player_name(search_query)
                 surname = self._extract_single_player_surname(clean_full)
 
-                # Search terms generation:
-                # 1. Full surname (e.g. 'Sinner', 'Alcaraz', 'Halys', 'Hanfmann', 'Etcheverry')
-                # 2. Significant individual alphabetic tokens (length >= 3)
-                # 3. Clean full name (unless it contains trailing initials like 'P.H.' or 'Q.')
+                def _unaccent(s: str) -> str:
+                    nfkd = unicodedata.normalize("NFKD", s or "")
+                    return "".join(ch for ch in nfkd if not unicodedata.combining(ch))
+
+                cleaned_name = re.sub(r"[^\w\s\-]", "", clean_full).strip()
+                cleaned_name = _unaccent(cleaned_name)
+                norm_surname = _unaccent(surname) if surname else ""
+
+                is_initial_name = bool(re.search(r"\b[A-Za-z]$", cleaned_name))
+
+                # User requirement:
+                # 1. Full name first (Nome e Cognome)
+                # 2. Surname second (Solo il Cognome as fallback)
                 search_terms: List[str] = []
-                if surname and len(surname) >= 3:
-                    search_terms.append(surname)
-                parts = [p.strip() for p in re.split(r"[\s\.\-]+", clean_full) if len(p.strip()) >= 3 and p.strip().isalpha()]
-                for p in parts:
-                    if p.upper() != (surname or "").upper() and p not in search_terms:
-                        search_terms.append(p)
-                if clean_full not in search_terms and not any(clean_full.endswith(f" {x}") for x in ["S.", "P.H.", "C.", "N.", "M.", "A.", "J.", "E.", "Q."]):
-                    search_terms.append(clean_full)
+                if not is_initial_name and len(cleaned_name.split()) >= 2:
+                    search_terms.append(cleaned_name)
+                if norm_surname and len(norm_surname) >= 3 and norm_surname.upper() != cleaned_name.upper():
+                    search_terms.append(norm_surname)
 
                 headers = {
                     "Accept": "application/json, text/plain, */*",
@@ -716,25 +737,28 @@ class TennisPosterService:
                     "Referer": "https://www.atptour.com/en/players",
                     "X-Requested-With": "XMLHttpRequest",
                     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                    "sec-ch-ua": '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+                    "sec-ch-ua-mobile": "?0",
+                    "sec-ch-ua-platform": '"Windows"',
+                    "sec-fetch-dest": "empty",
+                    "sec-fetch-mode": "cors",
+                    "sec-fetch-site": "same-origin",
                 }
 
-                proxies = None
-                proxy_url = os.getenv("STREAMSPORT_ATP_PROXY") or os.getenv("ALL_PROXY") or os.getenv("HTTPS_PROXY")
-                if proxy_url:
-                    if proxy_url.startswith("https://"):
-                        proxy_url = "http://" + proxy_url[8:]
-                    proxies = {"http": proxy_url, "https": proxy_url}
-
-                with curl_requests.Session(impersonate="chrome120", proxies=proxies) as session:
+                with curl_requests.Session(impersonate="chrome120") as session:
                     session.headers.update(headers)
                     found_player = None
 
-                    for term in search_terms:
+                    for i, term in enumerate(search_terms):
+                        if i > 0:
+                            time.sleep(0.25)
                         encoded = urllib.parse.quote(term.strip().lower())
                         api_url = f"https://www.atptour.com/en/-/www/players/find/byname/{encoded}/en"
                         try:
-                            res = session.get(api_url, timeout=5.0)
+                            res = session.get(api_url, timeout=8.0)
                             if res.status_code != 200:
+                                continue
+                            if not res.content or not res.content.startswith(b"["):
                                 continue
                             data = res.json()
                             if not isinstance(data, list) or not data:
@@ -753,7 +777,7 @@ class TennisPosterService:
                                     score += 50
                                 if full == clean_full.lower():
                                     score += 100
-                                elif surname and ln.lower() == surname.lower():
+                                elif norm_surname and _unaccent(ln).lower() == norm_surname.lower():
                                     score += 60
                                 if q_inits and fn:
                                     if fn[0].lower() in q_inits:
@@ -787,9 +811,22 @@ class TennisPosterService:
                         f"https://www.atptour.com/-/media/alias/player-gladiator-headshot/{atp_id}",
                         f"https://www.atptour.com/-/media/alias/player-headshot/{atp_id}",
                     ]
+                    img_headers = {
+                        "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+                        "Accept-Language": "en-US,en;q=0.9",
+                        "Referer": "https://www.atptour.com/en/players",
+                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                        "sec-ch-ua": '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+                        "sec-ch-ua-mobile": "?0",
+                        "sec-ch-ua-platform": '"Windows"',
+                        "sec-fetch-dest": "image",
+                        "sec-fetch-mode": "no-cors",
+                        "sec-fetch-site": "same-origin",
+                    }
                     for c_url in candidates:
                         try:
-                            r_img = session.get(c_url, timeout=5.0)
+                            time.sleep(0.2)
+                            r_img = session.get(c_url, headers=img_headers, timeout=8.0)
                             if r_img.status_code == 200:
                                 # Reject ATP default empty grey silhouette (exactly 4729 bytes)
                                 if len(r_img.content) == 4729:
