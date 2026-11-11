@@ -9,6 +9,7 @@ import re
 import tempfile
 import time
 from typing import Any, Dict, Optional, Set, Tuple
+import weakref
 
 try:
     from PIL import Image, ImageDraw, ImageFont
@@ -67,6 +68,16 @@ class BannerService:
 
         self._font_bold_path = self._find_font(bold=True)
         self._font_regular_path = self._find_font(bold=False)
+        self._poster_locks: weakref.WeakValueDictionary = weakref.WeakValueDictionary()
+
+    def _get_poster_lock(self, key: str) -> asyncio.Lock:
+        loop_id = id(asyncio.get_running_loop())
+        lock_key = (loop_id, key)
+        lock = self._poster_locks.get(lock_key)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._poster_locks[lock_key] = lock
+        return lock
 
     def _find_font(self, bold: bool = True) -> Optional[str]:
         """Locates a clean sans-serif font across Windows and Linux environments."""
@@ -133,53 +144,66 @@ class BannerService:
 
         cache_file = self.get_cache_path(match_id, status, time_str, has_tvvoo)
         fallback_marker = cache_file.with_suffix(".fallback")
+        has_real_poster = bool(match and match.get("poster") and "nostream" not in str(match.get("poster")))
 
-        if cache_file.exists() and cache_file.stat().st_size > 1000:
-            # If cached as fallback, but match now has an official poster, invalidate and regenerate
-            has_real_poster = bool(match and match.get("poster") and "nostream" not in str(match.get("poster")))
+        def _read_valid_cache() -> Optional[bytes]:
+            if not (cache_file.exists() and cache_file.stat().st_size > 1000):
+                return None
             if fallback_marker.exists() and has_real_poster:
                 try:
                     fallback_marker.unlink(missing_ok=True)
                     cache_file.unlink(missing_ok=True)
                 except Exception:
                     pass
-            else:
-                try:
-                    return cache_file.read_bytes()
-                except Exception as e:
-                    logger.debug("Error reading banner cache %s: %s", cache_file, e)
-
-        # Generate poster
-        poster_bytes, has_base = await self._generate_poster(match, status, time_str, has_tvvoo)
-        if poster_bytes:
+                return None
             try:
-                cache_file.parent.mkdir(parents=True, exist_ok=True)
-                cache_file.write_bytes(poster_bytes)
-                if not has_base:
-                    try:
-                        fallback_marker.touch()
-                    except Exception:
-                        pass
-                else:
-                    try:
-                        fallback_marker.unlink(missing_ok=True)
-                    except Exception:
-                        pass
+                return cache_file.read_bytes()
             except Exception as e:
-                # If primary directory failed to write, log cause and transparently switch to temp storage
-                logger.warning("Failed to save banner cache to primary %s: %s (attempting temp fallback)", cache_file, e)
-                if "streamsport_data" not in str(self.banners_dir):
-                    fallback_dir = Path(tempfile.gettempdir()) / "streamsport_data" / "posters" / "banners"
-                    try:
-                        fallback_dir.mkdir(parents=True, exist_ok=True)
-                        self.banners_dir = fallback_dir
-                        fallback_file = self.banners_dir / cache_file.name
-                        fallback_file.write_bytes(poster_bytes)
-                    except Exception as e2:
-                        logger.warning("Failed to save banner cache to fallback %s: %s (primary error: %s)", self.banners_dir, e2, e)
-                else:
-                    logger.warning("Failed to save banner cache to %s: %s", cache_file, e)
-            return poster_bytes
+                logger.debug("Error reading banner cache %s: %s", cache_file, e)
+                return None
+
+        cached = _read_valid_cache()
+        if cached is not None:
+            return cached
+
+        lock = self._get_poster_lock(cache_file.name)
+        async with lock:
+            # Re-check cache after acquiring single-flight lock
+            cached = _read_valid_cache()
+            if cached is not None:
+                return cached
+
+            # Generate poster and persist to disk before releasing single-flight lock
+            poster_bytes, has_base = await self._generate_poster(match, status, time_str, has_tvvoo)
+            if poster_bytes:
+                try:
+                    cache_file.parent.mkdir(parents=True, exist_ok=True)
+                    cache_file.write_bytes(poster_bytes)
+                    if not has_base:
+                        try:
+                            fallback_marker.touch()
+                        except Exception:
+                            pass
+                    else:
+                        try:
+                            fallback_marker.unlink(missing_ok=True)
+                        except Exception:
+                            pass
+                except Exception as e:
+                    # If primary directory failed to write, log cause and transparently switch to temp storage
+                    logger.warning("Failed to save banner cache to primary %s: %s (attempting temp fallback)", cache_file, e)
+                    if "streamsport_data" not in str(self.banners_dir):
+                        fallback_dir = Path(tempfile.gettempdir()) / "streamsport_data" / "posters" / "banners"
+                        try:
+                            fallback_dir.mkdir(parents=True, exist_ok=True)
+                            self.banners_dir = fallback_dir
+                            fallback_file = self.banners_dir / cache_file.name
+                            fallback_file.write_bytes(poster_bytes)
+                        except Exception as e2:
+                            logger.warning("Failed to save banner cache to fallback %s: %s (primary error: %s)", self.banners_dir, e2, e)
+                    else:
+                        logger.warning("Failed to save banner cache to %s: %s", cache_file, e)
+                return poster_bytes
 
         return None
 

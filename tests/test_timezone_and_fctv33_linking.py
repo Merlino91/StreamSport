@@ -108,7 +108,7 @@ class TestTimezoneAndFctv33Linking(unittest.TestCase):
             }
         ]
 
-        linked = catalog_service.link_official_schedule_to_provider_clusters(official_schedule, provider_clusters)
+        linked = catalog_service.link_official_schedule_to_providers(official_schedule, {"fctv33": provider_clusters})
         self.assertEqual(len(linked), 1)
         m = linked[0]
         self.assertEqual(m["_matched_cluster_id"], "fctv33:2257586")

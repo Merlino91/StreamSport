@@ -33,7 +33,7 @@ class DBService:
         cached_path = getattr(self._local, "conn_path", None)
         if cached_conn is not None and cached_path == target_path:
             try:
-                cached_conn.total_changes
+                _ = cached_conn.total_changes
                 return cached_conn
             except (sqlite3.ProgrammingError, sqlite3.OperationalError):
                 self._local.conn = None
@@ -318,16 +318,6 @@ class DBService:
         except Exception as e:
             logger.debug("Failed to save poster to cache for %s: %s", query_key, e)
 
-    def clear_failed_poster_cache(self):
-        """Clears all 'not_found' entries from thesportsdb_cache so they can be re-evaluated."""
-        try:
-            with self._get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute("DELETE FROM thesportsdb_cache WHERE status = 'not_found'")
-                conn.commit()
-        except Exception as e:
-            logger.debug("Failed to clear failed poster cache: %s", e)
-
     def get_match_by_id(self, match_id: str) -> Optional[Dict[str, Any]]:
         """Retrieves a single match from the database by ID."""
         try:
@@ -414,9 +404,6 @@ class DBService:
             return 0
 
     # Asynchronous non-blocking wrappers using asyncio.to_thread
-    async def upsert_matches_async(self, matches: List[Dict[str, Any]]) -> None:
-        return await asyncio.to_thread(self.upsert_matches, matches)
-
     async def save_matches_async(self, matches: List[Dict[str, Any]]) -> None:
         return await asyncio.to_thread(self.save_matches, matches)
 
@@ -440,9 +427,6 @@ class DBService:
 
     async def save_poster_to_cache_async(self, query_key: str, thumb_url: Optional[str], status: str) -> None:
         return await asyncio.to_thread(self.save_poster_to_cache, query_key, thumb_url, status)
-
-    async def clear_failed_poster_cache_async(self) -> None:
-        return await asyncio.to_thread(self.clear_failed_poster_cache)
 
     def _row_to_match(self, row: sqlite3.Row) -> Dict[str, Any]:
         sources = []
@@ -544,19 +528,6 @@ class DBService:
                 conn.execute("DELETE FROM tennis_athletes_cache WHERE slug = ?", (slug,))
         except Exception as e:
             logger.warning("Error deleting tennis athlete '%s': %s", slug, e)
-
-    def purge_contaminated_tennis_athletes(self):
-        """Purges any legacy banner/logo entries erroneously cached from WTA Open Graph or placeholders."""
-        try:
-            with self._get_connection() as conn:
-                conn.execute("""
-                    DELETE FROM tennis_athletes_cache 
-                    WHERE LOWER(image_url) LIKE '%home-share%' 
-                       OR LOWER(image_url) LIKE '%logo%' 
-                       OR LOWER(image_url) LIKE '%banner%'
-                """)
-        except Exception as e:
-            logger.warning("Error purging contaminated tennis athletes: %s", e)
 
 
 db_service = DBService()

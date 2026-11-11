@@ -89,7 +89,7 @@ class TestCanonicalDeduplication(unittest.TestCase):
         self.assertEqual(cat_b, "calcio_estero")
         self.assertEqual(genre_b, "Bundesliga e Ligue 1")
 
-        # 4. Deduplication: A simulcast show and a 1v1 match MUST NEVER merge
+        # 4. Top-Down isolation: A simulcast show and a 1v1 match MUST NEVER link
         now_ms = 1792000000000
         sim_match = {
             "id": "dlhd-the-golazo-show-179200",
@@ -105,20 +105,14 @@ class TestCanonicalDeduplication(unittest.TestCase):
             "_silo": "football",
             "sources": [{"id": "s2", "name": "Sky Sport Uno"}]
         }
-        merged = self.cs.merge_and_deduplicate([single_match], [sim_match])
-        self.assertEqual(len(merged), 2, "Simulcast show must NEVER merge with a 1v1 match!")
+        linked_isolated = self.cs.link_official_schedule_to_providers([single_match], {"prov": [sim_match]})
+        self.assertEqual(len(linked_isolated[0]["sources"]), 1, "Simulcast show must NEVER link onto a 1v1 match!")
 
-        # 5. Deduplication: Two identical simulcast shows within the window DO merge
-        sim_match_2 = {
-            "id": "streamed-golazo-show-179200",
-            "title": "The Golazo Show",
-            "date": now_ms + 600000,
-            "_silo": "football",
-            "sources": [{"id": "s3", "name": "CBS Sports"}]
-        }
-        merged_sims = self.cs.merge_and_deduplicate([sim_match], [sim_match_2])
-        self.assertEqual(len(merged_sims), 1, "Two identical simulcast shows must merge into one card!")
-        self.assertEqual(len(merged_sims[0]["sources"]), 2)
+        # 5. Canonical metadata lookup for simulcast shows
+        from app.services.canonical_competition_service import get_simulcast_info
+        sim_info = get_simulcast_info("The Golazo Show")
+        self.assertIsNotNone(sim_info)
+        self.assertEqual(sim_info["canonical"], "football_uefa_cl")
 
     def test_competition_conflict(self):
         # Direct conflicts in same silo
@@ -134,10 +128,12 @@ class TestCanonicalDeduplication(unittest.TestCase):
         self.assertFalse(is_competition_conflict(None, "basketball_nba"))
 
     def test_weighted_deduplication_merge(self):
-        # 1. Matching competition boost
+        # 1. Matching competition links cleanly
         primary = [{
-            "id": "streamed-inter-juve",
+            "id": "diretta-inter-juve",
             "title": "FC Internazionale vs Juventus",
+            "home": "FC Internazionale",
+            "away": "Juventus",
             "date": 1791838800000,
             "_silo": "football",
             "category": "football",
@@ -153,45 +149,45 @@ class TestCanonicalDeduplication(unittest.TestCase):
             "canonical_competition": "football_serie_a",
             "sources": [{"source": "dlhd", "id": "200"}],
         }]
-        merged = self.cs.merge_and_deduplicate(primary, secondary)
-        self.assertEqual(len(merged), 1)
-        self.assertEqual(len(merged[0]["sources"]), 2)
+        linked = self.cs.link_official_schedule_to_providers(primary, {"dlhd": secondary})
+        self.assertEqual(len(linked), 1)
+        self.assertEqual(len(linked[0]["sources"]), 2)
 
-        # 2. Conflicting competition penalty (-0.20) prevents false merge on youth match
+        # 2. Conflicting youth/competition trait prevents false link on senior match
         sec_conflicting = [{
             "id": "dlhd-inter-juve-primavera",
             "title": "Inter Primavera vs Juventus Primavera",
-            "date": 1791838800000 + 20 * 60 * 1000,  # 20 min offset
+            "date": 1791838800000 + 20 * 60 * 1000,
             "_silo": "football",
             "category": "football",
-            "canonical_competition": "football_primavera",  # Conflicting!
+            "canonical_competition": "football_primavera",
             "sources": [{"source": "dlhd", "id": "300"}],
         }]
-        merged_conflict = self.cs.merge_and_deduplicate(primary, sec_conflicting)
-        self.assertEqual(len(merged_conflict), 2, "Conflicting leagues with time offset should not merge!")
+        linked_conflict = self.cs.link_official_schedule_to_providers(primary, {"dlhd": sec_conflicting})
+        self.assertEqual(len(linked_conflict[0]["sources"]), 1, "Conflicting youth leagues must not link onto senior match!")
 
-        # 3. Soft time penalty (within 45 min merges, > 45 min does not)
+        # 3. Time window: within 45 min links, > 45 min does not
         sec_time_ok = [{
             "id": "dlhd-inter-juve-time-ok",
             "title": "FC Internazionale vs Juventus",
-            "date": 1791838800000 + 20 * 60 * 1000,  # +20 min (soft penalty -0.04)
+            "date": 1791838800000 + 20 * 60 * 1000,
             "_silo": "football",
             "category": "football",
             "sources": [{"source": "dlhd", "id": "400"}],
         }]
-        merged_time_ok = self.cs.merge_and_deduplicate(primary, sec_time_ok)
-        self.assertEqual(len(merged_time_ok), 1, "20-min offset with matching teams should still merge!")
+        linked_time_ok = self.cs.link_official_schedule_to_providers(primary, {"dlhd": sec_time_ok}, time_window_minutes=45.0)
+        self.assertEqual(len(linked_time_ok[0]["sources"]), 2, "20-min offset with matching teams should still link!")
 
         sec_time_fail = [{
             "id": "dlhd-inter-juve-time-fail",
             "title": "FC Internazionale vs Juventus",
-            "date": 1791838800000 + 50 * 60 * 1000,  # +50 min (>45 min hard cutoff)
+            "date": 1791838800000 + 50 * 60 * 1000,
             "_silo": "football",
             "category": "football",
             "sources": [{"source": "dlhd", "id": "500"}],
         }]
-        merged_time_fail = self.cs.merge_and_deduplicate(primary, sec_time_fail)
-        self.assertEqual(len(merged_time_fail), 2, ">45 min should never merge!")
+        linked_time_fail = self.cs.link_official_schedule_to_providers(primary, {"dlhd": sec_time_fail}, time_window_minutes=45.0)
+        self.assertEqual(len(linked_time_fail[0]["sources"]), 1, "Outside time window must never link!")
 
     def test_latin_american_serie_leagues_classification(self):
         # 1. Brazil Serie B detection & classification

@@ -191,6 +191,20 @@ class LiveManifestManager:
             for k in oldest_keys:
                 self.sessions.pop(k, None)
 
+    @staticmethod
+    def _log_refresh_error(task: asyncio.Task) -> None:
+        if not task.cancelled():
+            exc = task.exception()
+            if exc:
+                logger.warning("[LiveManifest] Background refresh task failed: %s", exc)
+
+    def _schedule_background_refresh(self, session: LiveStreamSession, play_url: str, client_ip: Optional[str]) -> None:
+        """Schedules a single background session refresh and holds a strong reference on the session."""
+        if session.refresh_task and not session.refresh_task.done():
+            return
+        session.refresh_task = asyncio.create_task(self._refresh_session(session, play_url, client_ip))
+        session.refresh_task.add_done_callback(self._log_refresh_error)
+
     async def get_live_manifest(self, play_url: str, client_ip: Optional[str] = None) -> Optional[str]:
         if not is_safe_vavoo_play_url(play_url):
             logger.warning("[LiveManifest] Rejected unsafe Vavoo play URL (SSRF protection): %s", play_url[:60] if play_url else "None")
@@ -205,9 +219,9 @@ class LiveManifestManager:
             session = self.sessions.get(key)
             if session and session.valid_until > now:
                 session.last_fetched_at = now
-                if (session.valid_until - now) < 300 and (not session.refresh_task or session.refresh_task.done()):
+                if (session.valid_until - now) < 300:
                     # Proactive non-blocking background token renewal when < 5 mins left
-                    session.refresh_task = asyncio.create_task(self._refresh_session(session, play_url, client_ip))
+                    self._schedule_background_refresh(session, play_url, client_ip)
             else:
                 # Initial resolution or token renewal required; coalesce concurrent requests
                 if key in self._in_flight and not self._in_flight[key].done():
@@ -242,7 +256,7 @@ class LiveManifestManager:
             # If we have an existing recent manifest (< 25 seconds), serve immediately to prevent player buffer stall!
             if session.last_manifest and (now - session.last_manifest_time) < 25.0:
                 if any(err in str(exc).lower() for err in ("401", "403", "auth")):
-                    asyncio.create_task(self._refresh_session(session, play_url, client_ip))
+                    self._schedule_background_refresh(session, play_url, client_ip)
                 return session.last_manifest
 
             # Synchronous refresh
@@ -477,6 +491,7 @@ class TvVooService:
         "Italy": {
             # Sky Sport 24 (LCN 200)
             "sky sport 24": "sky sport 24",
+            "sky sport 24 hd": "sky sport 24",
             "sky sports 24": "sky sport 24",
             "sky sport24": "sky sport 24",
             "ss24": "sky sport 24",
@@ -517,13 +532,16 @@ class TvVooService:
             "sky 204": "sky sport arena",
             "204": "sky sport arena",
 
-            # Sky Sport Golf (LCN 205)
-            "sky sport golf": "sky sport golf",
-            "sky sport golf hd": "sky sport golf",
-            "sky golf": "sky sport golf",
-            "sky sport 205": "sky sport golf",
-            "sky 205": "sky sport golf",
-            "205": "sky sport golf",
+            # Sky Sport Basket (LCN 205, ex Sky Sport NBA)
+            "sky sport basket": "sky sport basket",
+            "sky sport basket hd": "sky sport basket",
+            "sky basket": "sky sport basket",
+            "sky sport nba": "sky sport basket",
+            "sky sport nba hd": "sky sport basket",
+            "sky nba": "sky sport basket",
+            "sky sport 205": "sky sport basket",
+            "sky 205": "sky sport basket",
+            "205": "sky sport basket",
 
             # Sky Sport Max (LCN 206)
             "sky sport max": "sky sport max",
@@ -551,16 +569,15 @@ class TvVooService:
             "sky 208": "sky sport motogp",
             "208": "sky sport motogp",
 
-            # Sky Sport NBA (LCN 209)
-            "sky sport nba": "sky sport nba",
-            "sky sport nba hd": "sky sport nba",
-            "sky nba": "sky sport nba",
-            "sky sport 209": "sky sport nba",
-            "sky 209": "sky sport nba",
-            "209": "sky sport nba",
+            # Sky Sport Golf (LCN 209)
+            "sky sport golf": "sky sport golf",
+            "sky sport golf hd": "sky sport golf",
+            "sky golf": "sky sport golf",
+            "sky sport 209": "sky sport golf",
+            "sky 209": "sky sport golf",
+            "209": "sky sport golf",
 
-            # Sky Sport Mix & Serie A
-            "sky sport mix": "sky sport mix",
+            # Sky Sport Serie A (Legacy)
             "sky sport serie a": "sky sport serie a",
 
             # Sky Sport Event Feed (Dedicated separate feed, NOT collapsed into Uno!)
@@ -568,20 +585,14 @@ class TvVooService:
             "sky sport it": "sky sport",
             "sky sport eventi": "sky sport",
 
-            # Eurosport (LCN 210, 211)
+            # Eurosport (explicit channels & legacy LCN keywords)
             "eurosport": "eurosport 1",
             "eurosport 1": "eurosport 1",
             "eurosport 1 hd": "eurosport 1",
             "eurosport 210": "eurosport 1",
-            "sky 210": "eurosport 1",
-            "sky sport 210": "eurosport 1",
-            "210": "eurosport 1",
             "eurosport 2": "eurosport 2",
             "eurosport 2 hd": "eurosport 2",
             "eurosport 211": "eurosport 2",
-            "sky 211": "eurosport 2",
-            "sky sport 211": "eurosport 2",
-            "211": "eurosport 2",
 
             # SuperTennis (LCN 212) - Linear 24/7 Channel
             "supertennis": "supertennis",
@@ -648,18 +659,27 @@ class TvVooService:
             "sky sport 217": "dazn 4",
             "217": "dazn 4",
 
-            # Sky Sport 4K (LCN 213) & Sky Sport Legend (LCN 210) & Mix (LCN 211)
+            # Sky Sport Legend (LCN 210), Sky Sport Mix (LCN 211) & Sky Sport 4K (LCN 213)
+            "sky sport legend": "sky sport legend",
+            "sky sport legend hd": "sky sport legend",
+            "sky legend": "sky sport legend",
+            "sky sport 210": "sky sport legend",
+            "sky 210": "sky sport legend",
+            "210": "sky sport legend",
+
+            "sky sport mix": "sky sport mix",
+            "sky sport mix hd": "sky sport mix",
+            "sky mix": "sky sport mix",
+            "sky sport mix 211": "sky sport mix",
+            "sky sport 211": "sky sport mix",
+            "sky 211": "sky sport mix",
+            "211": "sky sport mix",
+
             "sky sport 4k": "sky sport 4k",
             "sky 4k": "sky sport 4k",
             "sky sport 213": "sky sport 4k",
             "sky 213": "sky sport 4k",
             "213": "sky sport 4k",
-            "sky sport legend": "sky sport legend",
-            "sky legend": "sky sport legend",
-            "sky sport 210": "sky sport legend",
-            "sky 210": "sky sport legend",
-            "sky sport mix 211": "sky sport mix",
-            "sky 211": "sky sport mix",
 
             # Sky Sport Calcio Contemporanea (LCN 251 - 259) - Mappatura Difensiva & ID Ufficiali
             "sky sport 251": "sky sport 251",
@@ -1121,7 +1141,7 @@ class TvVooService:
         "sky sport arena": "Sky Sport Arena",
         "sky sport f1": "Sky Sport F1",
         "sky sport motogp": "Sky Sport MotoGP",
-        "sky sport nba": "Sky Sport NBA",
+        "sky sport basket": "Sky Sport Basket",
         "sky sport 24": "Sky Sport 24",
         "sky sport golf": "Sky Sport Golf",
         "sky sport max": "Sky Sport Max",
@@ -1672,16 +1692,6 @@ class TvVooService:
             results = self.get_channel_streams("sportitalia solocalcio", country=country) or self.get_channel_streams("sportitalia plus", country=country)
 
         return results
-
-    def has_channel(
-        self,
-        channel_name: Optional[str] = None,
-        country: Optional[str] = None,
-        sky_id: Optional[Any] = None,
-        tivusat_id: Optional[Any] = None,
-    ) -> bool:
-        """Returns True if the requested channel exists and has at least one valid stream."""
-        return len(self.get_channel_streams(channel_name=channel_name, country=country, sky_id=sky_id, tivusat_id=tivusat_id)) > 0
 
     def enrich_matches_with_tvvoo(self, matches: List[Dict[str, Any]]) -> int:
         """

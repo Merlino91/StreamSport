@@ -94,7 +94,7 @@ class TestFCTV33Integration(unittest.IsolatedAsyncioTestCase):
             }
         ]
 
-        merged = catalog_service.merge_and_deduplicate_by_silos(primary, fctv)
+        merged = catalog_service.link_official_schedule_to_providers(primary, {"fctv33": fctv})
         self.assertEqual(len(merged), 1)
         res = merged[0]
         # Check that both sources are present

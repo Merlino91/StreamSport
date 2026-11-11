@@ -1,4 +1,5 @@
 import asyncio
+import datetime
 import os
 import sys
 import time
@@ -561,12 +562,15 @@ class TheSportsDBTestCase(unittest.IsolatedAsyncioTestCase):
         mock_client = AsyncMock()
         mock_client.get.return_value = mock_response
 
+        fixed_date_ms = int(
+            datetime.datetime(2026, 11, 8, 15, 0, tzinfo=datetime.timezone.utc).timestamp() * 1000
+        )
         with patch.object(thesportsdb_service, "_get_client", return_value=mock_client):
             thumb = asyncio.run(
                 thesportsdb_service.search_event_thumb_html(
                     "VfL Bochum",
                     "Karlsruher SC",
-                    match_date_ms=int(time.time() * 1000),
+                    match_date_ms=fixed_date_ms,
                     expected_silo="football",
                 )
             )

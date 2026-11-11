@@ -27,7 +27,6 @@ PUBLIC_URL = os.getenv("PUBLIC_URL", os.getenv("BASE_URL", "")).strip().rstrip("
 ENABLE_STREAMED = os.getenv("ENABLE_STREAMED", "false").lower() in ("true", "1", "yes")
 STREAMED_API_HOST = os.getenv("STREAMED_API_HOST", "streamed.pk")
 STREAMED_FALLBACK_HOSTS = ["streamed.su", "streamed.pk"]
-STREAMED_DOH_RESOLVER = "https://cloudflare-dns.com/dns-query"
 STREAMED_CACHE_TTL = int(os.getenv("STREAMED_CACHE_TTL", "3600"))  # seconds (1 hour)
 CATALOG_SYNC_INTERVAL = int(os.getenv("CATALOG_SYNC_INTERVAL", "3600"))  # seconds (1 hour)
 
@@ -92,8 +91,6 @@ ADDON_DESCRIPTION = "Eventi sportivi live con catalogo a generi, canali italiani
 
 # Dedicated Sport Catalogs Definitions
 CATALOG_TYPE = "Live Sports"
-CATALOG_ID = "streamsport_events"  # Fallback/legacy catalog ID
-CATALOG_NAME = "Tutti gli Eventi"
 
 CATALOG_DEFINITIONS = [
     {
@@ -222,8 +219,6 @@ CATALOG_DEFINITIONS = [
     },
 ]
 
-# Legacy lookup map (kept for backwards compatibility if needed)
-CATALOG_MAP = {c["id"]: c for c in CATALOG_DEFINITIONS}
 SPORT_GENRES = [g for c in CATALOG_DEFINITIONS for g in c["genres"]]
 
 # Generate flat standalone catalogs for Nuvio to prevent Collections collision/crash

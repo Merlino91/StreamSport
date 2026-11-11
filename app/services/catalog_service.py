@@ -12,8 +12,6 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 from app.config import (
     CATALOG_DEFINITIONS,
-    CATALOG_ID,
-    CATALOG_NAME,
     CATALOG_SYNC_INTERVAL,
     CATALOG_TYPE,
     ENABLE_REPLAYS,
@@ -24,7 +22,6 @@ from app.config import (
 )
 from app.services.daddylive_api import daddylive_api
 from app.services.db_service import db_service
-from app.services.espn_service import espn_service
 from app.services.genre_classifier import genre_classifier
 from app.services.ocblacktop_service import ocblacktop_service
 from app.services.streamed_api import streamed_api
@@ -50,7 +47,6 @@ from app.services.team_matching import extract_team_name, clean_team_name
 from app.services.canonical_competition_service import (
     detect_canonical_competition,
     get_canonical_display_name,
-    is_competition_conflict,
     is_redzone_event,
     is_simulcast_event,
     get_simulcast_info,
@@ -600,74 +596,6 @@ class CatalogService:
         c2 = cls.get_canonical_silo({"_silo": s2, "category": s2})
         return c1 == c2
 
-    @staticmethod
-    def _is_token_match(tokens1: str, tokens2: str) -> bool:
-        """
-        Determines if two token strings represent the exact same match.
-        Robust against:
-        1. Inverted team order (Home vs Away vs Away vs Home)
-        2. Spelling / transliteration differences (Turkey vs Türkiye, Munich vs München)
-        3. Minor competition name additions
-        Guarantees that rival clubs (e.g. Real Madrid vs Atletico Madrid) NEVER merge.
-        """
-        w1 = [w for w in tokens1.split() if len(w) > 1]
-        w2 = [w for w in tokens2.split() if len(w) > 1]
-        if not w1 or not w2:
-            return False
-        if w1 == w2:
-            return True
-
-        b1 = [max(SequenceMatcher(None, x, y).ratio() for y in w2) for x in w1]
-        b2 = [max(SequenceMatcher(None, y, x).ratio() for x in w1) for y in w2]
-        avg1 = sum(b1) / len(b1)
-        avg2 = sum(b2) / len(b2)
-        min1 = min(b1)
-        min2 = min(b2)
-
-        # Equal word count: each word must have a strong counterpart (ratio >= 0.70)
-        # and high overall similarity (average >= 0.80)
-        if len(w1) == len(w2):
-            return (avg1 + avg2) / 2.0 >= 0.80 and min1 >= 0.70 and min2 >= 0.70
-
-        # Unequal word count: the smaller title (at least 2 words) must be fully and cleanly covered in the larger title
-        if len(w1) < len(w2):
-            return len(w1) >= 2 and avg1 >= 0.85 and min1 >= 0.70
-        else:
-            return len(w2) >= 2 and avg2 >= 0.85 and min2 >= 0.70
-
-    @staticmethod
-    def _clean_team_str(s: str) -> str:
-        return clean_team_name(s)
-
-    @classmethod
-    def _teams_match_fuzzy(cls, t1: Optional[Dict[str, Any]], t2: Optional[Dict[str, Any]]) -> bool:
-        """
-        Symmetrically checks if two structured teams objects match (direct order or inverted).
-        Returns True if (Home1 ≈ Home2 and Away1 ≈ Away2) OR (Home1 ≈ Away2 and Away1 ≈ Home2).
-        """
-        if not isinstance(t1, dict) or not isinstance(t2, dict):
-            return False
-        h1 = cls._clean_team_str(extract_team_name(t1.get("home")))
-        a1 = cls._clean_team_str(extract_team_name(t1.get("away")))
-        h2 = cls._clean_team_str(extract_team_name(t2.get("home")))
-        a2 = cls._clean_team_str(extract_team_name(t2.get("away")))
-        if not h1 or not a1 or not h2 or not a2:
-            return False
-
-        # Direct comparison (Home1 vs Home2, Away1 vs Away2)
-        d1 = SequenceMatcher(None, h1, h2).ratio()
-        d2 = SequenceMatcher(None, a1, a2).ratio()
-        if d1 >= 0.75 and d2 >= 0.75:
-            return True
-
-        # Inverted comparison (Away @ Home / provider reversed: Home1 vs Away2, Away1 vs Home2)
-        i1 = SequenceMatcher(None, h1, a2).ratio()
-        i2 = SequenceMatcher(None, a1, h2).ratio()
-        if i1 >= 0.75 and i2 >= 0.75:
-            return True
-
-        return False
-
     @classmethod
     def calc_similarity(cls, tokens1: str, tokens2: str) -> float:
         """Calculates token-level similarity ratio between 0.0 and 1.0."""
@@ -689,223 +617,6 @@ class CatalogService:
             token_ratio = (r1 + r2) / 2.0
             return max(token_ratio, seq)
         return seq
-
-    def merge_and_deduplicate(
-        self,
-        primary_matches: List[Dict[str, Any]],
-        secondary_matches: List[Dict[str, Any]],
-    ) -> List[Dict[str, Any]]:
-        merged_list: List[Dict[str, Any]] = [dict(m) for m in primary_matches]
-        id_to_idx: Dict[str, int] = {}
-        for idx, m in enumerate(merged_list):
-            m_id = m.get("id")
-            if m_id:
-                id_to_idx[str(m_id)] = idx
-            if m.get("title") and "raw_titles" not in m:
-                m["raw_titles"] = [m["title"]]
-            if m.get("teams") and "alt_teams" not in m:
-                m["alt_teams"] = [m["teams"]]
-
-        for m2 in secondary_matches:
-            m2_id = m2.get("id")
-            m2_tokens = self._clean_tokens(m2.get("title", ""))
-            m2_teams = self._get_teams_key(m2)
-            m2_date = m2.get("date") or 0
-            m2_silo = self.get_canonical_silo(m2)
-            is_m2_simulcast = is_simulcast_event(m2.get("title", "")) or is_simulcast_event(str(m2_id or ""))
-
-            matched_idx = -1
-
-            # 0. Direct ID matching: identical ID is 100% the exact same match! (O(1) instant hash lookup)
-            if m2_id and str(m2_id) in id_to_idx:
-                matched_idx = id_to_idx[str(m2_id)]
-
-            # 1. Similarity and weighted scoring matching within the same silo
-            if matched_idx < 0:
-                for idx, existing in enumerate(merged_list):
-                    ex_silo = self.get_canonical_silo(existing)
-                    if ex_silo != m2_silo:
-                        continue
-
-                    is_ex_simulcast = is_simulcast_event(existing.get("title", "")) or is_simulcast_event(str(existing.get("id", "")))
-
-                    # RULE: A simulcast show and a regular 1v1 match MUST NEVER merge!
-                    if is_m2_simulcast != is_ex_simulcast:
-                        continue
-
-                    ex_date = existing.get("date") or 0
-                    time_diff_ms = abs(ex_date - m2_date) if ex_date and m2_date else 0
-                    time_diff_min = time_diff_ms / 60000.0
-
-                    # 1a. Special Simulcast & Multi-match show matching (coincides within 4h window)
-                    if is_m2_simulcast and is_ex_simulcast:
-                        if time_diff_min <= 240:
-                            m2_info = get_simulcast_info(m2.get("title", "")) or get_simulcast_info(str(m2_id or ""))
-                            ex_info = get_simulcast_info(existing.get("title", "")) or get_simulcast_info(str(existing.get("id", "")))
-                            if m2_info and ex_info and m2_info["title"] == ex_info["title"]:
-                                matched_idx = idx
-                                break
-                            if self.calc_similarity(m2_tokens, self._clean_tokens(existing.get("title", ""))) >= 0.70:
-                                matched_idx = idx
-                                break
-                        continue
-
-                    # 1b. Date Compatibility: hard cutoff at 45m for regular matches
-                    if ex_date and m2_date:
-                        if time_diff_min > 45:
-                            continue
-
-                    # 1c. Base Team / Title Similarity
-                    ex_teams = self._get_teams_key(existing)
-                    ex_tokens = self._clean_tokens(existing.get("title", ""))
-
-                    base_sim = 0.0
-                    if m2_teams and ex_teams:
-                        if m2_teams == ex_teams:
-                            base_sim = 1.0
-                        elif self._teams_match_fuzzy(m2.get("teams"), existing.get("teams")):
-                            base_sim = 0.85
-                        else:
-                            base_sim = self.calc_similarity(m2_tokens, ex_tokens)
-                    elif m2_tokens and ex_tokens:
-                        base_sim = self.calc_similarity(m2_tokens, ex_tokens)
-
-                    # Backwards-compatible token match boost
-                    if self._is_token_match(m2_tokens, ex_tokens) and base_sim < 0.75:
-                        base_sim = 0.80
-
-                    if base_sim < 0.45:
-                        continue
-
-                    # 1d. Soft Time Penalty
-                    time_penalty = 0.0
-                    if time_diff_min > 30:
-                        time_penalty = 0.08
-                    elif time_diff_min > 15:
-                        time_penalty = 0.04
-
-                    # 1e. Competition Modifier (+0.08 bonus if matching, -0.20 if in direct conflict, 0.0 neutral if either is None)
-                    c1 = existing.get("canonical_competition")
-                    c2 = m2.get("canonical_competition")
-                    comp_mod = 0.0
-                    if c1 and c2:
-                        if c1 == c2:
-                            comp_mod = 0.08
-                        elif is_competition_conflict(c1, c2):
-                            comp_mod = -0.20
-
-                    final_score = base_sim - time_penalty + comp_mod
-
-                    # For individual / non-team events without structured teams, require a higher threshold and never merge opposing genders
-                    if not m2_teams and not ex_teams:
-                        is_m2_w = bool(re.search(r"\b(women|femminile|femminili|ladies|damen|dames)\b", (m2.get("title") or "") + " " + (m2.get("competition") or ""), re.I))
-                        is_ex_w = bool(re.search(r"\b(women|femminile|femminili|ladies|damen|dames)\b", (existing.get("title") or "") + " " + (existing.get("competition") or ""), re.I))
-                        if is_m2_w != is_ex_w:
-                            continue
-                        if final_score < 0.78:
-                            continue
-
-                    if final_score >= 0.68:
-                        matched_idx = idx
-                        break
-
-            if matched_idx >= 0:
-                existing = merged_list[matched_idx]
-                existing_sources = existing.setdefault("sources", [])
-                existing_ids = {str(s.get("id")) for s in existing_sources if isinstance(s, dict)}
-
-                new_tvvoo = []
-                new_other = []
-                for s in m2.get("sources", []):
-                    if isinstance(s, dict) and str(s.get("id")) not in existing_ids:
-                        existing_ids.add(str(s.get("id")))
-                        if s.get("source") == "tvvoo":
-                            new_tvvoo.append(s)
-                        else:
-                            new_other.append(s)
-
-                if new_tvvoo or new_other:
-                    existing["sources"] = new_tvvoo + existing_sources + new_other
-
-                # Preserve all variant titles across merged providers
-                raw_titles = existing.setdefault("raw_titles", [])
-                if existing.get("title") and existing["title"] not in raw_titles:
-                    raw_titles.append(existing["title"])
-                m2_title = m2.get("title")
-                if m2_title and m2_title not in raw_titles:
-                    raw_titles.append(m2_title)
-
-                # Preserve all alternative team objects across merged providers
-                alt_teams = existing.setdefault("alt_teams", [])
-                if existing.get("teams") and existing["teams"] not in alt_teams:
-                    alt_teams.append(existing["teams"])
-                m2_teams = m2.get("teams")
-                if m2_teams and m2_teams not in alt_teams:
-                    alt_teams.append(m2_teams)
-
-                if not existing.get("teams") and m2.get("teams"):
-                    existing["teams"] = m2["teams"]
-                p_ex = str(existing.get("poster") or "")
-                p_m2 = str(m2.get("poster") or "")
-                if (not p_ex or "nostream" in p_ex) and (p_m2 and "nostream" not in p_m2):
-                    existing["poster"] = m2["poster"]
-                elif p_m2.startswith("http") and not p_ex.startswith("http"):
-                    existing["poster"] = m2["poster"]
-                if not existing.get("date") and m2.get("date"):
-                    existing["date"] = m2["date"]
-                if not existing.get("canonical_competition") and m2.get("canonical_competition"):
-                    existing["canonical_competition"] = m2["canonical_competition"]
-                if not existing.get("competition") and m2.get("competition"):
-                    existing["competition"] = m2["competition"]
-                if not existing.get("_competition") and m2.get("_competition"):
-                    existing["_competition"] = m2["_competition"]
-                if not existing.get("_silo") and m2.get("_silo"):
-                    existing["_silo"] = m2["_silo"]
-                if not existing.get("_fctv33_id") and m2.get("_fctv33_id"):
-                    existing["_fctv33_id"] = m2["_fctv33_id"]
-                if not existing.get("_sport_type") and m2.get("_sport_type"):
-                    existing["_sport_type"] = m2["_sport_type"]
-            else:
-                m2_dict = dict(m2)
-                if m2_dict.get("title") and "raw_titles" not in m2_dict:
-                    m2_dict["raw_titles"] = [m2_dict["title"]]
-                if m2_dict.get("teams") and "alt_teams" not in m2_dict:
-                    m2_dict["alt_teams"] = [m2_dict["teams"]]
-                if m2_id:
-                    id_to_idx[str(m2_id)] = len(merged_list)
-                merged_list.append(m2_dict)
-
-
-        return merged_list
-
-    def merge_and_deduplicate_by_silos(
-        self,
-        primary_matches: List[Dict[str, Any]],
-        secondary_matches: List[Dict[str, Any]],
-    ) -> List[Dict[str, Any]]:
-        """
-        Groups matches by sport silo and performs deduplication within each silo,
-        completely eliminating cross-sport collisions and accelerating merge operations.
-        """
-        from collections import defaultdict
-        p_by_silo = defaultdict(list)
-        s_by_silo = defaultdict(list)
-
-        for m in primary_matches:
-            silo = self.get_canonical_silo(m)
-            p_by_silo[silo].append(m)
-
-        for m in secondary_matches:
-            silo = self.get_canonical_silo(m)
-            s_by_silo[silo].append(m)
-
-        all_silos = set(p_by_silo.keys()) | set(s_by_silo.keys())
-        all_merged: List[Dict[str, Any]] = []
-        for silo in sorted(all_silos):
-            merged_silo = self.merge_and_deduplicate(p_by_silo[silo], s_by_silo[silo])
-            all_merged.extend(merged_silo)
-
-        return all_merged
 
     def link_official_schedule_to_providers(
         self,
@@ -935,7 +646,7 @@ class CatalogService:
 
         for off in official_schedule:
             off_copy = dict(off)
-            off_copy.setdefault("sources", [])
+            off_copy["sources"] = list(off.get("sources") or [])
             off_silo = off_copy.get("_silo") or self.get_canonical_silo(off_copy)
             off_date = off_copy.get("date") or 0
 
@@ -992,19 +703,6 @@ class CatalogService:
             linked_schedule.append(off_copy)
 
         return linked_schedule
-
-    def link_official_schedule_to_provider_clusters(
-        self,
-        official_schedule: List[Dict[str, Any]],
-        provider_clusters: List[Dict[str, Any]],
-        time_window_minutes: float = 60.0,
-    ) -> List[Dict[str, Any]]:
-        """Backwards-compatible wrapper delegating to direct provider linking."""
-        return self.link_official_schedule_to_providers(
-            official_schedule,
-            {"clusters": provider_clusters},
-            time_window_minutes=time_window_minutes,
-        )
 
     @classmethod
     def is_real_match(cls, m: Dict[str, Any]) -> bool:
@@ -1115,6 +813,90 @@ class CatalogService:
 
         # All other categories (baseball, hockey, altri_sport) have NO replays
         return False
+
+    @staticmethod
+    def _merge_epg_certified_sessions(
+        linked_schedule: List[Dict[str, Any]],
+        epg_certified_sessions: List[Dict[str, Any]],
+    ) -> None:
+        """Appends certified Italian EPG sessions not already covered by official schedule items."""
+        if not epg_certified_sessions:
+            return
+        from app.services.thesportsdb_service import TheSportsDBService
+
+        orphan_epg = []
+        for ep in epg_certified_sessions:
+            ep_title = (ep.get("title") or "").strip()
+            ep_silo = (ep.get("_silo") or ep.get("category") or "").lower()
+            ep_date = ep.get("date", 0)
+            is_simulcast = is_simulcast_event(ep_title)
+            already_covered = False
+
+            for off in linked_schedule:
+                off_title = (off.get("title") or "").strip()
+                off_silo = (off.get("_silo") or off.get("category") or "").lower()
+                time_diff = abs((off.get("date") or 0) - ep_date)
+
+                if off_silo != ep_silo or time_diff > (60 * 60 * 1000):
+                    continue
+
+                # Simulcast events (e.g. "Diretta Gol", "NFL RedZone") are never covered by a single match
+                if is_simulcast:
+                    if is_simulcast_event(off_title) and ep_title.lower() == off_title.lower():
+                        already_covered = True
+                        break
+                    continue
+
+                if ep_silo == "motor-sports":
+                    m_ser = TheSportsDBService.get_motorsport_series_key(off_title)
+                    e_ser = TheSportsDBService.get_motorsport_series_key(ep_title)
+                    if m_ser and e_ser and m_ser == e_ser:
+                        off_sess = TheSportsDBService.normalize_motorsport_session_name(off_title)
+                        ep_sess = TheSportsDBService.normalize_motorsport_session_name(ep_title)
+                        if off_sess == ep_sess:
+                            already_covered = True
+                            break
+                elif ep_silo == "tennis":
+                    # Tennis multicourt/tournament channel sessions (e.g. "ATP 1000 - Sky Sport Tennis")
+                    # are distinct from single 1v1 matches
+                    if " vs " not in ep_title.lower() and " vs " in off_title.lower():
+                        continue
+                    if ep_title.lower() == off_title.lower():
+                        already_covered = True
+                        break
+                else:
+                    clean_ep = re.sub(r"[^a-zA-Z0-9]+", " ", ep_title.lower()).strip()
+                    clean_off = re.sub(r"[^a-zA-Z0-9]+", " ", off_title.lower()).strip()
+                    if clean_ep == clean_off or SequenceMatcher(None, clean_ep, clean_off).ratio() >= 0.75:
+                        already_covered = True
+                        break
+
+            if not already_covered:
+                orphan_epg.append(ep)
+
+        linked_schedule.extend(orphan_epg)
+
+    def _append_historical_replays(
+        self,
+        linked_schedule: List[Dict[str, Any]],
+        all_db_matches: List[Dict[str, Any]],
+    ) -> None:
+        """Preserves replay-eligible concluded matches (6h-72h) from SQLite when Diretta shifts forward."""
+        if not ENABLE_REPLAYS or not all_db_matches:
+            return
+        existing_ids = {m.get("id") for m in linked_schedule if m.get("id")}
+        now_ms = time.time() * 1000
+        historical_replays = [
+            db_m for db_m in all_db_matches
+            if db_m.get("id") not in existing_ids
+            and self.is_real_match(db_m)
+            and self.is_replay_eligible(db_m)
+            and ((db_m.get("date") or 0) > 0)
+            and (((db_m.get("date") or 0) - now_ms) / 60000 < -self.get_live_window_minutes(db_m))
+        ]
+        if historical_replays:
+            linked_schedule.extend(historical_replays)
+            logger.info("Preserved %d historical replay matches (6h-72h) from SQLite.", len(historical_replays))
 
     async def sync_matches(self, force: bool = False) -> None:
         """
@@ -1236,87 +1018,30 @@ class CatalogService:
                     linked_schedule = self.link_official_schedule_to_providers(
                         official_schedule, providers_map, time_window_minutes=60.0
                     )
-                    if epg_certified_sessions:
-                        orphan_epg = []
-                        for ep in epg_certified_sessions:
-                            ep_title = (ep.get("title") or "").strip()
-                            ep_silo = (ep.get("_silo") or ep.get("category") or "").lower()
-                            ep_date = ep.get("date", 0)
-                            is_simulcast = is_simulcast_event(ep_title)
-                            already_covered = False
-
-                            for off in linked_schedule:
-                                off_title = (off.get("title") or "").strip()
-                                off_silo = (off.get("_silo") or off.get("category") or "").lower()
-                                time_diff = abs((off.get("date") or 0) - ep_date)
-
-                                if off_silo != ep_silo or time_diff > (60 * 60 * 1000):
-                                    continue
-
-                                # Simulcast events (e.g. "Diretta Gol", "NFL RedZone") are never covered by a single match
-                                if is_simulcast:
-                                    if is_simulcast_event(off_title) and ep_title.lower() == off_title.lower():
-                                        already_covered = True
-                                        break
-                                    continue
-
-                                if ep_silo == "motor-sports":
-                                    from app.services.thesportsdb_service import TheSportsDBService
-                                    m_ser = TheSportsDBService.get_motorsport_series_key(off_title)
-                                    e_ser = TheSportsDBService.get_motorsport_series_key(ep_title)
-                                    if m_ser and e_ser and m_ser == e_ser:
-                                        off_sess = TheSportsDBService.normalize_motorsport_session_name(off_title)
-                                        ep_sess = TheSportsDBService.normalize_motorsport_session_name(ep_title)
-                                        if off_sess == ep_sess:
-                                            already_covered = True
-                                            break
-                                elif ep_silo == "tennis":
-                                    # Tennis multicourt/tournament channel sessions (e.g. "ATP 1000 - Sky Sport Tennis")
-                                    # are distinct from single 1v1 matches
-                                    if " vs " not in ep_title.lower() and " vs " in off_title.lower():
-                                        continue
-                                    if ep_title.lower() == off_title.lower():
-                                        already_covered = True
-                                        break
-                                else:
-                                    clean_ep = re.sub(r"[^a-zA-Z0-9]+", " ", ep_title.lower()).strip()
-                                    clean_off = re.sub(r"[^a-zA-Z0-9]+", " ", off_title.lower()).strip()
-                                    if clean_ep == clean_off or SequenceMatcher(None, clean_ep, clean_off).ratio() >= 0.75:
-                                        already_covered = True
-                                        break
-
-                            if not already_covered:
-                                orphan_epg.append(ep)
-                        linked_schedule.extend(orphan_epg)
-
-                    # Preserve historical replay-eligible matches from all_db_matches (between 6h and 72h ago)
-                    # that are no longer part of Diretta's forward-sliding schedule.
-                    if ENABLE_REPLAYS and all_db_matches:
-                        existing_ids = {m.get("id") for m in linked_schedule if m.get("id")}
-                        now_ms = time.time() * 1000
-                        historical_replays = [
-                            db_m for db_m in all_db_matches
-                            if db_m.get("id") not in existing_ids
-                            and self.is_real_match(db_m)
-                            and self.is_replay_eligible(db_m)
-                            and ((db_m.get("date") or 0) > 0)
-                            and (((db_m.get("date") or 0) - now_ms) / 60000 < -self.get_live_window_minutes(db_m))
-                        ]
-                        if historical_replays:
-                            linked_schedule.extend(historical_replays)
-                            logger.info("Preserved %d historical replay matches (6h-72h) from SQLite.", len(historical_replays))
-
+                    self._merge_epg_certified_sessions(linked_schedule, epg_certified_sessions)
+                    self._append_historical_replays(linked_schedule, all_db_matches)
                     all_matches = linked_schedule
                     logger.info("Top-Down Pipeline: linked %d official matches directly to providers.", len(all_matches))
                 else:
-                    logger.warning("Diretta sliding schedule unavailable; falling back to cached active matches in SQLite.")
-                    cached_db = [m for m in all_db_matches if self.is_real_match(m)]
-                    if cached_db:
+                    # Diretta unavailable: fall back to last healthy catalog in RAM, then SQLite active cache,
+                    # and re-link fresh provider sources + EPG certified sessions cleanly.
+                    ram_schedule = [dict(m) for m in self._cached_matches if self.is_real_match(m)]
+                    cached_db = [dict(m) for m in all_db_matches if self.is_real_match(m)]
+                    fallback_base = ram_schedule or cached_db
+                    if fallback_base:
+                        src_label = "RAM cache" if ram_schedule else "SQLite cache"
+                        logger.warning(
+                            "Diretta sliding schedule unavailable; falling back to %s (%d events).",
+                            src_label, len(fallback_base),
+                        )
                         all_matches = self.link_official_schedule_to_providers(
-                            cached_db, providers_map, time_window_minutes=60.0
+                            fallback_base, providers_map, time_window_minutes=60.0
                         )
                     else:
+                        logger.warning("Diretta sliding schedule unavailable and no cached schedule available; keeping EPG certified sessions only.")
                         all_matches = []
+                    self._merge_epg_certified_sessions(all_matches, epg_certified_sessions)
+                    self._append_historical_replays(all_matches, all_db_matches)
 
                 # Reconcile motorsport events against official Orange Cat Blacktop session registry
                 if ocb_sessions:

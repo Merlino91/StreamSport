@@ -1,5 +1,8 @@
+import asyncio
+from contextlib import ExitStack
 import pytest
 import time
+from unittest.mock import AsyncMock, MagicMock, patch
 from app.services.provider_normalizers import (
     clean_daddylive_event,
     clean_spon_event,
@@ -8,7 +11,7 @@ from app.services.provider_normalizers import (
     clean_streamed_event,
     normalize_ascii_text,
 )
-from app.services.catalog_service import catalog_service
+from app.services.catalog_service import CatalogService, catalog_service
 
 
 def test_normalize_ascii_special_characters():
@@ -211,3 +214,117 @@ def test_link_official_schedule_time_window_cutoff():
 
     assert len(linked) == 1
     assert len(linked[0]["sources"]) == 0  # Cut off by 60m window
+
+
+async def _run_sync_during_diretta_outage(ram_matches, db_matches, dl_matches, epg_matches=None):
+    cat = CatalogService()
+    cat._cached_matches = list(ram_matches)
+
+    with ExitStack() as stack:
+        stack.enter_context(patch("app.services.catalog_service.diretta_service.get_official_sliding_schedule", new=AsyncMock(return_value=[])))
+        stack.enter_context(patch("app.services.catalog_service.streamed_api.get_all_matches", new=AsyncMock(return_value=[])))
+        stack.enter_context(patch("app.services.catalog_service.daddylive_api.get_matches", new=AsyncMock(return_value=list(dl_matches))))
+        stack.enter_context(patch("app.services.catalog_service.ocblacktop_service.get_official_sessions", new=AsyncMock(return_value=[])))
+        stack.enter_context(patch("app.services.catalog_service.thesportsdb_service.fetch_multi_day_calendar", new=AsyncMock(return_value=[])))
+        stack.enter_context(patch("app.services.catalog_service.italian_epg_service.get_matches", new=AsyncMock(return_value=list(epg_matches or []))))
+        stack.enter_context(patch("app.services.catalog_service.fctv33_service.get_matches", new=AsyncMock(return_value=[])))
+        stack.enter_context(patch("app.services.catalog_service.mandrakodi_service.get_matches", new=AsyncMock(return_value=[])))
+        stack.enter_context(patch("app.services.catalog_service.spon_service.get_matches", new=AsyncMock(return_value=[])))
+        stack.enter_context(patch("app.services.catalog_service.streamfree_service.get_matches", new=AsyncMock(return_value=[])))
+        stack.enter_context(patch("app.services.catalog_service.db_service.get_active_matches_async", new=AsyncMock(return_value=list(db_matches))))
+        stack.enter_context(patch("app.services.catalog_service.db_service.purge_expired_matches_async", new=AsyncMock(return_value=0)))
+        stack.enter_context(patch("app.services.catalog_service.db_service.save_matches_async", new=AsyncMock()))
+        stack.enter_context(patch("app.services.catalog_service.db_service.delete_matches_by_ids_async", new=AsyncMock()))
+        stack.enter_context(patch("app.services.catalog_service.tvvoo_service.enrich_matches_with_tvvoo", new=MagicMock()))
+        stack.enter_context(patch("app.services.catalog_service.mandrakodi_service.enrich_matches_with_mandrakodi", new=MagicMock()))
+        stack.enter_context(patch("app.services.catalog_service.italian_epg_service.enrich_matches_with_epg_channels", new=AsyncMock()))
+        stack.enter_context(patch("app.services.catalog_service.italian_epg_service.filter_conflicting_italian_channels", new=MagicMock()))
+        stack.enter_context(patch("app.services.catalog_service.thesportsdb_service.reconcile_matches", new=MagicMock()))
+        stack.enter_context(patch("app.services.catalog_service.thesportsdb_service.reconcile_motorsport_matches", new=MagicMock()))
+        stack.enter_context(patch("app.services.catalog_service.banner_service.purge_stale_banners", new=MagicMock()))
+        stack.enter_context(patch("app.services.catalog_service.tennis_poster_service.cleanup_finished_events", new=MagicMock()))
+        stack.enter_context(patch("app.services.catalog_service.tennis_poster_service.start_background_enrichment", new=MagicMock()))
+        await cat.sync_matches(force=True)
+
+    return cat._cached_matches
+
+
+def test_sync_matches_diretta_outage_prefers_ram_over_sqlite_and_keeps_epg():
+    now_ms = int(time.time() * 1000)
+    ram_match = {
+        "id": "diretta-ram-1",
+        "title": "Inter vs Juventus",
+        "home": "Inter",
+        "away": "Juventus",
+        "teams": {"home": {"name": "Inter"}, "away": {"name": "Juventus"}},
+        "category": "football",
+        "_silo": "football",
+        "date": now_ms,
+        "canonical_competition": "football_serie_a",
+        "sources": [],
+    }
+    db_match = {
+        "id": "diretta-db-stale",
+        "title": "Milan vs Roma",
+        "home": "Milan",
+        "away": "Roma",
+        "teams": {"home": {"name": "Milan"}, "away": {"name": "Roma"}},
+        "category": "football",
+        "_silo": "football",
+        "date": now_ms,
+        "sources": [],
+    }
+    dl_fresh = {
+        "id": "dlhd-fresh-1",
+        "title": "Inter vs Juventus",
+        "category": "football",
+        "date": now_ms,
+        "sources": [{"source": "dlhd", "id": "881", "name": "Sky Sport Calcio"}],
+    }
+    epg_live = {
+        "id": "epg-atp-session",
+        "title": "ATP Finals Live Session",
+        "competition": "ATP",
+        "category": "tennis",
+        "_silo": "tennis",
+        "_provider": "italian_epg",
+        "date": now_ms,
+        "sources": [{"source": "italian_epg", "id": "sky201", "name": "Sky Sport Tennis"}],
+    }
+
+    cached = asyncio.run(_run_sync_during_diretta_outage([ram_match], [db_match], [dl_fresh], [epg_live]))
+    ids = {m["id"] for m in cached}
+    assert "diretta-ram-1" in ids
+    assert "epg-atp-session" in ids
+    assert "diretta-db-stale" not in ids
+    ram_out = next(m for m in cached if m["id"] == "diretta-ram-1")
+    assert any(s.get("id") == "881" for s in ram_out.get("sources", []))
+
+
+def test_sync_matches_diretta_outage_cold_ram_uses_sqlite_and_relinks():
+    now_ms = int(time.time() * 1000)
+    db_match = {
+        "id": "diretta-db-1",
+        "title": "Napoli vs Lazio",
+        "home": "Napoli",
+        "away": "Lazio",
+        "teams": {"home": {"name": "Napoli"}, "away": {"name": "Lazio"}},
+        "category": "football",
+        "_silo": "football",
+        "date": now_ms,
+        "canonical_competition": "football_serie_a",
+        "sources": [],
+    }
+    dl_fresh = {
+        "id": "dlhd-fresh-2",
+        "title": "Napoli vs Lazio",
+        "category": "football",
+        "date": now_ms,
+        "sources": [{"source": "dlhd", "id": "882", "name": "DAZN 1"}],
+    }
+
+    cached = asyncio.run(_run_sync_during_diretta_outage([], [db_match], [dl_fresh]))
+    ids = {m["id"] for m in cached}
+    assert "diretta-db-1" in ids
+    db_out = next(m for m in cached if m["id"] == "diretta-db-1")
+    assert any(s.get("id") == "882" for s in db_out.get("sources", []))

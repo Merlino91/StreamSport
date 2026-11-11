@@ -8,7 +8,7 @@ import base64
 import time
 from fastapi.testclient import TestClient
 from app.main import app, decode_config, get_base_url, extract_extra_params
-from app.config import CATALOG_DEFINITIONS, CATALOG_ID, CATALOG_TYPE, SPORT_GENRES
+from app.config import CATALOG_DEFINITIONS, CATALOG_TYPE, SPORT_GENRES
 from app.services.genre_classifier import genre_classifier
 from app.services.catalog_service import catalog_service
 
@@ -264,44 +264,42 @@ class StreamSportTestCase(unittest.TestCase):
         self.assertIsNotNone(nfl_res)
         self.assertEqual(nfl_res, ("american-football", "american-football"))
 
-    def test_deduplication(self):
+    def test_top_down_linking_and_silo_isolation(self):
         from app.services.catalog_service import catalog_service
-        list1 = [
-            {"id": "m1", "title": "Inter vs Juventus", "category": "football", "country": "Italy", "competition": "Serie A", "date": 1780000000000, "poster": "http://img/1.png", "sources": [{"id": "s1"}]},
-            {"id": "m2", "title": "Real Madrid vs Barcelona", "category": "football", "country": "Spain", "competition": "La Liga", "date": 1780000000000, "poster": "http://img/2.png", "sources": [{"id": "s2"}]},
+        from app.services.provider_normalizers import clean_daddylive_event
+        official = [
+            {"id": "diretta-m1", "title": "Inter vs Juventus", "home": "Inter", "away": "Juventus", "category": "football", "_silo": "football", "country": "Italy", "competition": "Serie A", "date": 1780000000000, "poster": "http://img/1.png", "sources": [{"id": "s1"}]},
+            {"id": "diretta-m2", "title": "Real Madrid vs Barcelona", "home": "Real Madrid", "away": "Barcelona", "category": "football", "_silo": "football", "country": "Spain", "competition": "La Liga", "date": 1780000000000, "poster": "http://img/2.png", "sources": [{"id": "s2"}]},
         ]
-        list2 = [
-            # Same match with slightly different prefix and title formatting from another source
-            {"id": "dl1", "title": "Italy - Serie A : Inter vs Juventus", "category": "football", "date": 1780000000000, "poster": None, "sources": [{"id": "dl_s1"}]},
+        provider = [
+            clean_daddylive_event({"id": "dl1", "title": "Inter vs Juventus (Italy - Serie A)", "category": "football", "_silo": "football", "date": 1780000000000, "poster": None, "sources": [{"id": "dl_s1"}]}),
         ]
-        merged = catalog_service.merge_and_deduplicate(list1, list2)
-        self.assertEqual(len(merged), 2)
-        inter_match = next((m for m in merged if "Inter" in m["title"]), None)
+        linked = catalog_service.link_official_schedule_to_providers(official, {"dlhd": provider})
+        self.assertEqual(len(linked), 2)
+        inter_match = next((m for m in linked if "Inter" in m["title"]), None)
         self.assertIsNotNone(inter_match)
         self.assertEqual(len(inter_match["sources"]), 2)
         self.assertEqual(inter_match["poster"], "http://img/1.png")
 
         # Test Melbourne Phoenix vs Melbourne United partial name match
-        nbl_streamed = [{"id": "nbl1", "title": "South East Melbourne Phoenix vs Melbourne United", "category": "basketball", "date": 1790000000000, "poster": "http://img/nbl.png", "sources": [{"id": "s_nbl"}]}]
-        nbl_dlhd = [{"id": "dl_nbl1", "title": "South East Melbourne vs Melbourne United (NBL)", "category": "basketball", "date": 1790000000000, "poster": None, "sources": [{"id": "dl_nbl"}]}]
-        nbl_merged = catalog_service.merge_and_deduplicate(nbl_streamed, nbl_dlhd)
-        self.assertEqual(len(nbl_merged), 1)
-        self.assertEqual(len(nbl_merged[0]["sources"]), 2)
-        self.assertEqual(nbl_merged[0]["poster"], "http://img/nbl.png")
+        nbl_off = [{"id": "nbl1", "title": "South East Melbourne Phoenix vs Melbourne United", "home": "South East Melbourne Phoenix", "away": "Melbourne United", "category": "basketball", "_silo": "basketball", "date": 1790000000000, "poster": "http://img/nbl.png", "sources": [{"id": "s_nbl"}]}]
+        nbl_dlhd = [{"id": "dl_nbl1", "title": "South East Melbourne vs Melbourne United (NBL)", "category": "basketball", "_silo": "basketball", "date": 1790000000000, "poster": None, "sources": [{"id": "dl_nbl"}]}]
+        nbl_linked = catalog_service.link_official_schedule_to_providers(nbl_off, {"dlhd": nbl_dlhd})
+        self.assertEqual(len(nbl_linked), 1)
+        self.assertEqual(len(nbl_linked[0]["sources"]), 2)
+        self.assertEqual(nbl_linked[0]["poster"], "http://img/nbl.png")
 
-    def test_silo_deduplication_isolation(self):
-        """Verifies that events with identical tokens from different sport silos NEVER merge together."""
+    def test_silo_linking_isolation(self):
+        """Verifies that events with identical tokens from different sport silos NEVER link together."""
         from app.services.catalog_service import catalog_service
 
-        m_foot = {"id": "f1", "title": "Bears vs Lions", "date": 1780000000000, "category": "football", "_silo": "football", "sources": [{"id": "s_f"}]}
-        m_af = {"id": "af1", "title": "Bears vs Lions", "date": 1780000000000, "category": "american-football", "_silo": "american-football", "sources": [{"id": "s_af"}]}
+        m_foot = {"id": "f1", "title": "Bears vs Lions", "home": "Bears", "away": "Lions", "date": 1780000000000, "category": "football", "_silo": "football", "sources": [{"id": "s_f"}]}
+        m_af = {"id": "af1", "title": "Bears vs Lions", "home": "Bears", "away": "Lions", "date": 1780000000000, "category": "american-football", "_silo": "american-football", "sources": [{"id": "s_af"}]}
 
-        # Merging across different silos must preserve both distinct events!
-        merged = catalog_service.merge_and_deduplicate_by_silos([m_foot], [m_af])
-        self.assertEqual(len(merged), 2)
-        silos = [m.get("_silo") for m in merged]
-        self.assertIn("football", silos)
-        self.assertIn("american-football", silos)
+        linked = catalog_service.link_official_schedule_to_providers([m_foot], {"af_prov": [m_af]})
+        self.assertEqual(len(linked), 1)
+        self.assertEqual(len(linked[0]["sources"]), 1)
+        self.assertEqual(linked[0]["sources"][0]["id"], "s_f")
 
     def test_title_and_description_formatting(self):
         from app.services.catalog_service import catalog_service
@@ -344,78 +342,6 @@ class StreamSportTestCase(unittest.TestCase):
         item3 = catalog_service.build_meta_item(m3, "Champions League")
         self.assertEqual(item3["name"], "Arsenal vs Chelsea")
         self.assertTrue(item3["description"].startswith("🏁 Conclusa • Replay e Sintesi • 🏆 UEFA Champions League • Arsenal vs Chelsea"))
-
-    def test_espn_reconciliation(self):
-        from app.services.espn_service import espn_service
-        from app.services.catalog_service import catalog_service
-
-        # Simulated official registry from ESPN
-        official_espn = [
-            {
-                "id": "espn-12345",
-                "title": "Dubai Basketball vs Real Madrid Baloncesto",
-                "category": "basketball",
-                "date": 1790000000000,
-                "teams": {
-                    "home": {"name": "Dubai Basketball"},
-                    "away": {"name": "Real Madrid Baloncesto"},
-                },
-                "_catalog": "basket",
-                "_genre": "Eurolega ed Eurocup",
-                "_espn": True,
-            },
-            {
-                "id": "espn-67890",
-                "title": "Fiorentina vs Empoli",
-                "category": "football",
-                "date": 1790003600000,
-                "teams": {
-                    "home": {"name": "Fiorentina"},
-                    "away": {"name": "Empoli"},
-                },
-                "_catalog": "calcio_italiano",
-                "_genre": "Serie A",
-                "_espn": True,
-            },
-        ]
-
-        # Raw streamed matches with informal / slightly modified titles
-        raw_streamed = [
-            {
-                "id": "strem-1",
-                "title": "Dubai vs Real Madrid",
-                "category": "basketball",
-                "date": 1790000000000,
-                "teams": {"home": {"name": "Dubai"}, "away": {"name": "Real Madrid"}},
-            },
-            {
-                "id": "dl-2",
-                "title": "Italy - Serie A : Fiorentina vs Empoli [HD]",
-                "category": "football",
-                "date": 1790003600000,
-            },
-        ]
-
-        espn_service.reconcile_matches(
-            raw_streamed,
-            official_espn,
-            clean_tokens_fn=catalog_service._clean_tokens,
-            get_teams_key_fn=catalog_service._get_teams_key,
-        )
-
-        # Match 1 reconciled
-        self.assertTrue(raw_streamed[0].get("_espn_matched"))
-        self.assertEqual(raw_streamed[0]["title"], "Dubai Basketball vs Real Madrid Baloncesto")
-        self.assertEqual(raw_streamed[0]["teams"]["home"]["name"], "Dubai Basketball")
-        self.assertEqual(raw_streamed[0]["teams"]["away"]["name"], "Real Madrid Baloncesto")
-        self.assertEqual(raw_streamed[0]["_catalog"], "basket")
-        self.assertEqual(raw_streamed[0]["_genre"], "Eurolega ed Eurocup")
-
-        # Match 2 reconciled
-        self.assertTrue(raw_streamed[1].get("_espn_matched"))
-        self.assertEqual(raw_streamed[1]["title"], "Fiorentina vs Empoli")
-        self.assertEqual(raw_streamed[1]["_catalog"], "calcio_italiano")
-        self.assertEqual(raw_streamed[1]["_genre"], "Serie A")
 
     def test_thesportsdb_reconciliation_and_tiered_precedence(self):
         from app.services.thesportsdb_service import thesportsdb_service
@@ -661,12 +587,13 @@ class StreamSportTestCase(unittest.TestCase):
         self.assertEqual(cat3, "calcio_estero")
         self.assertEqual(genre3, "Americhe e Leghe Extra-UE")
 
-        # 4. Competition metadata preservation in deduplication
+        # 4. Competition metadata preservation in Top-Down linking
         m_streamed = {"id": "str-1", "title": "Fleetwood Town vs Rochdale", "_silo": "football", "sources": [{"id": "s1"}]}
-        m_daddylive = {"id": "dlhd-1", "title": "Fleetwood Town vs Rochdale (England - League Two)", "competition": "England - League Two", "_silo": "football", "sources": [{"id": "s2"}]}
-        merged = catalog_service.merge_and_deduplicate([m_streamed], [m_daddylive])
-        self.assertEqual(len(merged), 1)
-        self.assertEqual(merged[0].get("competition"), "England - League Two")
+        m_official = {"id": "diretta-1", "title": "Fleetwood Town vs Rochdale (England - League Two)", "home": "Fleetwood Town", "away": "Rochdale", "competition": "England - League Two", "_silo": "football", "sources": [{"id": "s2"}]}
+        linked = catalog_service.link_official_schedule_to_providers([m_official], {"streamed": [m_streamed]})
+        self.assertEqual(len(linked), 1)
+        self.assertEqual(linked[0].get("competition"), "England - League Two")
+        self.assertEqual(len(linked[0]["sources"]), 2)
 
     def test_channel_flag_and_stream_formatting(self):
         import asyncio
@@ -674,6 +601,10 @@ class StreamSportTestCase(unittest.TestCase):
 
         # 1. Test channel flag regex accuracy
         self.assertEqual(stream_service.get_channel_flag("Sky Sport Calcio IT"), "🇮🇹")
+        self.assertEqual(stream_service.get_channel_flag("Sky Sport Basket"), "🇮🇹")
+        self.assertEqual(stream_service.get_channel_flag("Sky Sport Uno"), "🇮🇹")
+        self.assertEqual(stream_service.get_channel_flag("Sky Sport Legend"), "🇮🇹")
+        self.assertEqual(stream_service.get_channel_flag("Sky Sport 24"), "🇮🇹")
         self.assertEqual(stream_service.get_channel_flag("Rai Sport"), "🇮🇹")
         self.assertEqual(stream_service.get_channel_flag("SuperTennis"), "🇮🇹")
         self.assertEqual(stream_service.get_channel_flag("Canale 5 IT"), "🇮🇹")
@@ -710,6 +641,8 @@ class StreamSportTestCase(unittest.TestCase):
         try:
             with patch("app.services.mandrakodi_service.mandrakodi_service.resolve_live_match_streams", new_callable=AsyncMock, return_value=[]), \
                  patch("app.services.mandrakodi_service.mandrakodi_service.get_matches", new_callable=AsyncMock, return_value=[]), \
+                 patch("app.services.daddylive_api.daddylive_api.get_matches", new_callable=AsyncMock, return_value=[]), \
+                 patch("app.services.streamed_api.streamed_api.get_all_matches", new_callable=AsyncMock, return_value=[]), \
                  patch("app.services.daddylive_api.daddylive_api.get_active_domain", new_callable=AsyncMock, return_value="dlive.sx"):
 
                 catalog_service._cached_matches = [mock_match]

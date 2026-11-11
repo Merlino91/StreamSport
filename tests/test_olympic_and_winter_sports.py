@@ -40,7 +40,7 @@ class TestOlympicAndWinterSports(unittest.TestCase):
         self.assertLess(sim, 0.55)
 
     def test_anti_fusion_deduplication(self):
-        """Verifies that distinct session events scheduled at the same time NEVER merge."""
+        """Verifies that distinct session events scheduled at the same time NEVER link onto each other."""
         m1 = {
             "id": "sky_arena_preliminari",
             "title": "Preliminari Napoli: 3a giornata",
@@ -57,11 +57,11 @@ class TestOlympicAndWinterSports(unittest.TestCase):
             "date": 1793674800000,
             "sources": [{"id": "rai_sport", "source": "tvvoo"}]
         }
-        merged = catalog_service.merge_and_deduplicate([m1], [m2])
-        self.assertEqual(len(merged), 2, "Events with different titles must remain separate even at identical kickoff times!")
+        linked = catalog_service.link_official_schedule_to_providers([m1], {"epg": [m2]})
+        self.assertEqual(len(linked[0]["sources"]), 1, "Events with different titles must remain separate even at identical kickoff times!")
 
     def test_gender_separation_deduplication(self):
-        """Verifies that Men and Women events in individual sports never merge."""
+        """Verifies that Men and Women events in individual sports never link onto each other."""
         m_men = {
             "id": "curling_men",
             "title": "Curling: Camp. Europei Ostrava 2026 Finale Maschile",
@@ -78,8 +78,8 @@ class TestOlympicAndWinterSports(unittest.TestCase):
             "date": 1793725800000,
             "sources": [{"id": "src2"}]
         }
-        merged = catalog_service.merge_and_deduplicate([m_men], [m_women])
-        self.assertEqual(len(merged), 2, "Maschile and Femminile finals must never merge!")
+        linked = catalog_service.link_official_schedule_to_providers([m_men], {"prov": [m_women]})
+        self.assertEqual(len(linked[0]["sources"]), 1, "Maschile and Femminile finals must never merge!")
 
     def test_tivusat_image_extraction_logic(self):
         """Verifies that Tivusat image parser extracts URLs from lists of dicts."""

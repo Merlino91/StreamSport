@@ -38,8 +38,8 @@ class TestDBServiceAsync(unittest.IsolatedAsyncioTestCase):
             },
         ]
 
-        # 1. Test upsert_matches_async
-        await self.service.upsert_matches_async(matches)
+        # 1. Test save_matches_async
+        await self.service.save_matches_async(matches)
 
         # 2. Test get_match_by_id_async
         m1 = await self.service.get_match_by_id_async("match_async_1")
@@ -84,15 +84,6 @@ class TestDBServiceAsync(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(failed[0], "not_found")
         self.assertIsNone(failed[1])
 
-        # 4. Clear failed cache async
-        await self.service.clear_failed_poster_cache_async()
-        failed_cleared = await self.service.get_poster_from_cache_async("Unknown vs Mystery")
-        self.assertIsNone(failed_cleared)
-
-        # Found entry remains intact
-        still_found = await self.service.get_poster_from_cache_async(q_key)
-        self.assertIsNotNone(still_found)
-
     async def test_async_purge_expired_matches(self):
         past_match = {
             "id": "old_match",
@@ -101,7 +92,7 @@ class TestDBServiceAsync(unittest.IsolatedAsyncioTestCase):
             "date": 1000000000,  # Far in the past
             "sources": [],
         }
-        await self.service.upsert_matches_async([past_match])
+        await self.service.save_matches_async([past_match])
 
         purged = await self.service.purge_expired_matches_async(max_age_hours=24)
         self.assertGreaterEqual(purged, 1)
@@ -146,7 +137,7 @@ class TestDBServiceAsync(unittest.IsolatedAsyncioTestCase):
             "sources": [],
             "competition": "UEFA Champions League",
         }
-        await self.service.upsert_matches_async([match_data])
+        await self.service.save_matches_async([match_data])
 
         fetched = await self.service.get_match_by_id_async("match_traits_test")
         self.assertIsNotNone(fetched)

@@ -68,6 +68,7 @@ SKY_CHID_TO_CANONICAL: Dict[str, str] = {
     "skysportgolf": "sky sport golf",
     "skysportlegend": "sky sport legend",
     "skysportmix": "sky sport mix",
+    "skysport4k": "sky sport 4k",
     "skysportcalcio": "sky sport calcio",
     "skysport251": "sky sport 251",
     "skysport252": "sky sport 252",

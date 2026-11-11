@@ -157,11 +157,9 @@ class FCTV33Service:
             if not title:
                 return None
 
-            # Team names and logos extraction from Field 30
+            # Team names extraction from Field 30
             home_name = ""
             away_name = ""
-            home_logo = None
-            away_logo = None
 
             if 30 in mf and len(mf[30]) >= 3:
                 # Team 1 (Home)
@@ -173,9 +171,6 @@ class FCTV33Service:
                         s1 = raw_name1.decode("utf-8", errors="replace")
                         raw_h = s1.split("\x12")[-1] if "\x12" in s1 else s1
                         home_name = re.sub(r"^[^a-zA-Z0-9]+", "", raw_h).strip()
-                    logo1_raw = sub10_1.get(4, [b""])[0]
-                    if isinstance(logo1_raw, bytes) and logo1_raw.startswith(b"http"):
-                        home_logo = logo1_raw.decode("utf-8", errors="replace")
 
                 # Team 2 (Away)
                 t2_fields = _read_fields(mf[30][2])
@@ -186,9 +181,6 @@ class FCTV33Service:
                         s2 = raw_name2.decode("utf-8", errors="replace")
                         raw_a = s2.split("\x12")[-1] if "\x12" in s2 else s2
                         away_name = re.sub(r"^[^a-zA-Z0-9]+", "", raw_a).strip()
-                    logo2_raw = sub10_2.get(4, [b""])[0]
-                    if isinstance(logo2_raw, bytes) and logo2_raw.startswith(b"http"):
-                        away_logo = logo2_raw.decode("utf-8", errors="replace")
 
             # Fallback: if home/away not parsed from subfields, extract by splitting title
             if (not home_name or not away_name) and title:
@@ -251,7 +243,6 @@ class FCTV33Service:
                         "name": "FCTV33 Live",
                     }
                 ],
-                "_silo": canonical_silo,
                 "_fctv33_id": mid_str,
                 "_sport_type": sport_type,
                 "_provider": "fctv33",

@@ -10,6 +10,7 @@ import tempfile
 import time
 import urllib.parse
 from typing import Any, Dict, List, Optional, Set, Tuple
+import weakref
 import httpx
 
 try:
@@ -100,6 +101,7 @@ class TennisPosterService:
         self._is_enriching: bool = False
         self._unknown_male_cache: Optional[Image.Image] = None
         self._unknown_female_cache: Optional[Image.Image] = None
+        self._poster_locks: weakref.WeakValueDictionary = weakref.WeakValueDictionary()
 
         # Pre-render missing background templates
         self._ensure_background_templates()
@@ -740,6 +742,26 @@ class TennisPosterService:
                     "X-Requested-With": "XMLHttpRequest",
                 }
 
+                q_toks = [t for t in re.split(r"[\s\.\-]+", clean_full.lower()) if t]
+                q_inits = [t[0] for t in q_toks if len(t) == 1]
+
+                def _score_item(it: dict) -> int:
+                    fn = (it.get("FirstName") or "").strip()
+                    ln = (it.get("LastName") or "").strip()
+                    full = f"{fn} {ln}".lower()
+                    active = it.get("Active") == "A"
+                    score = 0
+                    if active:
+                        score += 50
+                    if full == clean_full.lower():
+                        score += 100
+                    elif norm_surname and _unaccent(ln).lower() == norm_surname.lower():
+                        score += 60
+                    if q_inits and fn:
+                        if fn[0].lower() in q_inits:
+                            score += 30
+                    return score
+
                 with curl_requests.Session(impersonate="safari15_5") as session:
                     session.headers.update(headers)
                     found_player = None
@@ -760,26 +782,6 @@ class TennisPosterService:
                             data = res.json()
                             if not isinstance(data, list) or not data:
                                 continue
-
-                            q_toks = [t for t in re.split(r"[\s\.\-]+", clean_full.lower()) if t]
-                            q_inits = [t[0] for t in q_toks if len(t) == 1]
-
-                            def _score_item(it: dict) -> int:
-                                fn = (it.get("FirstName") or "").strip()
-                                ln = (it.get("LastName") or "").strip()
-                                full = f"{fn} {ln}".lower()
-                                active = it.get("Active") == "A"
-                                score = 0
-                                if active:
-                                    score += 50
-                                if full == clean_full.lower():
-                                    score += 100
-                                elif norm_surname and _unaccent(ln).lower() == norm_surname.lower():
-                                    score += 60
-                                if q_inits and fn:
-                                    if fn[0].lower() in q_inits:
-                                        score += 30
-                                return score
 
                             sorted_items = sorted(data, key=_score_item, reverse=True)
                             for item in sorted_items:
@@ -1067,10 +1069,71 @@ class TennisPosterService:
 
         return canvas
 
-    async def _render_standard_match(
-        self, canvas: Image.Image, p1_name: str, p2_name: str, is_female: bool = False
+    def _get_poster_lock(self, key: str) -> asyncio.Lock:
+        loop_id = id(asyncio.get_running_loop())
+        lock_key = (loop_id, key)
+        lock = self._poster_locks.get(lock_key)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._poster_locks[lock_key] = lock
+        return lock
+
+    async def _fetch_match_cutouts(
+        self, p1_name: str, p2_name: str, is_female: bool = False
+    ) -> Dict[str, Any]:
+        """Asynchronously fetches player cutout images for singles or doubles matches."""
+        team1 = self.parse_team_players(p1_name)
+        team2 = self.parse_team_players(p2_name)
+        is_doubles = len(team1) > 1 or len(team2) > 1
+
+        if not is_doubles:
+            p1_task = self.get_player_cutout(p1_name, is_female=is_female)
+            p2_task = self.get_player_cutout(p2_name, is_female=is_female) if p2_name else asyncio.sleep(0, result=None)
+            p1_img, p2_img = await asyncio.gather(p1_task, p2_task)
+            src1 = "CUTOUT" if p1_img is not None else "SILHOUETTE_FALLBACK"
+            src2 = "CUTOUT" if p2_img is not None else "SILHOUETTE_FALLBACK"
+            logger.info("Tennis match compositing: '%s' [%s] vs '%s' [%s]", p1_name, src1, p2_name, src2)
+            return {"is_doubles": False, "p1_img": p1_img, "p2_img": p2_img}
+
+        p1_a_name = team1[0] if len(team1) > 0 else ""
+        p1_b_name = team1[1] if len(team1) > 1 else ""
+        p2_a_name = team2[0] if len(team2) > 0 else ""
+        p2_b_name = team2[1] if len(team2) > 1 else ""
+
+        tasks = [
+            self.get_player_cutout(p1_a_name, is_female=is_female) if p1_a_name else asyncio.sleep(0, result=None),
+            self.get_player_cutout(p1_b_name, is_female=is_female) if p1_b_name else asyncio.sleep(0, result=None),
+            self.get_player_cutout(p2_a_name, is_female=is_female) if p2_a_name else asyncio.sleep(0, result=None),
+            self.get_player_cutout(p2_b_name, is_female=is_female) if p2_b_name else asyncio.sleep(0, result=None),
+        ]
+        t1_a_img, t1_b_img, t2_a_img, t2_b_img = await asyncio.gather(*tasks)
+
+        logger.info(
+            "Tennis doubles match compositing: Team 1 [%s: %s, %s: %s] vs Team 2 [%s: %s, %s: %s]",
+            p1_a_name, "CUTOUT" if t1_a_img is not None else "SILHOUETTE_FALLBACK",
+            p1_b_name, "CUTOUT" if t1_b_img is not None else "SILHOUETTE_FALLBACK",
+            p2_a_name, "CUTOUT" if t2_a_img is not None else "SILHOUETTE_FALLBACK",
+            p2_b_name, "CUTOUT" if t2_b_img is not None else "SILHOUETTE_FALLBACK",
+        )
+        return {
+            "is_doubles": True,
+            "p1_b_name": p1_b_name,
+            "p2_b_name": p2_b_name,
+            "t1_a_img": t1_a_img,
+            "t1_b_img": t1_b_img,
+            "t2_a_img": t2_a_img,
+            "t2_b_img": t2_b_img,
+        }
+
+    def _render_standard_match_sync(
+        self,
+        canvas: Image.Image,
+        p1_name: str,
+        p2_name: str,
+        cutouts: Dict[str, Any],
+        is_female: bool = False,
     ) -> Image.Image:
-        """Renders player cutouts (supporting both Singles and Doubles) and broadcast lower-third banner."""
+        """Synchronous CPU-bound player cutout compositing and lower-third banner rendering."""
         W, H = CANVAS_WIDTH, CANVAS_HEIGHT
         banner_h = 75
         banner_top = H - banner_h
@@ -1079,19 +1142,10 @@ class TennisPosterService:
 
         unknown_cutout = self._get_unknown_cutout(is_female=is_female)
 
-        team1 = self.parse_team_players(p1_name)
-        team2 = self.parse_team_players(p2_name)
-        is_doubles = len(team1) > 1 or len(team2) > 1
-
-        if not is_doubles:
+        if not cutouts.get("is_doubles"):
             target_h = 510
-            p1_task = self.get_player_cutout(p1_name, is_female=is_female)
-            p2_task = self.get_player_cutout(p2_name, is_female=is_female) if p2_name else asyncio.sleep(0, result=None)
-            p1_img, p2_img = await asyncio.gather(p1_task, p2_task)
-
-            src1 = "CUTOUT" if p1_img is not None else "SILHOUETTE_FALLBACK"
-            src2 = "CUTOUT" if p2_img is not None else "SILHOUETTE_FALLBACK"
-            logger.info("Tennis match compositing: '%s' [%s] vs '%s' [%s]", p1_name, src1, p2_name, src2)
+            p1_img = cutouts.get("p1_img")
+            p2_img = cutouts.get("p2_img")
 
             # Player 1 (Left)
             img1 = p1_img or unknown_cutout
@@ -1109,28 +1163,6 @@ class TennisPosterService:
                     canvas.paste(p2_resized, (W - 170 - (w2 * 3) // 4, y_bottom - target_h), p2_resized)
         else:
             # Doubles layout: 2 players per side with depth of field and balanced sizing
-            p1_a_name = team1[0] if len(team1) > 0 else ""
-            p1_b_name = team1[1] if len(team1) > 1 else ""
-            p2_a_name = team2[0] if len(team2) > 0 else ""
-            p2_b_name = team2[1] if len(team2) > 1 else ""
-
-            tasks = [
-                self.get_player_cutout(p1_a_name, is_female=is_female) if p1_a_name else asyncio.sleep(0, result=None),
-                self.get_player_cutout(p1_b_name, is_female=is_female) if p1_b_name else asyncio.sleep(0, result=None),
-                self.get_player_cutout(p2_a_name, is_female=is_female) if p2_a_name else asyncio.sleep(0, result=None),
-                self.get_player_cutout(p2_b_name, is_female=is_female) if p2_b_name else asyncio.sleep(0, result=None),
-            ]
-            t1_a_img, t1_b_img, t2_a_img, t2_b_img = await asyncio.gather(*tasks)
-
-            src1_a = "CUTOUT" if t1_a_img is not None else "SILHOUETTE_FALLBACK"
-            src1_b = "CUTOUT" if t1_b_img is not None else "SILHOUETTE_FALLBACK"
-            src2_a = "CUTOUT" if t2_a_img is not None else "SILHOUETTE_FALLBACK"
-            src2_b = "CUTOUT" if t2_b_img is not None else "SILHOUETTE_FALLBACK"
-            logger.info(
-                "Tennis doubles match compositing: Team 1 [%s: %s, %s: %s] vs Team 2 [%s: %s, %s: %s]",
-                p1_a_name, src1_a, p1_b_name, src1_b, p2_a_name, src2_a, p2_b_name, src2_b
-            )
-
             h_front = 400
             h_back = 350
 
@@ -1152,24 +1184,27 @@ class TennisPosterService:
             cx_right_inner = W - 390
             cx_right_outer = W - 170
 
+            p1_b_name = cutouts.get("p1_b_name", "")
+            p2_b_name = cutouts.get("p2_b_name", "")
+
             # Left Team - Player 1B (Back, outer left)
-            img1_b = t1_b_img or unknown_cutout
+            img1_b = cutouts.get("t1_b_img") or unknown_cutout
             if p1_b_name and img1_b:
                 _paste_athlete(img1_b, cx_left_outer, h_back)
 
             # Left Team - Player 1A (Front, inner left, layered over 1B)
-            img1_a = t1_a_img or unknown_cutout
+            img1_a = cutouts.get("t1_a_img") or unknown_cutout
             if img1_a:
                 _paste_athlete(img1_a, cx_left_inner, h_front)
 
             # Right Team - Player 2B (Back, outer right)
-            img2_b = t2_b_img or unknown_cutout
+            img2_b = cutouts.get("t2_b_img") or unknown_cutout
             if p2_b_name and img2_b:
                 _paste_athlete(img2_b, cx_right_outer, h_back)
 
             # Right Team - Player 2A (Front, inner right, layered over 2B)
-            img2_a = t2_a_img or unknown_cutout
-            if p2_a_name and img2_a:
+            img2_a = cutouts.get("t2_a_img") or unknown_cutout
+            if img2_a:
                 _paste_athlete(img2_a, cx_right_inner, h_front)
 
         # Continuous Edge-to-Edge Broadcast Lower-Third Banner
@@ -1281,52 +1316,37 @@ class TennisPosterService:
 
         return canvas
 
-    async def generate_poster(
-        self, match_id: str, title: str, genre: str, match: Optional[Dict[str, Any]] = None
+    def _compose_and_save_poster_sync(
+        self,
+        target_path: Path,
+        fallback_path: Path,
+        filename: str,
+        title: str,
+        genre: str,
+        stage_info: Optional[Dict[str, str]],
+        p1_name: str,
+        p2_name: str,
+        is_country: bool,
+        is_fem: bool,
+        cutouts: Optional[Dict[str, Any]],
     ) -> Optional[str]:
-        """
-        Creates and saves an 888x500 landscape poster for a tennis match.
-        Returns the relative web path (e.g. '/posters/tennis_xyz.jpg').
-        """
-        if not HAS_PIL:
-            return None
-
-        clean_key = hashlib.md5(match_id.encode("utf-8")).hexdigest()[:12]
-        filename = f"tennis_{clean_key}_v{TENNIS_POSTER_VERSION}.jpg"
-        target_path = self.posters_dir / filename
-        fallback_path = Path(tempfile.gettempdir()) / "streamsport_data" / "posters" / filename
-
-        if target_path.exists() or fallback_path.exists():
-            return f"/posters/{filename}"
-
+        """Executes CPU-bound Pillow rendering and JPEG saving cleanly inside a worker thread."""
         theme = self.get_theme_palette(genre, title)
-        tourn_name, stage_name = self.extract_tournament_and_stage(title, genre)
+        tourn_name, _ = self.extract_tournament_and_stage(title, genre)
 
-        # Base Arena
         canvas = self._render_cinematic_arena(theme, tourn_name)
-
-        # 1. Check if title is a Bracket Stage card (e.g. '(Couples) 1/4 Final 1 (WTA 500 Singapore)')
-        stage_info = self.is_stage_placeholder(title)
         if stage_info:
             canvas = self._render_stage_card(canvas, stage_info["stage"], stage_info["tournament"])
+        elif is_country:
+            canvas = self._render_country_match(canvas, p1_name, p2_name, tourn_name)
+        elif not p2_name:
+            # Failsafe: if there is no second competitor, never render an asymmetric single-sided match
+            canvas = self._render_stage_card(canvas, "LIVE BROADCAST", tourn_name)
         else:
-            p1_name, p2_name = self.parse_players(title)
-            if not p1_name:
-                return None
+            canvas = self._render_standard_match_sync(
+                canvas, p1_name, p2_name, cutouts or {}, is_female=is_fem
+            )
 
-            is_fem = self.is_female_competition(title, genre, match=match)
-
-            # 2. Check if Country match (Davis Cup / BJK Cup / 'Italy vs China')
-            if self.is_country_match(title, p1_name, p2_name, genre):
-                canvas = self._render_country_match(canvas, p1_name, p2_name, tourn_name)
-            elif not p2_name:
-                # Failsafe: if there is no second competitor, never render an asymmetric single-sided match
-                canvas = self._render_stage_card(canvas, "LIVE BROADCAST", tourn_name)
-            else:
-                # 3. Standard Player vs Player Match
-                canvas = await self._render_standard_match(canvas, p1_name, p2_name, is_female=is_fem)
-
-        # Save to disk as high-quality JPEG
         final_rgb = canvas.convert("RGB")
         saved = False
         try:
@@ -1347,6 +1367,60 @@ class TennisPosterService:
             logger.info("Generated tennis poster: %s (%s)", filename, title)
             return f"/posters/{filename}"
         return None
+
+    async def generate_poster(
+        self, match_id: str, title: str, genre: str, match: Optional[Dict[str, Any]] = None
+    ) -> Optional[str]:
+        """
+        Creates and saves a 16:9 landscape poster for a tennis match.
+        Returns the relative web path (e.g. '/posters/tennis_xyz.jpg').
+        """
+        if not HAS_PIL:
+            return None
+
+        clean_key = hashlib.md5(match_id.encode("utf-8")).hexdigest()[:12]
+        filename = f"tennis_{clean_key}_v{TENNIS_POSTER_VERSION}.jpg"
+        target_path = self.posters_dir / filename
+        fallback_path = Path(tempfile.gettempdir()) / "streamsport_data" / "posters" / filename
+
+        if target_path.exists() or fallback_path.exists():
+            return f"/posters/{filename}"
+
+        lock = self._get_poster_lock(filename)
+        async with lock:
+            if target_path.exists() or fallback_path.exists():
+                return f"/posters/{filename}"
+
+            stage_info = self.is_stage_placeholder(title)
+            p1_name = ""
+            p2_name = ""
+            is_country = False
+            is_fem = False
+            cutouts: Optional[Dict[str, Any]] = None
+
+            if not stage_info:
+                p1_name, p2_name = self.parse_players(title)
+                if not p1_name:
+                    return None
+                is_fem = self.is_female_competition(title, genre, match=match)
+                is_country = self.is_country_match(title, p1_name, p2_name, genre)
+                if not is_country and p2_name:
+                    cutouts = await self._fetch_match_cutouts(p1_name, p2_name, is_female=is_fem)
+
+            return await asyncio.to_thread(
+                self._compose_and_save_poster_sync,
+                target_path,
+                fallback_path,
+                filename,
+                title,
+                genre,
+                stage_info,
+                p1_name,
+                p2_name,
+                is_country,
+                is_fem,
+                cutouts,
+            )
 
     def start_background_enrichment(self, matches: List[Dict[str, Any]]):
         """Asynchronously triggers poster generation for tennis matches lacking artwork."""

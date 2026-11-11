@@ -9,9 +9,7 @@ import unicodedata
 from typing import Any, Dict, List, Optional, Set, Tuple
 import httpx
 
-from app.services.canonical_competition_service import detect_canonical_competition, get_canonical_display_name
-from app.services.team_matching import calculate_match_score, extract_team_words
-from app.services.tvvoo_service import tvvoo_service
+from app.services.canonical_competition_service import detect_canonical_competition
 from app.utils.demographics import extract_demographics
 
 logger = logging.getLogger("streamsport.diretta")
@@ -87,16 +85,9 @@ class DirettaService:
 
     def __init__(self):
         self._cached_events: List[Dict[str, Any]] = []
-        self._en_events_by_silo: Dict[str, List[Dict[str, Any]]] = {}
         self._cache_time: float = 0.0
         self._cache_ttl: float = 1800  # 30 minutes TTL
-        self._is_healthy: bool = False
         self._lock = asyncio.Lock()
-
-    @property
-    def is_healthy(self) -> bool:
-        """Returns True if the last fetch from Diretta.it was successful and returned events."""
-        return self._is_healthy and len(self._cached_events) > 0
 
     @staticmethod
     def reconstruct_tennis_name(abbrev: str, slug: str) -> str:
@@ -298,7 +289,6 @@ class DirettaService:
                 it_events: List[Dict[str, Any]] = []
                 en_events: List[Dict[str, Any]] = []
                 en_by_id: Dict[str, Dict[str, Any]] = {}
-                en_events_by_silo: Dict[str, List[Dict[str, Any]]] = {}
 
                 for res in results:
                     if isinstance(res, tuple) and len(res) == 2:
@@ -313,7 +303,6 @@ class DirettaService:
                                     fid = ev.get("flashscore_id")
                                     if fid:
                                         en_by_id[fid] = ev
-                                    en_events_by_silo.setdefault(ev.get("_silo", "altri_sport"), []).append(ev)
                         else:
                             fail_count += 1
                     else:
@@ -339,9 +328,7 @@ class DirettaService:
 
                 if len(all_consolidated) > 100:
                     self._cached_events = all_consolidated
-                    self._en_events_by_silo = en_events_by_silo
                     self._cache_time = now
-                    self._is_healthy = True
                     logger.info(
                         "Diretta.it feed engine synchronized: %d events indexed (IT: %d, EN: %d).",
                         len(all_consolidated),
@@ -349,9 +336,8 @@ class DirettaService:
                         len(en_events),
                     )
                 else:
-                    self._is_healthy = False
                     logger.warning(
-                        "Diretta.it feed engine returned insufficient events (%d events, failed feeds: %d). Marking unhealthy for fallback.",
+                        "Diretta.it feed engine returned insufficient events (%d events, failed feeds: %d).",
                         len(all_consolidated),
                         fail_count,
                     )
@@ -482,167 +468,5 @@ class DirettaService:
 
         return official_matches
 
-    def reconcile_matches(self, matches: List[Dict[str, Any]]) -> int:
-        """
-        Reconciles stream matches using a 2-pass Flashscore algorithm:
-        Pass 1: Identifies the match on the English feed (to obtain the universal Flashscore ID).
-        Pass 2: Reconciles against Italian / Consolidated candidates with a +0.20 Match ID bonus,
-                inheriting official Italian titles and TV channels.
-        """
-        if not self._cached_events or not matches:
-            return 0
-
-        # Group consolidated events by silo
-        by_silo: Dict[str, List[Dict[str, Any]]] = {}
-        for ev in self._cached_events:
-            by_silo.setdefault(ev.get("_silo", "altri_sport"), []).append(ev)
-
-        reconciled_count = 0
-
-        for m in matches:
-            silo = (m.get("_silo") or "").lower().strip()
-            if not silo:
-                from app.services.catalog_service import catalog_service
-                silo = catalog_service.get_canonical_silo(m)
-
-            m_date = m.get("date") or 0
-
-            # Pass 1: Flashscore EN Identification
-            en_cands = self._en_events_by_silo.get(silo, [])
-            if m_date and en_cands:
-                en_cands = [e for e in en_cands if abs((e.get("date") or 0) - m_date) <= 90 * 60 * 1000]
-
-            best_en_cand: Optional[Dict[str, Any]] = None
-            best_en_score: float = 0.0
-            for en_c in en_cands:
-                sc = calculate_match_score(m, en_c, phase="phase1_diretta")
-                if sc["matched"] and sc["score"] > best_en_score:
-                    best_en_score = sc["score"]
-                    best_en_cand = en_c
-                    if best_en_score >= 0.95:
-                        break
-
-            if best_en_cand and best_en_score >= 0.75:
-                m["_flashscore_id"] = best_en_cand.get("flashscore_id") or best_en_cand.get("id")
-                # DOMINANT: Adopt official English competition and country from Livesport (Flashscore EN)
-                en_comp = (best_en_cand.get("competition") or "").strip()
-                if en_comp and not self.is_generic_competition(en_comp):
-                    m["competition"] = en_comp
-                    m["_competition"] = en_comp
-                    if best_en_cand.get("country"):
-                        m["country"] = best_en_cand["country"]
-                        m["_country"] = best_en_cand["country"]
-                    en_canon = detect_canonical_competition(
-                        f"{en_comp} : {best_en_cand.get('title') or m.get('title', '')}", silo_hint=silo
-                    )
-                    if en_canon:
-                        m["canonical_competition"] = en_canon
-                        m["_canonical_competition"] = en_canon
-
-            # Pass 2: Reconcile against Italian / Consolidated candidates (with Match ID bonus/penalty)
-            candidates = by_silo.get(silo, [])
-            if m_date and candidates:
-                candidates = [e for e in candidates if abs((e.get("date") or 0) - m_date) <= 90 * 60 * 1000]
-
-            best_cand: Optional[Dict[str, Any]] = None
-            best_score: float = 0.0
-            for cand in candidates:
-                res = calculate_match_score(m, cand, phase="phase1_diretta")
-                if res["matched"] and res["score"] > best_score:
-                    best_cand = cand
-                    best_score = res["score"]
-                    if best_score >= 0.95:
-                        break
-
-            # If an Italian/consolidated candidate matched, use it; otherwise fallback to the EN match
-            chosen = best_cand if (best_cand and best_score >= 0.75) else (best_en_cand if (best_en_cand and best_en_score >= 0.75) else None)
-
-            if chosen:
-                reconciled_count += 1
-                m["_diretta_matched"] = True
-                d_home = chosen.get("full_home") or chosen["home"]
-                d_away = chosen.get("full_away") or chosen["away"]
-                m["home"] = d_home
-                m["away"] = d_away
-                m["title"] = f"{d_home} vs {d_away}"
-                m["teams"] = {"home": {"name": d_home}, "away": {"name": d_away}}
-                if chosen.get("full_home") and chosen.get("full_away"):
-                    m["_full_players"] = (d_home, d_away)
-
-                alt_h = chosen.get("alt_home")
-                alt_a = chosen.get("alt_away")
-                if alt_h and alt_a:
-                    m["alt_home"] = alt_h
-                    m["alt_away"] = alt_a
-                    m["alt_title"] = chosen.get("alt_title") or f"{alt_h} vs {alt_a}"
-                    m["alt_teams"] = [{"home": {"name": alt_h}, "away": {"name": alt_a}}]
-
-                # Non-destructive: preserve raw title if not already tracked
-                if "raw_titles" not in m and m.get("title"):
-                    m["raw_titles"] = [m["title"]]
-
-                # Adopt exact kickoff time from Diretta
-                if chosen.get("date"):
-                    m["_official_date"] = chosen["date"]
-                    m["date"] = chosen["date"]
-
-                # Adopt country from chosen validator candidate
-                if chosen.get("country"):
-                    m["country"] = chosen["country"]
-                    m["_country"] = chosen["country"]
-
-                # Inherit confirmed traits from chosen candidate (Diretta is authoritative)
-                if chosen.get("is_women"):
-                    m["is_women"] = True
-                elif "is_women" in chosen:
-                    m["is_women"] = False
-                if chosen.get("is_youth"):
-                    m["is_youth"] = True
-                elif "is_youth" in chosen:
-                    m["is_youth"] = False
-
-                # Adopt official competition from chosen validator candidate (Diretta is authoritative)
-                if chosen.get("competition") and not self.is_generic_competition(chosen["competition"]):
-                    m["competition"] = chosen["competition"]
-                    m["_competition"] = chosen["competition"]
-
-                # Enrich canonical competition tag using confirmed official competition
-                if chosen.get("competition"):
-                    canon = detect_canonical_competition(
-                        f"{chosen['competition']} : {m['title']}", silo_hint=silo
-                    )
-                    if canon:
-                        m["canonical_competition"] = canon
-                        m["_canonical_competition"] = canon
-
-                # Attach recognized TV channels & enrich with TvVoo streams (only if present, e.g. from IT feed)
-                cand_tvs = chosen.get("tv_channels", [])
-                if cand_tvs:
-                    m["_diretta_tv_channels"] = cand_tvs
-                    existing_urls = {
-                        s.get("url") for s in m.get("sources", [])
-                        if isinstance(s, dict) and s.get("url")
-                    }
-                    for ch in cand_tvs:
-                        if any(ott in ch.lower() for ott in self.OTT_EXCLUDE):
-                            continue
-                        tv_streams = tvvoo_service.get_channel_streams(channel_name=ch, country="Italy")
-                        if tv_streams:
-                            for st in tv_streams:
-                                if st.get("url") and st["url"] not in existing_urls:
-                                    existing_urls.add(st["url"])
-                                    m.setdefault("sources", []).append({
-                                        "source": "tvvoo",
-                                        "id": st.get("canonical", "tvvoo"),
-                                        "name": st.get("display_name", ch),
-                                        "url": st.get("url"),
-                                        "tag": st.get("tag", "c"),
-                                        "country": st.get("country", "Italy"),
-                                    })
-
-        if reconciled_count > 0:
-            logger.info("Diretta.it Convalidatore: convalidati e normalizzati %d match con successo.", reconciled_count)
-
-        return reconciled_count
 
 diretta_service = DirettaService()

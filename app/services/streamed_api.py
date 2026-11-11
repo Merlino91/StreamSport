@@ -72,12 +72,12 @@ class StreamedAPI:
                 # 1. Primary: Fetch all sports with controlled concurrency (semaphore=5)
                 sem = asyncio.Semaphore(5)
 
-                async def _fetch_sport(sport: str):
-                    async with sem:
+                async def _fetch_sport(sport: str, _host: str = host, _sem: asyncio.Semaphore = sem):
+                    async with _sem:
                         subpath = STREAMED_SPORT_SUBPATHS.get(sport, sport)
                         return await doh_client.get_json(
-                            f"https://{host}/api/matches/{subpath}",
-                            host_header=host,
+                            f"https://{_host}/api/matches/{subpath}",
+                            host_header=_host,
                             timeout=12.0
                         )
 

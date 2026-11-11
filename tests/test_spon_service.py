@@ -134,7 +134,7 @@ class SPONServiceTestCase(unittest.IsolatedAsyncioTestCase):
             ]
         }
 
-        merged = catalog.merge_and_deduplicate_by_silos([canonical_match], [juve_spon])
+        merged = catalog.link_official_schedule_to_providers([canonical_match], {"sportsonline": [juve_spon]})
         self.assertEqual(len(merged), 1)
 
         merged_match = merged[0]

@@ -34,173 +34,16 @@ class TestDirettaService(unittest.TestCase):
         self.assertEqual(m2["home"], "Milan")
         self.assertEqual(m2["away"], "Napoli")
 
-    def test_reconcile_matches_success(self):
-        self.service._cached_events = [
-            {
-                "id": "diretta-1",
-                "_silo": "football",
-                "sport": "Calcio",
-                "country": "Italia",
-                "league": "Serie A",
-                "competition": "Italia: Serie A",
-                "home": "Inter",
-                "away": "Juventus",
-                "title": "Inter vs Juventus",
-                "date": 1728846000000,
-            }
-        ]
-
-        stream_matches = [
-            {
-                "title": "FC Internazionale Milano vs Juventus FC",
-                "_silo": "football",
-                "date": 1728846000000 + (10 * 60 * 1000),  # 10 min drift
-                "competition": "other",
-            }
-        ]
-
-        count = self.service.reconcile_matches(stream_matches)
-        self.assertEqual(count, 1)
-        m = stream_matches[0]
-        self.assertTrue(m.get("_diretta_matched"))
-        self.assertEqual(m["title"], "Inter vs Juventus")
-        self.assertEqual(m["date"], 1728846000000)
-        self.assertEqual(m["competition"], "Italia: Serie A")
-        self.assertEqual(m.get("canonical_competition"), "football_serie_a")
-
-    def test_reconcile_matches_inverted_us_format(self):
-        self.service._cached_events = [
-            {
-                "id": "diretta-nba-1",
-                "_silo": "basketball",
-                "sport": "Basket",
-                "country": "USA",
-                "league": "NBA",
-                "competition": "USA: NBA",
-                "home": "Boston Celtics",
-                "away": "Los Angeles Lakers",
-                "title": "Boston Celtics vs Los Angeles Lakers",
-                "date": 1728850000000,
-            }
-        ]
-
-        # In US format, away visits home: "Lakers at Celtics"
-        stream_matches = [
-            {
-                "title": "Los Angeles Lakers vs Boston Celtics",
-                "_silo": "basketball",
-                "date": 1728850000000,
-                "competition": "NBA",
-            }
-        ]
-
-        count = self.service.reconcile_matches(stream_matches)
-        self.assertEqual(count, 1)
-        m = stream_matches[0]
-        self.assertTrue(m.get("_diretta_matched"))
-        self.assertEqual(m["title"], "Boston Celtics vs Los Angeles Lakers")
-
-    def test_reconcile_matches_time_drift_rejection(self):
-        self.service._cached_events = [
-            {
-                "id": "diretta-1",
-                "_silo": "football",
-                "home": "Inter",
-                "away": "Juventus",
-                "title": "Inter vs Juventus",
-                "date": 1728846000000,
-                "competition": "Italia: Serie A",
-            }
-        ]
-
-        # 3 hours apart (> 90 min tolerance)
-        stream_matches = [
-            {
-                "title": "Inter vs Juventus",
-                "_silo": "football",
-                "date": 1728846000000 + (180 * 60 * 1000),
-                "competition": "Serie A",
-            }
-        ]
-
-        count = self.service.reconcile_matches(stream_matches)
-        self.assertEqual(count, 0)
-        self.assertFalse(stream_matches[0].get("_diretta_matched", False))
-
-    def test_reconcile_matches_silo_mismatch(self):
-        self.service._cached_events = [
-            {
-                "id": "diretta-1",
-                "_silo": "football",
-                "home": "Real Madrid",
-                "away": "Barcelona",
-                "title": "Real Madrid vs Barcelona",
-                "date": 1728846000000,
-                "competition": "Spagna: LaLiga",
-            }
-        ]
-
-        # Same team names, but basketball silo (Euroleague Clásico)
-        stream_matches = [
-            {
-                "title": "Real Madrid vs Barcelona",
-                "_silo": "basketball",
-                "date": 1728846000000,
-                "competition": "Euroleague",
-            }
-        ]
-
-        count = self.service.reconcile_matches(stream_matches)
-        self.assertEqual(count, 0)
-
-
-class TestCatalogServiceValidationFallback(unittest.TestCase):
-    @patch("app.services.catalog_service.diretta_service")
-    @patch("app.services.catalog_service.espn_service")
-    def test_diretta_healthy_uses_diretta_skips_espn(self, mock_espn, mock_diretta):
-        from app.services.catalog_service import catalog_service
-
-        mock_diretta.is_healthy = True
-        mock_diretta.reconcile_matches.return_value = 5
-
-        matches = [{"title": "Test vs Sample", "_silo": "football"}]
-        
-        # Simulate step 4b directly
-        if mock_diretta.is_healthy:
-            mock_diretta.reconcile_matches(matches)
-        else:
-            mock_espn.reconcile_matches(matches, [], lambda x: set(), lambda x: "")
-
-        mock_diretta.reconcile_matches.assert_called_once_with(matches)
-        mock_espn.reconcile_matches.assert_not_called()
-
-    @patch("app.services.catalog_service.diretta_service")
-    @patch("app.services.catalog_service.espn_service")
-    def test_diretta_unhealthy_triggers_espn_fallback(self, mock_espn, mock_diretta):
-        mock_diretta.is_healthy = False
-        mock_espn.reconcile_matches.return_value = None
-
-        matches = [{"title": "Test vs Sample", "_silo": "football"}]
-        espn_events = [{"id": "espn-1", "title": "Test vs Sample"}]
-
-        # Simulate step 4b fallback logic
-        if mock_diretta.is_healthy:
-            mock_diretta.reconcile_matches(matches)
-        else:
-            if espn_events:
-                mock_espn.reconcile_matches(matches, espn_events, lambda x: set(), lambda x: "")
-
-        mock_diretta.reconcile_matches.assert_not_called()
-        mock_espn.reconcile_matches.assert_called_once()
-
 
 class TestBuildMetaItemAndMerging(unittest.TestCase):
     def test_merge_provider_streams_and_build_meta(self):
         from app.services.catalog_service import catalog_service
 
         match_streamed = {
-            "id": "streamed-101",
+            "id": "diretta-101",
             "title": "LAFC vs Austin FC",
+            "home": "LAFC",
+            "away": "Austin FC",
             "date": 1792031400000,
             "category": "football",
             "_silo": "football",
@@ -227,11 +70,14 @@ class TestBuildMetaItemAndMerging(unittest.TestCase):
             "sources": [{"id": "s2", "name": "DaddyLive", "url": "https://daddylive.sx/2"}],
         }
 
-        # Merge provider clusters before linking
-        deduped = catalog_service.merge_and_deduplicate_by_silos([match_streamed], [match_daddylive])
-        self.assertEqual(len(deduped), 1)
+        # Top-down linking attaches provider streams directly to the official match
+        linked = catalog_service.link_official_schedule_to_providers(
+            [match_streamed],
+            {"daddylive": [match_daddylive]},
+        )
+        self.assertEqual(len(linked), 1)
 
-        merged = deduped[0]
+        merged = linked[0]
         self.assertEqual(len(merged["sources"]), 2)
         urls = [s["url"] for s in merged["sources"]]
         self.assertIn("https://streamed.xyz/1", urls)

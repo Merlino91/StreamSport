@@ -75,8 +75,8 @@ class TestHockeyEuropeanLeagues(unittest.TestCase):
         self.assertIn("🏆 SHL", meta.get("description", ""))
 
     def test_livesport_competition_dominance(self):
-        # A raw match with rough provider competition
-        m = {
+        # Top-Down linking: official schedule competition dominates generic provider competition
+        raw_prov = {
             "id": "dlhd-test-1",
             "title": "Timra vs HV 71 (SHL)",
             "category": "hockey",
@@ -84,30 +84,30 @@ class TestHockeyEuropeanLeagues(unittest.TestCase):
             "competition": "Leghe Europee Hockey",
             "canonical_competition": "hockey_euro",
             "date": 1792083600000,
-            "sources": []
+            "sources": [{"source": "dlhd", "id": "dl1", "name": "Sport TV"}],
         }
 
-        # Mock Pass 1 Flashscore EN candidate
-        en_cand = {
+        official_shl = {
             "id": "diretta-en-123",
             "flashscore_id": "fs-123",
             "_silo": "hockey",
+            "category": "hockey",
             "home": "Timra",
             "away": "HV 71",
             "title": "Timra vs HV 71",
             "competition": "Sweden: SHL",
+            "canonical_competition": "hockey_shl",
+            "country": "Sweden",
             "date": 1792083600000,
-            "tv_channels": []
+            "sources": [],
         }
 
-        diretta_service._en_events_by_silo = {"hockey": [en_cand]}
-        diretta_service._cached_events = [en_cand]
-
-        n = diretta_service.reconcile_matches([m])
-        self.assertEqual(n, 1)
-        # Dominant English competition from Livesport inherited
+        linked = catalog_service.link_official_schedule_to_providers([official_shl], {"dlhd": [raw_prov]})
+        self.assertEqual(len(linked), 1)
+        m = linked[0]
         self.assertEqual(m["competition"], "Sweden: SHL")
         self.assertEqual(m["canonical_competition"], "hockey_shl")
+        self.assertEqual(len(m["sources"]), 1)
 
 
 if __name__ == "__main__":

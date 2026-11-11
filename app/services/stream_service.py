@@ -49,7 +49,7 @@ STREAMED_LANG_MAP = {
 CHANNEL_COUNTRY_PATTERNS: List[Tuple[re.Pattern, Optional[re.Pattern], str]] = [
     # 1. Italian: strict word boundaries on keywords including Rai and calcio, must NOT contain foreign country keywords
     (
-        re.compile(r"\b(it|italy|italia|rai|calcio|raisport|supertennis|sportitalia|mediaset|canale\s*5|italia\s*1|tv8)\b", re.IGNORECASE),
+        re.compile(r"\b(it|italy|italia|rai|calcio|raisport|supertennis|sportitalia|mediaset|canale\s*5|italia\s*1|tv8|sky\s*sport\s*(?:uno|basket|legend|24|25[1-9]|4k))\b", re.IGNORECASE),
         re.compile(r"\b(uk|spain|espana|germany|deutschland|austria|ca|canada|us|usa|turkey|turkiye|croatia|hrvatska|serbia|srbija|france|poland|polska|netherlands|holland|russia)\b", re.IGNORECASE),
         "🇮🇹"
     ),
@@ -167,6 +167,33 @@ class StreamService:
     """
     Resolves live streams (DaddyLive/Italian channels + Streamed sources) and post-match replays/highlights.
     """
+
+    def __init__(self):
+        self._background_tasks: Set[asyncio.Task] = set()
+
+    def _on_background_task_done(self, task: asyncio.Task) -> None:
+        self._background_tasks.discard(task)
+        if not task.cancelled():
+            exc = task.exception()
+            if exc:
+                logger.debug("Background DB persistence task error: %s", exc)
+
+    def _persist_match_async(self, match: Dict[str, Any]) -> None:
+        """Updates catalog cache and schedules background SQLite save with strong task reference."""
+        from app.services.catalog_service import catalog_service
+        catalog_service.update_cached_match(match)
+        try:
+            loop = asyncio.get_running_loop()
+            task = loop.create_task(db_service.save_matches_async([match]))
+            self._background_tasks.add(task)
+            task.add_done_callback(self._on_background_task_done)
+        except RuntimeError:
+            try:
+                db_service.save_matches([match])
+            except Exception:
+                pass
+        except Exception:
+            pass
 
     def detect_host(self, embed_url: str) -> str:
         """Detects the appropriate EasyProxy extractor host from the embed URL."""
@@ -698,18 +725,7 @@ class StreamService:
                 logger.debug("Streamed on-demand fallback lookup failed for %s: %s", slug_id, e)
 
         if match_updated:
-            from app.services.catalog_service import catalog_service
-            catalog_service.update_cached_match(match)
-            try:
-                loop = asyncio.get_running_loop()
-                loop.create_task(db_service.save_matches_async([match]))
-            except RuntimeError:
-                try:
-                    db_service.save_matches([match])
-                except Exception:
-                    pass
-            except Exception:
-                pass
+            self._persist_match_async(match)
 
         # 0. Process Mandrakodi (Amstaff ClearKey 1080p 50fps, Direct CDN, SuperTennis OTT, AceStream Media)
         mandrakodi_streams: List[Dict[str, Any]] = []
@@ -1022,18 +1038,7 @@ class StreamService:
                         sources = [s for s in sources if not (isinstance(s, dict) and s.get("source") == "fctv33")]
                         sources.extend(fresh_fctv)
                         match["sources"] = sources
-                        from app.services.catalog_service import catalog_service
-                        catalog_service.update_cached_match(match)
-                        try:
-                            loop = asyncio.get_running_loop()
-                            loop.create_task(db_service.save_matches_async([match]))
-                        except RuntimeError:
-                            try:
-                                db_service.save_matches([match])
-                            except Exception:
-                                pass
-                        except Exception:
-                            pass
+                        self._persist_match_async(match)
                 except Exception as e:
                     logger.debug("Failed real-time FCTV33 stream fetch for %s: %s", fctv_mid, e)
 

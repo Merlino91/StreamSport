@@ -4,7 +4,7 @@ from app.services.team_matching import clean_team_name, match_single_team
 from app.services.genre_classifier import genre_classifier
 from app.services.thesportsdb_service import thesportsdb_service
 from app.services.canonical_competition_service import is_tier_match, detect_canonical_competition
-from app.config import NUVIO_CATALOG_LOOKUP, CATALOG_MAP
+from app.config import NUVIO_CATALOG_LOOKUP, CATALOG_DEFINITIONS
 
 
 class TestWomenChampionsAndTheSportsDB(unittest.IsolatedAsyncioTestCase):
@@ -143,7 +143,7 @@ class TestWomenChampionsAndTheSportsDB(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(genre, "Champions League Femminile")
 
         # Check Stremio catalog definition contains the new genre
-        estero = CATALOG_MAP["calcio_estero"]
+        estero = next(c for c in CATALOG_DEFINITIONS if c["id"] == "calcio_estero")
         self.assertIn("Champions League Femminile", estero["genres"])
         self.assertIn("Champions League", estero["genres"])
 

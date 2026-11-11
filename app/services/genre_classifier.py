@@ -573,10 +573,9 @@ class GenreClassifier:
         # 3. NFL
         is_usa = country in ("usa", "united states", "stati uniti", "us") or "🇺🇸" in eval_text
         has_nfl_keyword = bool(self._NFL_KEYWORD_REGEX.search(eval_text))
-        is_espn_nfl = bool(match.get("_espn_matched") and match.get("_genre") == "NFL")
 
         if not is_explicit_college:
-            if has_nfl_keyword or is_espn_nfl or (is_usa and not is_cfl):
+            if has_nfl_keyword or (is_usa and not is_cfl):
                 return "football_americano", "NFL"
         return "football_americano", "NCAA College Football"
 

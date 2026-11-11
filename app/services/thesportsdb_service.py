@@ -95,6 +95,7 @@ class TheSportsDBService:
         self._blocked_until: float = 0.0
         self._rate_limit_reason: str = ""
         self._enrichment_task: Optional[asyncio.Task] = None
+        self._fallback_task: Optional[asyncio.Task] = None
         self._is_enriching: bool = False
 
         # Authenticated Calendar State
@@ -1074,6 +1075,7 @@ class TheSportsDBService:
                 self._is_enriching = False
 
         self._enrichment_task = asyncio.create_task(_enrich_task())
+        self._enrichment_task.add_done_callback(self._on_background_task_done)
 
     def start_background_fallback_search(self, matches: List[Dict[str, Any]]):
         """Triggers the non-blocking Level 2 fallback semantic search for orphan matches."""
@@ -1089,7 +1091,15 @@ class TheSportsDBService:
             finally:
                 self._is_enriching = False
 
-        asyncio.create_task(_search_task())
+        self._fallback_task = asyncio.create_task(_search_task())
+        self._fallback_task.add_done_callback(self._on_background_task_done)
+
+    @staticmethod
+    def _on_background_task_done(task: asyncio.Task) -> None:
+        if not task.cancelled():
+            exc = task.exception()
+            if exc:
+                logger.warning("TheSportsDB background task failed: %s", exc)
 
 
 thesportsdb_service = TheSportsDBService()
