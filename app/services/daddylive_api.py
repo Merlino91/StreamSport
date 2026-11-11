@@ -1,13 +1,11 @@
 import asyncio
 import datetime
 import html
-import json
 import logging
 import re
 import time
 import urllib.parse
 from typing import Any, Dict, List, Optional, Tuple
-from zoneinfo import ZoneInfo
 import hashlib
 from bs4 import BeautifulSoup
 import httpx
@@ -17,7 +15,6 @@ from app.services.canonical_competition_service import (
     detect_canonical_competition,
     get_canonical_display_name,
     get_canonical_silo,
-    is_redzone_event,
     is_simulcast_event,
     get_simulcast_info,
 )

@@ -1,5 +1,4 @@
 import asyncio
-import inspect
 import logging
 import re
 import time
@@ -11,7 +10,6 @@ from app.services.catalog_service import CatalogService
 from app.services.daddylive_api import daddylive_api
 from app.services.dailymotion_service import dailymotion_service
 from app.services.db_service import db_service
-from app.services.genre_classifier import genre_classifier
 from app.services.sportvideo_service import sportvideo_service
 from app.services.streamed_api import streamed_api
 from app.services.fctv33_service import fctv33_service

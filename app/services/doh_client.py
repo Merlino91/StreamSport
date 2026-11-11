@@ -6,11 +6,11 @@ import socket
 import ssl
 import time
 import urllib.parse
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 import httpcore
 import httpx
 
-logger = logging.getLogger("easysports.doh")
+logger = logging.getLogger("streamsport.doh")
 
 
 def is_ip_private_or_reserved(ip_str: str) -> bool:
@@ -79,23 +79,17 @@ class DoHClient:
         )
         self._doh_client_loop: Optional[asyncio.AbstractEventLoop] = None
 
-        # 2. Upstream Client: Direct IP / CDN fetching with custom SNI support
-        # Allows routing via direct numerical IP when local ISP DNS blocks hostnames
-        self._ssl_context = ssl.create_default_context()
-        self._ssl_context.check_hostname = False
-        self._ssl_context.verify_mode = ssl.CERT_NONE
-
+        # 2. Image / Upstream Cache & Limits
         # In-memory image cache with authentic LRU eviction: url -> (content_bytes, content_type, expire_timestamp)
         self._image_cache: OrderedDict[str, Tuple[bytes, str, float]] = OrderedDict()
         self._image_cache_ttl = 86400  # 24 hours
         self._image_cache_max = 400
 
-        # Shared singleton transport and client with expanded connection pooling
+        # Shared singleton DoH transport and client with strict TLS + DoH SNI bypass
         self._limits = httpx.Limits(max_keepalive_connections=50, max_connections=100, keepalive_expiry=60.0)
-        self._transport = httpx.AsyncHTTPTransport(verify=self._ssl_context, limits=self._limits)
+        self._transport = self.create_transport(verify=True)
         self._client = httpx.AsyncClient(transport=self._transport, timeout=httpx.Timeout(8.0, connect=4.0))
         self._client_loop: Optional[asyncio.AbstractEventLoop] = None
-        self._resolve_lock: asyncio.Lock = asyncio.Lock()
         self._host_locks: Dict[str, asyncio.Lock] = {}
         self._host_locks_loop: Optional[asyncio.AbstractEventLoop] = None
 
@@ -142,7 +136,7 @@ class DoHClient:
         if self._client_loop is None:
             self._client_loop = current_loop
         elif self._client_loop != current_loop or getattr(self._client, "is_closed", False):
-            self._transport = httpx.AsyncHTTPTransport(verify=self._ssl_context, limits=self._limits)
+            self._transport = self.create_transport(verify=True)
             self._client = httpx.AsyncClient(transport=self._transport, timeout=httpx.Timeout(8.0, connect=4.0))
             self._client_loop = current_loop
         return self._client
@@ -216,38 +210,29 @@ class DoHClient:
 
     async def get_json(self, url: str, host_header: Optional[str] = None, timeout: float = 8.0) -> Optional[dict]:
         """
-        Executes an HTTP GET request resolving host via DoH using shared client.
+        Executes an HTTP GET request resolving host via DoH with full TLS SNI and cert verification.
         """
         parsed = httpx.URL(url)
         hostname = parsed.host
 
-        resolved_ip = await self.resolve(hostname)
-        target_url = url
+        # Prime DoH cache and guard against private IPs before transport connect
+        if hostname:
+            await self.resolve(hostname)
+
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             "Accept": "application/json, text/plain, */*",
         }
-
-        if resolved_ip and resolved_ip != hostname:
-            target_url = str(parsed.copy_with(host=resolved_ip))
-            headers["Host"] = host_header or hostname
+        if host_header and host_header != hostname:
+            headers["Host"] = host_header
 
         try:
             http_cli = self._ensure_client()
-            response = await http_cli.get(target_url, headers=headers, timeout=timeout)
+            response = await http_cli.get(url, headers=headers, timeout=timeout)
             if response.status_code == 200:
                 return response.json()
             logger.warning("Request to %s returned status %d", url, response.status_code)
         except Exception as e:
-            if target_url != url:
-                try:
-                    # Fallback to direct URL if SNI was rejected by target server
-                    fallback_headers = {"User-Agent": headers["User-Agent"], "Accept": headers.get("Accept", "*/*")}
-                    response = await http_cli.get(url, headers=fallback_headers, timeout=timeout)
-                    if response.status_code == 200:
-                        return response.json()
-                except Exception:
-                    pass
             logger.error("Failed requesting %s: %s", url, e)
 
         return None
@@ -311,32 +296,6 @@ class DoHClient:
 
         return True, "OK"
 
-    @classmethod
-    def is_safe_image_target(cls, url: str) -> Tuple[bool, str]:
-        """
-        Synchronously validates whether a target URL is safe to proxy (Anti-SSRF guard).
-        Maintained for synchronous callers and unit tests.
-        """
-        is_safe, reason = cls._check_safe_target_pre_dns(url)
-        if not is_safe:
-            return False, reason
-
-        parsed = urllib.parse.urlsplit(url.strip())
-        hostname = (parsed.hostname or "").strip().lower()
-
-        # Verify system DNS resolution
-        try:
-            addr_info = socket.getaddrinfo(hostname, None, proto=socket.IPPROTO_TCP)
-            for entry in addr_info:
-                resolved_addr = entry[4][0]
-                if is_ip_private_or_reserved(resolved_addr):
-                    return False, f"L'hostname {hostname} risolve su un indirizzo interno vietato ({resolved_addr})"
-        except Exception:
-            # If system DNS resolution fails (e.g. ISP censorship), DoH will handle resolution
-            pass
-
-        return True, "OK"
-
     async def get_raw(
         self,
         url: str,
@@ -375,7 +334,6 @@ class DoHClient:
             logger.warning("Blocked raw request: %s resolved to private/reserved IP %s", hostname, resolved_ip)
             return None, None
 
-        target_url = url
         req_headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
@@ -384,13 +342,12 @@ class DoHClient:
         if extra_h:
             req_headers.update(extra_h)
 
-        if resolved_ip and resolved_ip != hostname:
-            target_url = str(parsed.copy_with(host=resolved_ip))
-            req_headers["Host"] = host_header or hostname
+        if host_header and host_header != hostname:
+            req_headers["Host"] = host_header
 
         try:
             http_cli = self._ensure_client()
-            response = await http_cli.get(target_url, headers=req_headers, timeout=timeout)
+            response = await http_cli.get(url, headers=req_headers, timeout=timeout)
             if response.status_code == 200:
                 content_type = response.headers.get("content-type", "image/webp")
                 content = response.content
@@ -406,60 +363,22 @@ class DoHClient:
                         return await self.get_raw(redirect_loc, headers=headers, custom_headers=custom_headers, timeout=timeout)
             logger.warning("Raw request to %s returned status %d", url, response.status_code)
         except Exception as e:
-            if target_url != url:
-                try:
-                    fallback_headers = req_headers.copy()
-                    fallback_headers.pop("Host", None)
-                    response = await http_cli.get(url, headers=fallback_headers, timeout=timeout)
-                    if response.status_code == 200:
-                        content_type = response.headers.get("content-type", "image/webp")
-                        content = response.content
-                        self._save_to_image_cache(url, content, content_type, now)
-                        return content, content_type
-                    if response.status_code in (301, 302, 307, 308):
-                        redirect_loc = response.headers.get("location")
-                        if redirect_loc:
-                            if redirect_loc.startswith("/"):
-                                redirect_loc = f"{parsed.scheme}://{hostname}{redirect_loc}"
-                            is_safe, _ = await self.is_safe_image_target_async(redirect_loc)
-                            if is_safe and redirect_loc != url:
-                                return await self.get_raw(redirect_loc, headers=headers, custom_headers=custom_headers, timeout=timeout)
-                except Exception:
-                    pass
             logger.error("Failed raw request to %s: %s", url, e)
 
         return None, None
 
-    def create_transport(self, verify: bool = False, **kwargs) -> "DoHAsyncHTTPTransport":
-        """Creates a DoHAsyncHTTPTransport attached to this DoHClient."""
-        ssl_ctx = self._ssl_context if not verify else True
-        return DoHAsyncHTTPTransport(verify=ssl_ctx, limits=self._limits, doh_resolver=self, **kwargs)
+    @staticmethod
+    def _build_insecure_ssl_context() -> ssl.SSLContext:
+        """Creates an unverified SSL context only when explicitly requested by a scraper."""
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        return ctx
 
-    async def get_text(
-        self,
-        url: str,
-        headers: Optional[Dict[str, str]] = None,
-        timeout: float = 10.0,
-        follow_redirects: bool = True,
-    ) -> Optional[str]:
-        """
-        Fetches text content from URL with full DoH bypass, SNI preservation,
-        and automatic redirect following.
-        """
-        transport = self.create_transport(verify=False)
-        try:
-            async with httpx.AsyncClient(
-                transport=transport,
-                follow_redirects=follow_redirects,
-                timeout=timeout,
-            ) as client:
-                resp = await client.get(url, headers=headers)
-                if resp.status_code == 200:
-                    return resp.text.lstrip("\ufeff")
-                logger.warning("DoH get_text for %s returned status %d", url, resp.status_code)
-        except Exception as e:
-            logger.error("DoH get_text failed for %s: %s", url, e)
-        return None
+    def create_transport(self, verify: bool = True, **kwargs) -> "DoHAsyncHTTPTransport":
+        """Creates a DoHAsyncHTTPTransport attached to this DoHClient."""
+        ssl_ctx: Any = True if verify else self._build_insecure_ssl_context()
+        return DoHAsyncHTTPTransport(verify=ssl_ctx, limits=self._limits, doh_resolver=self, **kwargs)
 
     async def proxy_image(self, url: str) -> Tuple[Optional[bytes], Optional[str]]:
         """Proxies an image URL and returns (content_bytes, content_type) with anti-SSRF validation."""

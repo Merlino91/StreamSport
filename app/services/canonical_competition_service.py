@@ -1311,7 +1311,7 @@ def detect_canonical_competition(text: str, silo_hint: Optional[str] = None) -> 
         if norm_silo in ("volleyball",): norm_silo = "volley"
         if norm_silo in ("combattimento", "boxe", "mma"): norm_silo = "fight"
 
-        for slug, s_silo, display, regexes in _COMPILED_PATTERNS:
+        for slug, s_silo, _, regexes in _COMPILED_PATTERNS:
             if s_silo == norm_silo:
                 for rx in regexes:
                     if rx.search(t):
@@ -1323,7 +1323,7 @@ def detect_canonical_competition(text: str, silo_hint: Optional[str] = None) -> 
             return None
 
     # 2. Match across all leagues ONLY if no specific sport silo was known
-    for slug, s_silo, display, regexes in _COMPILED_PATTERNS:
+    for slug, s_silo, _, regexes in _COMPILED_PATTERNS:
         # Never match football if text explicitly mentions another sport
         if s_silo == "football" and re.search(r"\b(handball|hbl|ehf|volleyball|pallamano|pallavolo|rugby)\b", t):
             continue

@@ -4,7 +4,7 @@ import datetime
 import logging
 import re
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 import httpx
 
 from app.config import ENABLE_OCBLACKTOP, OCBLACKTOP_API_BASE, OCBLACKTOP_API_KEY

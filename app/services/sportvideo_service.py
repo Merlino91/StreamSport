@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import urllib.parse
 import httpx
 
-logger = logging.getLogger("easysports.sportvideo")
+logger = logging.getLogger("streamsport.sportvideo")
 
 SPORT_URL_MAP = {
     "football": "football.html",

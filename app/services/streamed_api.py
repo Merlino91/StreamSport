@@ -6,12 +6,10 @@ from app.services.doh_client import doh_client
 from app.services.canonical_competition_service import (
     detect_canonical_competition,
     get_canonical_display_name,
-    is_redzone_event,
-    is_simulcast_event,
     get_simulcast_info,
 )
 
-logger = logging.getLogger("easysports.streamed")
+logger = logging.getLogger("streamsport.streamed")
 
 STREAMED_SPORTS_MAP = {
     "football": "football",

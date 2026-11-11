@@ -18,6 +18,8 @@ from app.config import (
     ENABLE_MANDRAKODI_AMSTAFF,
     ENABLE_MANDRAKODI_ACESTREAM,
     ENABLE_MANDRAKODI_SOCCERON,
+    MANDRAKODI_API_URL,
+    MANDRAKODI_XOR_KEY,
     MANDRAKODI_PASSWORD,
     MANDRAKODI_DEVICE_ID,
 )
@@ -28,8 +30,8 @@ from app.services.canonical_competition_service import (
 
 logger = logging.getLogger("streamsport.mandrakodi")
 
-BASE_API_URL = "https://test34344.herokuapp.com/filter.php"
-XOR_KEY = b"my_secret_key"
+BASE_API_URL = MANDRAKODI_API_URL
+XOR_KEY = MANDRAKODI_XOR_KEY
 ROME_TZ = ZoneInfo("Europe/Rome")
 
 HEADER_MAP: Dict[str, Tuple[str, str, str, str]] = {
@@ -738,7 +740,7 @@ class MandrakodiService:
                     channels_map.setdefault(canonical, []).append(stream_entry)
 
             # Prioritize Italian streams at the top of each canonical channel's list
-            for can, s_list in channels_map.items():
+            for s_list in channels_map.values():
                 s_list.sort(key=lambda s: 0 if (s.get("country") == "Italia" or s.get("language") == "ita") else 1)
 
             self._channels_by_canonical = channels_map

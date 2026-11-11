@@ -1,14 +1,12 @@
 import asyncio
-import datetime
-import html
 import json
 import logging
 import re
 import time
-import unicodedata
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Set, Tuple
 import httpx
 
+from app.config import DIRETTA_X_FSIGN
 from app.services.canonical_competition_service import detect_canonical_competition
 from app.utils.demographics import extract_demographics
 
@@ -43,14 +41,14 @@ class DirettaService:
 
     DIRETTA_HEADERS = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
-        "x-fsign": "SW9D1eZo",
+        "x-fsign": DIRETTA_X_FSIGN,
         "Referer": "https://www.diretta.it/",
         "Origin": "https://www.diretta.it"
     }
 
     FLASHSCORE_EN_HEADERS = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
-        "x-fsign": "SW9D1eZo",
+        "x-fsign": DIRETTA_X_FSIGN,
         "Referer": "https://www.flashscore.com/",
         "Origin": "https://www.flashscore.com"
     }
@@ -63,25 +61,6 @@ class DirettaService:
         "onefootball", "fifa+", "uefa.tv", "red bull tv", "youtube", "twitch",
         "apple tv", "mls season pass", "nba global league pass", "nhl.tv", "fiba tv", "euroleague tv", "mlb.tv"
     )
-
-    GENERIC_COMPETITIONS: Set[str] = {
-        "", "other", "unknown", "altri sport", "live sports", "football", "soccer",
-        "calcio", "basket", "basketball", "pallacanestro", "tennis", "undefined",
-        "americhe e leghe extra-ue", "altre leghe europee", "altri campionati europei",
-        "calcio internazionale", "partite amichevoli", "campionati minori",
-        "leghe europee hockey", "leghe europee", "european leagues", "ice hockey", "hockey",
-        "volleyball", "volley", "pallavolo", "motor-sports", "motorsport",
-        "american-football", "american football", "baseball", "fight", "boxe", "mma"
-    }
-
-    @classmethod
-    def is_generic_competition(cls, comp: Optional[str]) -> bool:
-        """Checks if a competition name is missing or generic (ignoring decorative emojis)."""
-        if not comp:
-            return True
-        c = re.sub(r"[\U0001F1E6-\U0001F1FF\U0001F300-\U0001F9FF]", "", comp).lower().strip()
-        c = re.sub(r"\s+", " ", c).strip(" :-–|")
-        return not c or c in cls.GENERIC_COMPETITIONS
 
     def __init__(self):
         self._cached_events: List[Dict[str, Any]] = []

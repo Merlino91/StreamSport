@@ -81,7 +81,7 @@ class ItalianEPGService:
     _TENNIS_EXCLUDED_TOKENS = frozenset({
         "men", "women", "singles", "doubles", "singolare", "doppio", "live", "tour",
         "2025", "2026", "masters", "finals", "open", "quarti", "semifinali", "semifinal",
-        "finale", "finals", "giornata", "sessione", "day", "night", "court", "campo",
+        "finale", "giornata", "sessione", "day", "night", "court", "campo",
         "round", "turno", "match", "diretta", "tennis"
     })
 

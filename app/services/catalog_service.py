@@ -11,13 +11,10 @@ import urllib.parse
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from app.config import (
-    CATALOG_DEFINITIONS,
     CATALOG_SYNC_INTERVAL,
     CATALOG_TYPE,
     ENABLE_REPLAYS,
     NUVIO_CATALOG_LOOKUP,
-    SPORT_GENRES,
-    STREAMED_API_HOST,
     TIMEZONE,
 )
 from app.services.daddylive_api import daddylive_api
@@ -45,9 +42,7 @@ from app.services.provider_normalizers import (
 )
 from app.services.team_matching import extract_team_name, clean_team_name
 from app.services.canonical_competition_service import (
-    detect_canonical_competition,
     get_canonical_display_name,
-    is_redzone_event,
     is_simulcast_event,
     get_simulcast_info,
 )
@@ -158,7 +153,6 @@ class CatalogService:
         if self._cached_matches:
             claimed = set()
             for off in self._cached_matches:
-                off_silo = off.get("_silo") or self.get_canonical_silo(off)
                 off_date = off.get("date") or 0
                 for cand in clean_mk:
                     if cand.get("id") in claimed:
@@ -201,23 +195,6 @@ class CatalogService:
         dt_utc = datetime.datetime.fromtimestamp(timestamp_ms / 1000, tz=datetime.timezone.utc)
         dt_local = dt_utc.astimezone(tz)
         return dt_local.strftime("%d %b %Y, %H:%M").lstrip("0")
-
-    def normalize_image_url(self, path: Optional[str], base_url: Optional[str] = None) -> Optional[str]:
-        """Routes image URL through addon image proxy to bypass ISP blocks."""
-        if not path:
-            return None
-        if path.startswith("/posters/"):
-            return f"{base_url}{path}" if base_url else path
-        if not path.startswith("http://") and not path.startswith("https://"):
-            full_url = f"https://{STREAMED_API_HOST}{path}"
-        else:
-            full_url = path
-
-        if base_url:
-            encoded = urllib.parse.quote(full_url, safe="")
-            return f"{base_url}/image-proxy?url={encoded}"
-
-        return full_url
 
     @staticmethod
     def split_title_and_competition(raw_title: str, genre: Optional[str] = None) -> Tuple[str, str]:
@@ -358,7 +335,6 @@ class CatalogService:
         display_title = match.get("title") or match.get("display_title_it") or match.get("_italian_title") or "Live Sports"
         date_ms = match.get("date", 0)
         is_popular = match.get("popular", False)
-        poster_url = self.normalize_image_url(match.get("poster"), base_url=base_url)
 
         clean_title, comp_name = self.split_title_and_competition(display_title, genre)
         if not comp_name:
@@ -595,28 +571,6 @@ class CatalogService:
         c1 = cls.get_canonical_silo({"_silo": s1, "category": s1})
         c2 = cls.get_canonical_silo({"_silo": s2, "category": s2})
         return c1 == c2
-
-    @classmethod
-    def calc_similarity(cls, tokens1: str, tokens2: str) -> float:
-        """Calculates token-level similarity ratio between 0.0 and 1.0."""
-        if not tokens1 or not tokens2:
-            return 0.0
-        if tokens1 == tokens2:
-            return 1.0
-        w1 = set(tokens1.split())
-        w2 = set(tokens2.split())
-        if w1 == w2:
-            return 1.0
-        if w1.issubset(w2) or w2.issubset(w1):
-            return 0.88
-        seq = SequenceMatcher(None, tokens1, tokens2).ratio()
-        overlap = len(w1 & w2)
-        if overlap:
-            r1 = overlap / len(w1)
-            r2 = overlap / len(w2)
-            token_ratio = (r1 + r2) / 2.0
-            return max(token_ratio, seq)
-        return seq
 
     def link_official_schedule_to_providers(
         self,
@@ -1304,7 +1258,6 @@ class CatalogService:
         limit: int = 50,
         user_tz: Optional[str] = None,
         base_url: Optional[str] = None,
-        is_nuvio: bool = False,
     ) -> List[Dict[str, Any]]:
         """
         Returns catalog items filtered by catalog, genre, and optional search query.
@@ -1320,7 +1273,6 @@ class CatalogService:
         actual_catalog = catalog_id
         if catalog_id and catalog_id in NUVIO_CATALOG_LOOKUP:
             actual_catalog, target_genre = NUVIO_CATALOG_LOOKUP[catalog_id]
-            is_nuvio = True
 
         # Classify and filter by catalog and genre
         now_ms = time.time() * 1000

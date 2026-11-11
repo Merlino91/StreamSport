@@ -100,6 +100,7 @@ class TheSportsDBService:
 
         # Authenticated Calendar State
         self._client: Optional[httpx.AsyncClient] = None
+        self._client_loop: Optional[asyncio.AbstractEventLoop] = None
         self._is_logged_in: bool = False
         self._calendar_cache: List[Dict[str, Any]] = []
         self._calendar_by_silo: Dict[str, List[Dict[str, Any]]] = {}
@@ -108,7 +109,16 @@ class TheSportsDBService:
         self._calendar_lock = asyncio.Lock()
 
     async def _get_client(self) -> httpx.AsyncClient:
-        if self._client is None or self._client.is_closed:
+        try:
+            cur_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            cur_loop = None
+
+        if (
+            self._client is None
+            or self._client.is_closed
+            or self._client_loop is not cur_loop
+        ):
             self._client = httpx.AsyncClient(
                 follow_redirects=True,
                 headers={
@@ -121,7 +131,19 @@ class TheSportsDBService:
                 },
                 timeout=20.0,
             )
+            self._client_loop = cur_loop
         return self._client
+
+    async def close(self) -> None:
+        """Closes the shared HTTP client pool gracefully on shutdown."""
+        if self._client and not self._client.is_closed:
+            try:
+                await self._client.aclose()
+            except Exception:
+                pass
+        self._client = None
+        self._client_loop = None
+        self._is_logged_in = False
 
     async def login(self) -> bool:
         """
@@ -891,7 +913,7 @@ class TheSportsDBService:
                 if not matches_found:
                     continue
 
-                for ev_id, slug, inner, date_str in matches_found:
+                for _, slug, inner, date_str in matches_found:
                     slug_unquoted = urllib.parse.unquote(slug)
                     slug_norm = (
                         unicodedata.normalize("NFKD", slug_unquoted)

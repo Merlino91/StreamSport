@@ -6,7 +6,7 @@ import urllib.parse
 from typing import Any, Dict, List, Optional, Tuple
 from app.services.doh_client import doh_client
 
-logger = logging.getLogger("easysports.dailymotion")
+logger = logging.getLogger("streamsport.dailymotion")
 
 
 class DailymotionService:

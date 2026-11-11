@@ -2,7 +2,7 @@ from __future__ import annotations
 import re
 import unicodedata
 from difflib import SequenceMatcher
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, Set, Tuple
 from app.utils.demographics import extract_demographics
 
 # ==============================================================================

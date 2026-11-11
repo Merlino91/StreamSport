@@ -61,8 +61,13 @@ FCTV33_CACHE_TTL = int(os.getenv("FCTV33_CACHE_TTL", "3600"))  # 1 hour (in seco
 
 # Mandrakodi Provider Settings
 ENABLE_MANDRAKODI = os.getenv("ENABLE_MANDRAKODI", "true").lower() in ("true", "1", "yes")
+MANDRAKODI_API_URL = os.getenv("MANDRAKODI_API_URL", "https://test34344.herokuapp.com/filter.php")
+MANDRAKODI_XOR_KEY = os.getenv("MANDRAKODI_XOR_KEY", "my_secret_key").encode("utf-8")
 MANDRAKODI_PASSWORD = os.getenv("MANDRAKODI_PASSWORD", "UDvXkJqTBR")
 MANDRAKODI_DEVICE_ID = os.getenv("MANDRAKODI_DEVICE_ID", "ABC123XYZ456")
+
+# Diretta / Flashscore Official Feed Signature
+DIRETTA_X_FSIGN = os.getenv("DIRETTA_X_FSIGN", "SW9D1eZo")
 ENABLE_MANDRAKODI_AMSTAFF = os.getenv("ENABLE_MANDRAKODI_AMSTAFF", "true").lower() in ("true", "1", "yes")
 ENABLE_MANDRAKODI_ACESTREAM = os.getenv("ENABLE_MANDRAKODI_ACESTREAM", "true").lower() in ("true", "1", "yes")
 ENABLE_MANDRAKODI_SOCCERON = os.getenv("ENABLE_MANDRAKODI_SOCCERON", "true").lower() in ("true", "1", "yes")

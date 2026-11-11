@@ -1,4 +1,3 @@
-import os
 from pathlib import Path
 import sys
 import unittest
@@ -99,6 +98,7 @@ class TennisPosterTestCase(unittest.IsolatedAsyncioTestCase):
         # Verify physical file
         filename = rel_path.replace("/posters/", "")
         file_path = POSTERS_DIR / filename
+        self.addCleanup(file_path.unlink, missing_ok=True)
         self.assertTrue(file_path.exists())
 
         # Verify image properties
@@ -137,7 +137,9 @@ class TennisPosterTestCase(unittest.IsolatedAsyncioTestCase):
         genre = "WTA"
         rel_path = await tennis_poster_service.generate_poster(match_id, title, genre)
         self.assertIsNotNone(rel_path)
-        self.assertTrue((POSTERS_DIR / rel_path.replace("/posters/", "")).exists())
+        file_path = POSTERS_DIR / rel_path.replace("/posters/", "")
+        self.addCleanup(file_path.unlink, missing_ok=True)
+        self.assertTrue(file_path.exists())
 
     async def test_generate_country_poster(self):
         match_id = "test_country_tie_unit"
@@ -145,7 +147,9 @@ class TennisPosterTestCase(unittest.IsolatedAsyncioTestCase):
         genre = "Coppa Davis e BJK Cup"
         rel_path = await tennis_poster_service.generate_poster(match_id, title, genre)
         self.assertIsNotNone(rel_path)
-        self.assertTrue((POSTERS_DIR / rel_path.replace("/posters/", "")).exists())
+        file_path = POSTERS_DIR / rel_path.replace("/posters/", "")
+        self.addCleanup(file_path.unlink, missing_ok=True)
+        self.assertTrue(file_path.exists())
 
     def test_parse_players_hyphen_stage_guard(self):
         # Hyphen split should NOT occur if tournament or stage tokens are present
@@ -175,6 +179,7 @@ class TennisPosterTestCase(unittest.IsolatedAsyncioTestCase):
         rel_path = await tennis_poster_service.generate_poster(match_id, title, genre)
         self.assertIsNotNone(rel_path)
         file_path = POSTERS_DIR / rel_path.replace("/posters/", "")
+        self.addCleanup(file_path.unlink, missing_ok=True)
         self.assertTrue(file_path.exists())
 
     def test_cleanup_finished_events(self):

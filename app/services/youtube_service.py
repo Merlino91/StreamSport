@@ -8,7 +8,7 @@ import urllib.parse
 from typing import Any, Dict, List, Optional, Tuple
 from app.services.doh_client import doh_client
 
-logger = logging.getLogger("easysports.youtube")
+logger = logging.getLogger("streamsport.youtube")
 
 PREFERRED_CHANNELS = [
     # Official Italian broadcasters and leagues
@@ -373,11 +373,6 @@ class YouTubeService:
             self._manifest_cache[video_id] = (now, content, redirect)
 
         return content, redirect
-
-    async def resolve_stream_url(self, video_id: str) -> Optional[str]:
-        """Backward compatibility for direct stream resolution."""
-        content, redirect = await self.resolve_stream_manifest(video_id)
-        return redirect or None
 
     async def get_highlight_streams(self, match_title: str, base_url: Optional[str] = None) -> List[Dict[str, Any]]:
         """

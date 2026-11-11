@@ -1,9 +1,7 @@
 import re
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Tuple
 from app.utils.demographics import extract_demographics
 from app.services.canonical_competition_service import (
-    is_redzone_event,
-    is_simulcast_event,
     get_simulcast_info,
     get_canonical_silo,
     get_canonical_catalog_and_genre,

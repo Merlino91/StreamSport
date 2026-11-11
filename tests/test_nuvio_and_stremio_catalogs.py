@@ -166,7 +166,6 @@ class TestNuvioAndStremioCatalogs(unittest.TestCase):
                     genre_filter="Serie A",
                     skip=0,
                     limit=50,
-                    is_nuvio=False,
                 )
                 self.assertEqual(len(stremio_page), 10)
 
@@ -175,7 +174,6 @@ class TestNuvioAndStremioCatalogs(unittest.TestCase):
                     catalog_id="nuvio_calcio_italiano_serie_a",
                     skip=0,
                     limit=50,
-                    is_nuvio=True,
                 )
                 self.assertEqual(len(nuvio_page), 10)
 

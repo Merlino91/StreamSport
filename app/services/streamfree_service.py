@@ -18,7 +18,6 @@ from app.services.doh_client import doh_client
 from app.services.canonical_competition_service import (
     detect_canonical_competition,
     get_canonical_display_name,
-    get_canonical_silo,
 )
 from app.utils.demographics import extract_demographics
 

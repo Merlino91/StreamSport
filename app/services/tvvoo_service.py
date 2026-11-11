@@ -156,7 +156,12 @@ class LiveManifestManager:
         self._lock = asyncio.Lock()
         self._last_cleanup: float = 0.0
         # Persistent pooled client for live HLS upstream polling to prevent socket TIME_WAIT exhaustion
-        self._client = httpx.AsyncClient(
+        self._client = self._build_client()
+        self._client_loop: Optional[asyncio.AbstractEventLoop] = None
+
+    @staticmethod
+    def _build_client() -> httpx.AsyncClient:
+        return httpx.AsyncClient(
             timeout=httpx.Timeout(4.0, connect=2.0),
             limits=httpx.Limits(max_keepalive_connections=20, max_connections=50, keepalive_expiry=30.0),
             headers={
@@ -165,10 +170,25 @@ class LiveManifestManager:
             }
         )
 
+    def _ensure_client(self) -> httpx.AsyncClient:
+        """Returns the pooled client, recreating it if closed or bound to an old event loop."""
+        try:
+            current_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            current_loop = None
+
+        if self._client_loop is None:
+            self._client_loop = current_loop
+        elif self._client_loop != current_loop or getattr(self._client, "is_closed", False):
+            self._client = self._build_client()
+            self._client_loop = current_loop
+        return self._client
+
     async def close(self):
         """Closes the underlying HTTP client."""
         if hasattr(self, "_client") and self._client and not self._client.is_closed:
             await self._client.aclose()
+        self._client_loop = None
 
     def _get_key(self, play_url: str, client_ip: Optional[str]) -> str:
         valid_ip = sanitize_ip(client_ip)
@@ -274,7 +294,8 @@ class LiveManifestManager:
     async def _fetch_upstream(self, stream_url: str) -> str:
         if not is_safe_stream_target(stream_url):
             raise RuntimeError(f"Unsafe upstream stream target rejected (SSRF protection): {stream_url[:50]}")
-        res = await self._client.get(stream_url)
+        client = self._ensure_client()
+        res = await client.get(stream_url)
         if res.status_code in (401, 403):
             raise RuntimeError(f"Upstream auth error: {res.status_code}")
         if res.status_code != 200:

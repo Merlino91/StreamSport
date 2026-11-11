@@ -1,9 +1,11 @@
+import asyncio
+import ssl
 import unittest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app.services.doh_client import doh_client, is_ip_private_or_reserved, parse_ip_safe
+from app.services.doh_client import DoHAsyncHTTPTransport, doh_client, is_ip_private_or_reserved, parse_ip_safe
 
 
 class TestSSRFProtection(unittest.TestCase):
@@ -52,36 +54,35 @@ class TestSSRFProtection(unittest.TestCase):
         self.assertFalse(is_ip_private_or_reserved("104.21.5.12"))
 
     def test_is_safe_image_target_schemes(self):
-        safe, _ = doh_client.is_safe_image_target("file:///etc/passwd")
-        self.assertFalse(safe)
+        async def check():
+            for url in (
+                "file:///etc/passwd",
+                "gopher://127.0.0.1:70",
+                "ftp://127.0.0.1/test",
+            ):
+                safe, _ = await doh_client.is_safe_image_target_async(url)
+                self.assertFalse(safe)
 
-        safe, _ = doh_client.is_safe_image_target("gopher://127.0.0.1:70")
-        self.assertFalse(safe)
-
-        safe, _ = doh_client.is_safe_image_target("ftp://127.0.0.1/test")
-        self.assertFalse(safe)
+        asyncio.run(check())
 
     def test_is_safe_image_target_private_hosts(self):
-        safe, _ = doh_client.is_safe_image_target("http://localhost/admin")
-        self.assertFalse(safe)
+        async def check():
+            for url in (
+                "http://localhost/admin",
+                "http://127.0.0.1:8000/api",
+                "http://169.254.169.254/latest/meta-data/",
+                "http://172.17.0.2:9000/",
+                "http://2130706433/test",
+                "http://server.local/",
+                "http://app.internal/",
+            ):
+                safe, _ = await doh_client.is_safe_image_target_async(url)
+                self.assertFalse(safe)
 
-        safe, _ = doh_client.is_safe_image_target("http://127.0.0.1:8000/api")
-        self.assertFalse(safe)
+            safe_pub, _ = await doh_client.is_safe_image_target_async("https://images.unsplash.com/photo-123.jpg")
+            self.assertTrue(safe_pub)
 
-        safe, _ = doh_client.is_safe_image_target("http://169.254.169.254/latest/meta-data/")
-        self.assertFalse(safe)
-
-        safe, _ = doh_client.is_safe_image_target("http://172.17.0.2:9000/")
-        self.assertFalse(safe)
-
-        safe, _ = doh_client.is_safe_image_target("http://2130706433/test")
-        self.assertFalse(safe)
-
-        safe, _ = doh_client.is_safe_image_target("http://server.local/")
-        self.assertFalse(safe)
-
-        safe, _ = doh_client.is_safe_image_target("http://app.internal/")
-        self.assertFalse(safe)
+        asyncio.run(check())
 
     def test_api_endpoint_blocks_ssrf(self):
         # 1. Loopback attack
@@ -120,40 +121,23 @@ class TestSSRFProtection(unittest.TestCase):
         self.assertIsNone(ctype)
 
     def test_doh_client_ssl_verification_isolation(self):
-        import asyncio
-        import ssl
-
-        # 1. Verify that DoH client has strict TLS verification (NOT CERT_NONE)
+        # 1. Verify both DoH resolver client and default upstream/image client enforce strict TLS verification
         self.assertIsNotNone(doh_client._doh_client)
-        # In httpx, verify=True creates an SSL context with CERT_REQUIRED
-        ssl_ctx = getattr(doh_client._doh_client._transport, "_ssl_context", None)
-        if ssl_ctx:
-            self.assertEqual(ssl_ctx.verify_mode, ssl.CERT_REQUIRED)
-            self.assertTrue(ssl_ctx.check_hostname)
+        doh_ssl_ctx = doh_client._doh_client._transport._pool._ssl_context
+        self.assertIsNotNone(doh_ssl_ctx)
+        self.assertEqual(doh_ssl_ctx.verify_mode, ssl.CERT_REQUIRED)
+        self.assertTrue(doh_ssl_ctx.check_hostname)
+
+        self.assertIsInstance(doh_client._client._transport, DoHAsyncHTTPTransport)
+        upstream_ssl_ctx = doh_client._client._transport._pool._ssl_context
+        self.assertIsNotNone(upstream_ssl_ctx)
+        self.assertEqual(upstream_ssl_ctx.verify_mode, ssl.CERT_REQUIRED)
+        self.assertTrue(upstream_ssl_ctx.check_hostname)
 
         # 2. Test live DoH resolution through verified TLS endpoint
         resolved = asyncio.run(doh_client.resolve("google.com"))
         self.assertIsNotNone(resolved)
         self.assertTrue(len(resolved.split(".")) == 4)
-
-    def test_is_safe_image_target_async_parity(self):
-        """Verifies that the non-blocking async DNS implementation behaves identically to the sync version."""
-        import asyncio
-
-        async def check():
-            safe1, _ = await doh_client.is_safe_image_target_async("http://127.0.0.1:8000/metrics")
-            self.assertFalse(safe1)
-
-            safe2, _ = await doh_client.is_safe_image_target_async("http://localhost/image.png")
-            self.assertFalse(safe2)
-
-            safe3, _ = await doh_client.is_safe_image_target_async("file:///etc/passwd")
-            self.assertFalse(safe3)
-
-            safe4, _ = await doh_client.is_safe_image_target_async("https://images.unsplash.com/photo-123.jpg")
-            self.assertTrue(safe4)
-
-        asyncio.run(check())
 
     def test_cors_headers_wildcard_no_credentials(self):
         """Verifies compliant CORS headers: wildcard origin without conflicting credentials."""

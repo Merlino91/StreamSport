@@ -1,6 +1,5 @@
 import base64
 from contextlib import asynccontextmanager
-import ipaddress
 import json
 import logging
 import os
@@ -32,8 +31,6 @@ from app.config import (
     PUBLIC_URL,
     SPORT_GENRES,
     TIMEZONE,
-    STREAMED_API_HOST,
-    TIMEZONE,
 )
 from app.services.banner_service import banner_service
 from app.services.catalog_service import catalog_service
@@ -43,6 +40,7 @@ from app.services.doh_client import doh_client
 from app.services.mandrakodi_service import mandrakodi_service
 from app.services.sportvideo_service import sportvideo_service
 from app.services.stream_service import stream_service
+from app.services.thesportsdb_service import thesportsdb_service
 from app.services.tvvoo_service import is_safe_vavoo_play_url, sanitize_ip, tvvoo_service
 from app.services.youtube_service import youtube_service
 
@@ -63,6 +61,7 @@ async def lifespan(app: FastAPI):
     await doh_client.close()
     await mandrakodi_service.close()
     await sportvideo_service.close()
+    await thesportsdb_service.close()
     db_service.close()
 
 # Directories
@@ -376,10 +375,8 @@ async def unconfigured_catalog(
     genre, search, skip = extract_extra_params(request, extra)
     actual_catalog = id
     actual_genre = genre
-    is_nuvio = ("/nuvio" in request.url.path)
     if id in NUVIO_CATALOG_LOOKUP:
         actual_catalog, actual_genre = NUVIO_CATALOG_LOOKUP[id]
-        is_nuvio = True
 
     metas = await catalog_service.get_catalog(
         catalog_id=actual_catalog,
@@ -388,7 +385,6 @@ async def unconfigured_catalog(
         skip=skip,
         user_tz=TIMEZONE,
         base_url=base_url,
-        is_nuvio=is_nuvio,
     )
     return JSONResponse(
         content={"metas": metas},
@@ -408,15 +404,13 @@ async def configured_catalog(
     extra: Optional[str] = None,
 ):
     base_url = get_base_url(request)
-    ep_url, ep_pass, tz, client = decode_config(config)
+    ep_url, ep_pass, tz, _client = decode_config(config)
     genre, search, skip = extract_extra_params(request, extra)
 
     actual_catalog = id
     actual_genre = genre
-    is_nuvio = (client == "nuvio") or ("/nuvio" in request.url.path)
     if id in NUVIO_CATALOG_LOOKUP:
         actual_catalog, actual_genre = NUVIO_CATALOG_LOOKUP[id]
-        is_nuvio = True
 
     metas = await catalog_service.get_catalog(
         catalog_id=actual_catalog,
@@ -425,7 +419,6 @@ async def configured_catalog(
         skip=skip,
         user_tz=tz,
         base_url=base_url,
-        is_nuvio=is_nuvio,
     )
     return JSONResponse(
         content={"metas": metas},

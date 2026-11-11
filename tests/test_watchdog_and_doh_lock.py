@@ -6,13 +6,16 @@ from app.services.catalog_service import CatalogService
 
 
 class TestWatchdogAndDoHLock(unittest.IsolatedAsyncioTestCase):
-    async def test_doh_client_lock_initialized_atomically(self):
-        """Verifies _resolve_lock is an initialized asyncio.Lock immediately in __init__."""
+    async def test_doh_client_per_host_lock_and_concurrency(self):
+        """Verifies per-hostname DoH locks are created lazily per running loop and serialize concurrent queries."""
         client = DoHClient()
-        self.assertIsNotNone(client._resolve_lock)
-        self.assertIsInstance(client._resolve_lock, asyncio.Lock)
+        lock_a = client._get_host_lock("streamed.pk")
+        lock_b = client._get_host_lock("other.example")
+        self.assertIsInstance(lock_a, asyncio.Lock)
+        self.assertIs(client._get_host_lock("streamed.pk"), lock_a)
+        self.assertIsNot(lock_a, lock_b)
 
-        # Run 20 concurrent resolve() calls to ensure thread safety
+        # Run 20 concurrent resolve() calls to ensure lock & cache safety
         with patch.object(client._doh_client, "get", new_callable=AsyncMock) as mock_get:
             mock_res = MagicMock()
             mock_res.status_code = 200
@@ -22,6 +25,7 @@ class TestWatchdogAndDoHLock(unittest.IsolatedAsyncioTestCase):
             results = await asyncio.gather(*[client.resolve("streamed.pk") for _ in range(20)])
             self.assertEqual(len(results), 20)
             self.assertTrue(all(r == "1.2.3.4" for r in results))
+            self.assertEqual(mock_get.call_count, 1)
 
         await client.close()
 

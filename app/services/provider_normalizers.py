@@ -6,7 +6,7 @@ from __future__ import annotations
 import re
 import html
 import unicodedata
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict
 
 from app.services.team_matching import clean_team_name, extract_team_name
 

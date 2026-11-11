@@ -34,12 +34,12 @@ __pycache__/
 events.db
 matches.db
 
-# Dynamic Poster Caches (preserve embedded static backgrounds & assets)
+# Dynamic Poster Caches & legacy duplicates (static assets live in app/static/posters/; preserve Silos/)
 data/posters/*.jpg
 data/posters/athletes/
+data/posters/assets/
+data/posters/backgrounds/
 data/posters/banners/
-!data/posters/assets/
-!data/posters/backgrounds/
 
 # Local backup files
 *_backup.py

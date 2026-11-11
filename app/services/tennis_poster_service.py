@@ -14,16 +14,15 @@ import weakref
 import httpx
 
 try:
-    from PIL import Image, ImageDraw, ImageFont, ImageFilter
+    from PIL import Image, ImageDraw, ImageFont
     HAS_PIL = True
 except ImportError:
     HAS_PIL = False
     Image = None
     ImageDraw = None
     ImageFont = None
-    ImageFilter = None
 
-from app.config import DATA_DIR, POSTERS_DIR, PROJECT_DIR
+from app.config import POSTERS_DIR, PROJECT_DIR
 from app.services.db_service import db_service
 
 logger = logging.getLogger("streamsport.tennis_poster")
@@ -86,15 +85,11 @@ class TennisPosterService:
         try:
             POSTERS_DIR.mkdir(parents=True, exist_ok=True)
             ATHLETES_DIR.mkdir(parents=True, exist_ok=True)
-            ASSETS_DIR.mkdir(parents=True, exist_ok=True)
-            BACKGROUNDS_DIR.mkdir(parents=True, exist_ok=True)
         except Exception as e:
             logger.warning("Primary POSTERS_DIR %s unavailable (%s). Switching to temp fallback.", POSTERS_DIR, e)
             self.posters_dir = Path(tempfile.gettempdir()) / "streamsport_data" / "posters"
             self.posters_dir.mkdir(parents=True, exist_ok=True)
             (self.posters_dir / "athletes").mkdir(parents=True, exist_ok=True)
-            (self.posters_dir / "assets").mkdir(parents=True, exist_ok=True)
-            (self.posters_dir / "backgrounds").mkdir(parents=True, exist_ok=True)
 
         self._font_path = self._find_font()
         self._enrichment_task: Optional[asyncio.Task] = None
@@ -102,9 +97,6 @@ class TennisPosterService:
         self._unknown_male_cache: Optional[Image.Image] = None
         self._unknown_female_cache: Optional[Image.Image] = None
         self._poster_locks: weakref.WeakValueDictionary = weakref.WeakValueDictionary()
-
-        # Pre-render missing background templates
-        self._ensure_background_templates()
 
         # In-memory negative cache only (session-based). Clean any legacy .missing files from disk.
         self._missing_athletes: Set[str] = set()
@@ -127,73 +119,6 @@ class TennisPosterService:
                         pass
         except Exception:
             pass
-
-    def _ensure_background_templates(self):
-        """Pre-renders clean, minimal 16:9 backgrounds with official tournament logos centered at top."""
-        if not HAS_PIL:
-            return
-
-        BACKGROUNDS_DIR.mkdir(parents=True, exist_ok=True)
-
-        def _make_white_logo(img: Image.Image) -> Image.Image:
-            r, g, b, a = img.split()
-            white = Image.new("RGBA", img.size, (255, 255, 255, 255))
-            white.putalpha(a)
-            return white
-
-        def _stamp_preset(bg_filename: str, logo_filename: str, target_h: int, top_y: int,
-                          force_white: bool, out_filename: str):
-            out_path = BACKGROUNDS_DIR / out_filename
-            if out_path.exists():
-                return
-            bg_src = BACKGROUNDS_DIR / bg_filename
-            logo_src = ASSETS_DIR / logo_filename
-            if not bg_src.exists() or not logo_src.exists():
-                return
-            try:
-                with Image.open(bg_src) as loaded_bg:
-                    bg = loaded_bg.convert("RGBA")
-                with Image.open(logo_src) as loaded_logo:
-                    logo = loaded_logo.convert("RGBA")
-                if force_white:
-                    logo = _make_white_logo(logo)
-                aspect = logo.width / logo.height
-                target_w = int(target_h * aspect)
-                resized = logo.resize((target_w, target_h), Image.Resampling.LANCZOS)
-                pad = 24
-                padded = Image.new("RGBA", (target_w + pad * 2, target_h + pad * 2), (0, 0, 0, 0))
-                padded.paste(resized, (pad, pad), resized)
-                r, g, b, a = padded.split()
-                shadow = Image.new("RGBA", padded.size, (0, 0, 0, 220))
-                shadow.putalpha(a)
-                if ImageFilter:
-                    shadow = shadow.filter(ImageFilter.GaussianBlur(8))
-                final_logo = Image.new("RGBA", padded.size, (0, 0, 0, 0))
-                final_logo.paste(shadow, (0, 0), shadow)
-                final_logo.paste(padded, (0, 0), padded)
-                W, H = bg.size
-                paste_x = (W - final_logo.width) // 2
-                bg.paste(final_logo, (paste_x, top_y), final_logo)
-                bg.convert("RGB").save(out_path, "JPEG", quality=95)
-            except Exception as e:
-                logger.debug("Failed building background %s: %s", out_filename, e)
-
-        configs = [
-            ("bg_atp2.jpg", "atp.png", 135, 45, True, "bg_atp.jpg"),
-            ("bg_wta2.jpg", "wta2.png", 105, 48, True, "bg_wta.jpg"),
-            ("bg_australian_open2.jpg", "australian_open.png", 85, 52, False, "bg_australian_open.jpg"),
-            ("bg_roland_garros2.jpg", "roland_garros.png", 105, 45, False, "bg_roland_garros.jpg"),
-            ("bg_wimbledon2.jpg", "wimbledon.png", 105, 45, False, "bg_wimbledon.jpg"),
-            ("bg_us_open2.jpg", "us_open.png", 90, 50, False, "bg_us_open.jpg"),
-            ("bg_davis_cup2.jpg", "davis_cup.png", 80, 50, False, "bg_davis_cup.jpg"),
-            ("bg_bjk_cup2.jpg", "bjk_cup.png", 80, 52, True, "bg_bjk_cup.jpg"),
-            ("bg_laver_cup2.jpg", "laver_cup.png", 100, 48, True, "bg_laver_cup.jpg"),
-            ("bg_united_cup2.jpg", "united_cup.png", 105, 45, False, "bg_united_cup.jpg"),
-            ("bg_challenger2.jpg", "challenger.png", 75, 52, False, "bg_challenger.jpg"),
-        ]
-
-        for bg_f, l_f, th, ty, fw, out_f in configs:
-            _stamp_preset(bg_f, l_f, th, ty, fw, out_f)
 
     def _find_font(self) -> Optional[str]:
         """Locates a clean, bold sans-serif font across Windows and Linux."""
@@ -385,7 +310,6 @@ class TennisPosterService:
         q_initials = [t[0] for t in q_tokens if len(t) == 1]
         q_words = [t for t in q_tokens if len(t) > 1]
 
-        c_initials = [t[0] for t in c_tokens if len(t) == 1]
         c_words = [t for t in c_tokens if len(t) > 1]
 
         if not q_words or not c_words:
@@ -558,10 +482,8 @@ class TennisPosterService:
             if self._unknown_female_cache is not None:
                 return self._unknown_female_cache
             for p in (
-                ASSETS_DIR / "Unknow_female.png",
                 STATIC_ASSETS_DIR / "Unknow_female.png",
-                ASSETS_DIR / "Tennis_Player_Unknow_female.png",
-                STATIC_ASSETS_DIR / "Tennis_Player_Unknow_female.png",
+                ASSETS_DIR / "Unknow_female.png",
             ):
                 if p.exists():
                     try:
@@ -574,10 +496,8 @@ class TennisPosterService:
             if self._unknown_male_cache is not None:
                 return self._unknown_male_cache
             for p in (
-                ASSETS_DIR / "Unknow_male.png",
                 STATIC_ASSETS_DIR / "Unknow_male.png",
-                ASSETS_DIR / "Tennis_Player_Unknow.png",
-                STATIC_ASSETS_DIR / "Tennis_Player_Unknow.png",
+                ASSETS_DIR / "Unknow_male.png",
             ):
                 if p.exists():
                     try:
@@ -587,10 +507,8 @@ class TennisPosterService:
                     except Exception as e:
                         logger.warning("Failed loading unknown male cutout from %s: %s", p, e)
 
-        # Fallbacks if specific gender asset is missing
+        # Fallback if specific gender asset is missing
         for p in (
-            ASSETS_DIR / "Tennis_Player_Unknow.png",
-            STATIC_ASSETS_DIR / "Tennis_Player_Unknow.png",
             STATIC_ASSETS_DIR / "Unknown.png",
             ASSETS_DIR / "Unknown.png",
         ):
@@ -1279,7 +1197,7 @@ class TennisPosterService:
     def _render_country_match(self, canvas: Image.Image, c1_name: str, c2_name: str, tourn_name: str) -> Image.Image:
         """Renders National Team tie poster (e.g. 'ITALY vs CHINA') for Davis Cup and Billie Jean King Cup."""
         W, H = CANVAS_WIDTH, CANVAS_HEIGHT
-        cx, cy = W // 2, int(H * 0.55)
+        cy = int(H * 0.55)
         draw = ImageDraw.Draw(canvas)
 
         code_map = {

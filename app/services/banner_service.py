@@ -1,6 +1,5 @@
 from __future__ import annotations
 import asyncio
-import datetime
 import io
 import logging
 import os
@@ -8,7 +7,7 @@ from pathlib import Path
 import re
 import tempfile
 import time
-from typing import Any, Dict, Optional, Set, Tuple
+from typing import Any, Dict, Optional, Tuple
 import weakref
 
 try:
@@ -20,7 +19,7 @@ except ImportError:
     ImageDraw = None
     ImageFont = None
 
-from app.config import BANNERS_DIR, DATA_DIR, PROJECT_DIR
+from app.config import BANNERS_DIR, DATA_DIR
 from app.services.doh_client import doh_client
 
 logger = logging.getLogger("streamsport.banner")
