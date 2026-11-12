@@ -688,6 +688,7 @@ async def get_dynamic_poster(
                         match["poster"] = poster_url
                         catalog_service.update_cached_match(match)
                         await db_service.update_match_poster_async(clean_id, poster_url)
+                        banner_service.invalidate_match(clean_id)
                 except Exception as e:
                     logger.debug("Failed on-demand tennis poster generation for %s: %s", clean_id, e)
 

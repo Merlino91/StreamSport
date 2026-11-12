@@ -41,7 +41,7 @@ STATIC_ASSETS_DIR = STATIC_DIR / "assets"
 
 CANVAS_WIDTH = 1225
 CANVAS_HEIGHT = 700
-TENNIS_POSTER_VERSION = 3
+TENNIS_POSTER_VERSION = 4
 
 ESPN_COUNTRIES_URL = "https://sports.core.api.espn.com/v2/sports/tennis/leagues/atp/countries?limit=300"
 ESPN_FLAG_CDN_TMPL = "https://a.espncdn.com/i/teamlogos/countries/500/{code}.png"
@@ -827,11 +827,27 @@ class TennisPosterService:
                 except Exception:
                     pass
 
+        content_bytes: Optional[bytes] = None
         try:
             async with httpx.AsyncClient(timeout=8.0, headers={"User-Agent": "curl/8.4.0"}) as client:
                 res = await client.get(flag_url)
             if res.status_code == 200 and len(res.content) > 200:
-                with io.BytesIO(res.content) as bio:
+                content_bytes = res.content
+        except Exception as e:
+            logger.debug("Direct flag download failed for %s: %s", flag_url, e)
+
+        if content_bytes is None:
+            try:
+                from app.services.doh_client import doh_client
+                proxied, _ = await doh_client.proxy_image(flag_url)
+                if proxied and len(proxied) > 200:
+                    content_bytes = proxied
+            except Exception as e:
+                logger.debug("DoH flag proxy failed for %s: %s", flag_url, e)
+
+        if content_bytes:
+            try:
+                with io.BytesIO(content_bytes) as bio:
                     with Image.open(bio) as opened:
                         if opened.width < 40 or opened.height < 40:
                             return None
@@ -844,8 +860,8 @@ class TennisPosterService:
                 except Exception as e:
                     logger.debug("Could not write flag cache %s: %s", local_path, e)
                 return cropped
-        except Exception as e:
-            logger.debug("Failed downloading flag %s: %s", flag_url, e)
+            except Exception as e:
+                logger.debug("Failed decoding flag %s: %s", flag_url, e)
 
         self._missing_flags.add(code)
         return None

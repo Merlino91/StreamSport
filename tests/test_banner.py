@@ -127,6 +127,19 @@ class BannerServiceTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(item["poster"].startswith("https://addon.test/poster/match_catalog_banner_test.jpg?s="))
         self.assertIn("tv=1", item["poster"])
 
+        from app.services.banner_service import BANNER_VERSION
+        from app.services.tennis_poster_service import TENNIS_POSTER_VERSION
+        tennis_match = {
+            "id": "match_tennis_banner_ver_test",
+            "title": "Emirati arabi uniti vs Yemen",
+            "category": "tennis",
+            "date": 1790000000000,
+            "poster": None,
+            "sources": [],
+        }
+        tennis_item = catalog_service.build_meta_item(tennis_match, "Coppa Davis e BJK Cup", base_url="https://addon.test")
+        self.assertIn(f"&v={BANNER_VERSION}_{TENNIS_POSTER_VERSION}", tennis_item["poster"])
+
 
 if __name__ == "__main__":
     unittest.main()

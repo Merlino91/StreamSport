@@ -444,7 +444,13 @@ class CatalogService:
             poster_endpoint += f"&t={urllib.parse.quote(banner_time)}"
         if has_tvvoo:
             poster_endpoint += "&tv=1"
-        poster_endpoint += f"&v={BANNER_VERSION}"
+        is_tennis = (
+            "tennis" in str(match.get("category") or "").lower()
+            or "tennis" in str(match.get("_catalog") or "").lower()
+            or "tennis" in str(match.get("_silo") or "").lower()
+        )
+        ver_tag = f"{BANNER_VERSION}_{TENNIS_POSTER_VERSION}" if is_tennis else str(BANNER_VERSION)
+        poster_endpoint += f"&v={ver_tag}"
 
         dynamic_poster_url = f"{base_url}{poster_endpoint}" if base_url else poster_endpoint
 
