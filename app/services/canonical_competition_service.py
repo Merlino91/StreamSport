@@ -703,7 +703,7 @@ CANONICAL_LEAGUES = {
         "silo": "tennis",
         "catalog": "tennis",
         "genre": "Coppa Davis e BJK Cup",
-        "patterns": [r"davis\s*cup", r"coppa\s*davis", r"billie\s*jean\s*king", r"\bbjk\s*cup\b", r"laver\s*cup"],
+        "patterns": [r"davis\s*cup", r"coppa\s*davis", r"billie\s*jean\s*king", r"\bbjk\s*cup\b", r"laver\s*cup", r"united\s*cup", r"hopman\s*cup"],
     },
 
     # --------------------------------------------------------------------------
@@ -1537,7 +1537,7 @@ def is_tier_match(m: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
             return True, "tennis_atp"
         if "wta" in league:
             return True, "tennis_wta"
-        if any(w in league for w in ("davis", "billie jean king", "bjk cup", "laver cup")):
+        if any(w in league for w in ("davis", "billie jean king", "bjk cup", "laver cup", "united cup", "hopman cup")):
             return True, "tennis_davis_bjk"
         return False, None
 

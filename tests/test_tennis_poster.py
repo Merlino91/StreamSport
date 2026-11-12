@@ -1,16 +1,21 @@
 from pathlib import Path
 import sys
 import unittest
+from unittest.mock import AsyncMock, patch
 from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from app.services.canonical_competition_service import detect_canonical_competition, is_tier_match
+from app.services.diretta_service import DirettaService
+from app.services.genre_classifier import genre_classifier
 from app.services.tennis_poster_service import (
     tennis_poster_service,
     CANVAS_WIDTH,
     CANVAS_HEIGHT,
     POSTERS_DIR,
     ATHLETES_DIR,
+    FLAGS_DIR,
     ASSETS_DIR,
     STATIC_ASSETS_DIR,
 )
@@ -83,8 +88,26 @@ class TennisPosterTestCase(unittest.IsolatedAsyncioTestCase):
         wim = tennis_poster_service.get_theme_palette("Grandi Slam", "Djokovic vs Alcaraz (Wimbledon Final)")
         self.assertEqual(wim["badge_text"], "WIMBLEDON")
 
-        davis = tennis_poster_service.get_theme_palette("Coppa Davis e BJK Cup", "Italy vs China (Billie Jean King Cup)")
+        bjk = tennis_poster_service.get_theme_palette("Coppa Davis e BJK Cup", "Italy vs China (Billie Jean King Cup)")
+        self.assertEqual(bjk["badge_text"], "BJK CUP")
+        self.assertEqual(bjk["bg_file"], "bg_bjk_cup.jpg")
+
+        davis = tennis_poster_service.get_theme_palette("Coppa Davis e BJK Cup", "Emirati arabi uniti vs Yemen (Davis Cup)")
         self.assertEqual(davis["badge_text"], "DAVIS CUP")
+        self.assertEqual(davis["bg_file"], "bg_davis_cup.jpg")
+
+        # "United Arab Emirates" must NOT false-trigger bg_united_cup.jpg
+        davis_uae = tennis_poster_service.get_theme_palette(
+            "Coppa Davis e BJK Cup",
+            "United Arab Emirates vs Yemen",
+            match={"competition": "SQUADRE - UOMINI: Davis Cup - Group V"},
+        )
+        self.assertEqual(davis_uae["badge_text"], "DAVIS CUP")
+        self.assertEqual(davis_uae["bg_file"], "bg_davis_cup.jpg")
+
+        ucup = tennis_poster_service.get_theme_palette("Coppa Davis e BJK Cup", "Italy vs Spain (United Cup)")
+        self.assertEqual(ucup["badge_text"], "UNITED CUP")
+        self.assertEqual(ucup["bg_file"], "bg_united_cup.jpg")
 
     async def test_generate_poster_creation(self):
         match_id = "test_tennis_match_unit"
@@ -236,6 +259,89 @@ class TennisPosterTestCase(unittest.IsolatedAsyncioTestCase):
         for t in real_matches:
             info = tennis_poster_service.is_stage_placeholder(t)
             self.assertIsNone(info, f"Expected regular match (None) for: {t}")
+
+    def test_diretta_reconstruct_skips_team_ties(self):
+        """Ensures national-team tennis ties keep clean Italianized titles without English slug prepending."""
+        ds = DirettaService()
+        raw_feed = (
+            "~ZA÷SQUADRE - UOMINI: Davis Cup - Group V (Mondo)¬"
+            "~AA÷tie123¬AD÷1794535200¬AE÷Emirati arabi uniti¬WU÷united-arab-emirates"
+            "¬AF÷Tagikistan¬WV÷tajikistan¬AB÷1¬"
+            "~ZA÷WTA - SINGOLARE: Finals¬"
+            "~AA÷plr456¬AD÷1794535200¬AE÷Paolini J.¬WU÷paolini-jasmine"
+            "¬AF÷Gauff C.¬WV÷gauff-coco¬AB÷1¬"
+        )
+        events = ds.parse_flashscore_feed(raw_feed, "Tennis", "tennis")
+        by_id = {e["id"]: e for e in events}
+        self.assertEqual(by_id["diretta-tie123"]["title"], "Emirati arabi uniti vs Tagikistan")
+        self.assertEqual(by_id["diretta-plr456"]["title"], "Jasmine Paolini vs Coco Gauff")
+
+    def test_genre_classifier_and_canonical_team_cups(self):
+        """Ensures BJK Cup and United Cup stay in 'Coppa Davis e BJK Cup' and match canonical patterns."""
+        self.assertEqual(detect_canonical_competition("United Cup Perth", silo_hint="tennis"), "tennis_davis_bjk")
+        self.assertEqual(detect_canonical_competition("Hopman Cup Nice", silo_hint="tennis"), "tennis_davis_bjk")
+        self.assertEqual(is_tier_match({"_silo": "tennis", "competition": "United Cup"})[1], "tennis_davis_bjk")
+
+        cat_bjk, gen_bjk = genre_classifier.classify(
+            {"title": "Laos vs Bhutan", "competition": "SQUADRE - DONNE: Billie Jean King Cup", "sport": "Tennis", "is_women": True}
+        )
+        self.assertEqual((cat_bjk, gen_bjk), ("tennis", "Coppa Davis e BJK Cup"))
+
+        cat_uc, gen_uc = genre_classifier.classify(
+            {"title": "Italia vs Spagna", "competition": "United Cup", "sport": "Tennis", "is_women": True}
+        )
+        self.assertEqual((cat_uc, gen_uc), ("tennis", "Coppa Davis e BJK Cup"))
+
+    def test_country_tie_vs_individual_rubber_detection(self):
+        """Individual Davis/BJK rubbers must still render player cutouts; nation ties must render flags."""
+        self.assertTrue(tennis_poster_service.is_country_match("Laos vs Bhutan", "Laos", "Bhutan", "WTA"))
+        self.assertTrue(tennis_poster_service.is_country_match("Repubblica Ceca vs Gran Bretagna", "Repubblica Ceca", "Gran Bretagna", "Coppa Davis e BJK Cup"))
+        self.assertTrue(tennis_poster_service.is_country_match("Pacific Oceania vs Guam", "Pacific Oceania", "Guam", "Coppa Davis e BJK Cup"))
+        # Legacy doubled EN+IT title recovery
+        resolved = tennis_poster_service.resolve_country("United Arab Emirates Emirati arabi uniti")
+        self.assertTrue(resolved["is_team"])
+        self.assertEqual(resolved["abbr"], "UAE")
+        self.assertEqual(resolved["display"], "Emirati Arabi Uniti")
+        # Singles rubber inside Davis Cup must NOT trigger country boxes
+        self.assertFalse(
+            tennis_poster_service.is_country_match(
+                "Jannik Sinner vs Carlos Alcaraz",
+                "Jannik Sinner",
+                "Carlos Alcaraz",
+                "Coppa Davis e BJK Cup",
+                match={"competition": "SQUADRE - UOMINI: Davis Cup"},
+            )
+        )
+
+    async def test_country_poster_skips_athlete_searches_and_uses_flags(self):
+        """Nation ties must render standalone flags (or clean Italian fallback) without any player cutout searches."""
+        sample_flag = Image.new("RGBA", (180, 120), (0, 140, 60, 255))
+
+        async def fake_fetch_flag(info):
+            if info.get("is_special"):
+                return None
+            return sample_flag.copy()
+
+        with (
+            patch.object(tennis_poster_service, "_ensure_espn_country_index", new=AsyncMock()),
+            patch.object(tennis_poster_service, "_fetch_country_flag", side_effect=fake_fetch_flag),
+            patch.object(tennis_poster_service, "_search_espn", new=AsyncMock()) as m_espn,
+            patch.object(tennis_poster_service, "_search_atp", new=AsyncMock()) as m_atp,
+            patch.object(tennis_poster_service, "_search_wta", new=AsyncMock()) as m_wta,
+        ):
+            rel = await tennis_poster_service.generate_poster(
+                "test_davis_pac_gum_flags",
+                "Pacific Oceania vs Guam",
+                "WTA",
+                match={"competition": "SQUADRE - UOMINI: Davis Cup - Group V"},
+            )
+            self.assertIsNotNone(rel)
+            file_path = POSTERS_DIR / rel.replace("/posters/", "")
+            self.addCleanup(file_path.unlink, missing_ok=True)
+            self.assertTrue(file_path.exists())
+            m_espn.assert_not_awaited()
+            m_atp.assert_not_awaited()
+            m_wta.assert_not_awaited()
 
 
 if __name__ == "__main__":

@@ -69,6 +69,24 @@ class DirettaService:
         self._lock = asyncio.Lock()
 
     @staticmethod
+    def _is_tennis_team_league(league: str) -> bool:
+        """Returns True for national/team tennis competitions whose sides are countries, not players."""
+        low = (league or "").lower()
+        return any(
+            kw in low
+            for kw in (
+                "squadre",
+                "teams",
+                "davis",
+                "billie jean",
+                "bjk",
+                "united cup",
+                "hopman",
+                "laver cup",
+            )
+        )
+
+    @staticmethod
     def reconstruct_tennis_name(abbrev: str, slug: str) -> str:
         """Reconstructs 'Jasmine Paolini' from 'Paolini J.' and slug 'paolini-jasmine'."""
         if not slug or not abbrev:
@@ -183,7 +201,7 @@ class DirettaService:
 
                     full_home = home.strip()
                     full_away = away.strip()
-                    if silo_name == "tennis":
+                    if silo_name == "tennis" and not self._is_tennis_team_league(current_league):
                         full_home = self.reconstruct_tennis_name(home, fields.get("WU") or "")
                         full_away = self.reconstruct_tennis_name(away, fields.get("WV") or "")
 

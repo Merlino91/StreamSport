@@ -2,12 +2,14 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import io
+import json
 import logging
 import os
 from pathlib import Path
 import re
 import tempfile
 import time
+import unicodedata
 import urllib.parse
 from typing import Any, Dict, List, Optional, Set, Tuple
 import weakref
@@ -28,6 +30,7 @@ from app.services.db_service import db_service
 logger = logging.getLogger("streamsport.tennis_poster")
 
 ATHLETES_DIR = POSTERS_DIR / "athletes"
+FLAGS_DIR = POSTERS_DIR / "flags"
 ASSETS_DIR = POSTERS_DIR / "assets"
 BACKGROUNDS_DIR = POSTERS_DIR / "backgrounds"
 
@@ -38,21 +41,166 @@ STATIC_ASSETS_DIR = STATIC_DIR / "assets"
 
 CANVAS_WIDTH = 1225
 CANVAS_HEIGHT = 700
-TENNIS_POSTER_VERSION = 2
+TENNIS_POSTER_VERSION = 3
 
-KNOWN_COUNTRIES = {
-    "italy", "italia", "china", "cina", "usa", "united states", "spain", "spagna",
-    "france", "francia", "germany", "germania", "great britain", "gran bretagna", "uk",
-    "australia", "canada", "argentina", "japan", "giappone", "netherlands", "olanda",
-    "belgium", "belgio", "switzerland", "svizzera", "serbia", "croatia", "croazia",
-    "czech republic", "repubblica ceca", "poland", "polonia", "brazil", "brasile",
-    "sweden", "svezia", "austria", "kazakhstan", "kazakistan", "ukraine", "ucraina",
-    "slovakia", "slovacchia", "chile", "cile", "colombia", "mexico", "messico",
-    "korea", "south korea", "corea del sud", "norway", "norvegia", "denmark", "danimarca",
-    "finland", "finlandia", "romania", "hungary", "ungheria", "greece", "grecia",
-    "portugal", "portogallo", "india", "israel", "taiwan", "hong kong", "thailand",
-    "indonesia", "paraguay", "south africa", "georgia", "latvia", "lettonia", "philippines"
+ESPN_COUNTRIES_URL = "https://sports.core.api.espn.com/v2/sports/tennis/leagues/atp/countries?limit=300"
+ESPN_FLAG_CDN_TMPL = "https://a.espncdn.com/i/teamlogos/countries/500/{code}.png"
+ESPN_COUNTRIES_TTL = 86400  # 24h
+
+# Normalized country aliases (lowercase, unaccented) -> ESPN 3-letter code
+COUNTRY_ALIASES: Dict[str, str] = {
+    "italia": "ita", "italy": "ita",
+    "cina": "chn", "china": "chn",
+    "stati uniti": "usa", "united states": "usa", "usa": "usa",
+    "spagna": "esp", "spain": "esp",
+    "francia": "fra", "france": "fra",
+    "germania": "ger", "germany": "ger",
+    "gran bretagna": "gbr", "great britain": "gbr", "regno unito": "gbr", "united kingdom": "gbr", "uk": "gbr",
+    "inghilterra": "eng", "england": "eng",
+    "australia": "aus",
+    "canada": "can",
+    "argentina": "arg",
+    "giappone": "jpn", "japan": "jpn",
+    "olanda": "ned", "paesi bassi": "ned", "netherlands": "ned", "holland": "ned",
+    "belgio": "bel", "belgium": "bel",
+    "svizzera": "sui", "switzerland": "sui",
+    "serbia": "srb",
+    "croazia": "cro", "croatia": "cro",
+    "repubblica ceca": "cze", "cechia": "cze", "czech republic": "cze", "czechia": "cze",
+    "polonia": "pol", "poland": "pol",
+    "brasile": "bra", "brazil": "bra",
+    "svezia": "swe", "sweden": "swe",
+    "austria": "aut",
+    "kazakistan": "kaz", "kazakhstan": "kaz",
+    "ucraina": "ukr", "ukraine": "ukr",
+    "slovacchia": "svk", "slovakia": "svk",
+    "slovenia": "slo",
+    "cile": "chi", "chile": "chi",
+    "colombia": "col",
+    "messico": "mex", "mexico": "mex",
+    "corea del sud": "kor", "south korea": "kor", "korea": "kor", "korea republic": "kor", "corea": "kor",
+    "corea del nord": "prk", "north korea": "prk",
+    "norvegia": "nor", "norway": "nor",
+    "danimarca": "den", "denmark": "den",
+    "finlandia": "fin", "finland": "fin",
+    "romania": "rou",
+    "ungheria": "hun", "hungary": "hun",
+    "grecia": "gre", "greece": "gre",
+    "portogallo": "por", "portugal": "por",
+    "india": "ind",
+    "israele": "isr", "israel": "isr",
+    "taiwan": "tpo", "taipei cinese": "tpo", "chinese taipei": "tpo",
+    "hong kong": "hkg",
+    "thailandia": "tha", "thailand": "tha",
+    "indonesia": "ina",
+    "paraguay": "par",
+    "sudafrica": "rsa", "south africa": "rsa",
+    "georgia": "geo",
+    "lettonia": "lat", "latvia": "lat",
+    "lituania": "ltu", "lithuania": "ltu",
+    "estonia": "est",
+    "filippine": "phi", "philippines": "phi",
+    "emirati arabi uniti": "uae", "united arab emirates": "uae", "uae": "uae",
+    "tagikistan": "tjk", "tajikistan": "tjk",
+    "brunei": "bru", "brunei darussalam": "bru",
+    "yemen": "yem",
+    "bhutan": "bhu",
+    "laos": "lao",
+    "maldive": "mdv", "maldives": "mdv",
+    "mongolia": "mgl",
+    "nepal": "nep",
+    "bangladesh": "ban",
+    "bahrein": "bhr", "bahrain": "bhr",
+    "macao": "mac", "macau": "mac",
+    "guam": "gum",
+    "cambogia": "cam", "cambodia": "cam",
+    "papua nuova guinea": "png", "papua new guinea": "png",
+    "barbados": "brb",
+    "figi": "fij", "fiji": "fij",
+    "nuova zelanda": "nzl", "new zealand": "nzl",
+    "russia": "rus",
+    "bielorussia": "blr", "belarus": "blr",
+    "turchia": "tur", "turkey": "tur", "turkiye": "tur",
+    "arabia saudita": "ksa", "saudi arabia": "ksa",
+    "giordania": "jor", "jordan": "jor",
+    "libano": "lib", "lebanon": "lib",
+    "siria": "syr", "syria": "syr",
+    "uzbekistan": "uzb",
+    "turkmenistan": "tkm",
+    "kirghizistan": "kgz", "kyrgyzstan": "kgz",
+    "pakistan": "pak",
+    "vietnam": "vie",
+    "singapore": "sin",
+    "malesia": "mas", "malaysia": "mas",
+    "marocco": "mar", "morocco": "mar",
+    "tunisia": "tun",
+    "egitto": "egy", "egypt": "egy",
+    "algeria": "alg",
+    "uruguay": "uru",
+    "peru": "per",
+    "ecuador": "ecu",
+    "bolivia": "bol",
+    "venezuela": "ven",
+    "costa d avorio": "civ", "cote d ivoire": "civ", "ivory coast": "civ",
+    "lussemburgo": "lux", "luxembourg": "lux",
+    "bosnia ed erzegovina": "bih", "bosnia and herzegovina": "bih", "bosnia herzegovina": "bih",
+    "macedonia del nord": "mkd", "north macedonia": "mkd", "macedonia": "mkd",
+    "porto rico": "pur", "puerto rico": "pur",
+    "repubblica dominicana": "dom", "dominican republic": "dom",
+    "moldavia": "mda", "moldova": "mda",
+    "irlanda": "irl", "ireland": "irl",
+    "cipro": "cyp", "cyprus": "cyp",
+    "malta": "mlt",
+    "monaco": "mon",
+    "armenia": "arm",
+    "azerbaigian": "aze", "azerbaijan": "aze",
+    "qatar": "qat",
+    "oman": "oma",
+    "kuwait": "kuw",
+    "iran": "irn",
+    "iraq": "irq",
+    "palestina": "ple", "palestine": "ple",
+    "myanmar": "mya",
+    "sri lanka": "sri",
+    "bulgaria": "bul",
+    "el salvador": "esa",
+    "costa rica": "crc",
+    "samoa": "wsm",
 }
+
+# Preferred clean Italian names for fallback cards (when an entity has no flag and feed used English)
+COUNTRY_IT_DISPLAY: Dict[str, str] = {
+    "ita": "Italia", "chn": "Cina", "usa": "Stati Uniti", "esp": "Spagna",
+    "fra": "Francia", "ger": "Germania", "gbr": "Gran Bretagna", "eng": "Inghilterra",
+    "jpn": "Giappone", "ned": "Paesi Bassi", "bel": "Belgio", "sui": "Svizzera",
+    "cro": "Croazia", "cze": "Repubblica Ceca", "pol": "Polonia", "bra": "Brasile",
+    "swe": "Svezia", "kaz": "Kazakistan", "ukr": "Ucraina", "svk": "Slovacchia",
+    "chi": "Cile", "mex": "Messico", "kor": "Corea del Sud", "prk": "Corea del Nord",
+    "nor": "Norvegia", "den": "Danimarca", "fin": "Finlandia", "hun": "Ungheria",
+    "gre": "Grecia", "por": "Portogallo", "isr": "Israele", "tha": "Thailandia",
+    "rsa": "Sudafrica", "lat": "Lettonia", "ltu": "Lituania", "phi": "Filippine",
+    "uae": "Emirati Arabi Uniti", "tjk": "Tagikistan", "mdv": "Maldive",
+    "bhr": "Bahrein", "mac": "Macao", "cam": "Cambogia", "png": "Papua Nuova Guinea",
+    "fij": "Figi", "nzl": "Nuova Zelanda", "blr": "Bielorussia", "tur": "Turchia",
+    "ksa": "Arabia Saudita", "jor": "Giordania", "lib": "Libano", "syr": "Siria",
+    "kgz": "Kirghizistan", "mas": "Malesia", "mar": "Marocco", "egy": "Egitto",
+    "civ": "Costa d'Avorio", "lux": "Lussemburgo", "bih": "Bosnia ed Erzegovina",
+    "mkd": "Macedonia del Nord", "pur": "Porto Rico", "dom": "Repubblica Dominicana",
+    "mda": "Moldavia", "irl": "Irlanda", "cyp": "Cipro", "aze": "Azerbaigian",
+    "ple": "Palestina",
+}
+
+SPECIAL_TEAM_ENTITIES: Dict[str, Tuple[str, str]] = {
+    "pacific oceania": ("PAC", "Pacific Oceania"),
+    "team europe": ("EUR", "Team Europe"),
+    "europa": ("EUR", "Team Europe"),
+    "europe": ("EUR", "Team Europe"),
+    "team world": ("WLD", "Team World"),
+    "resto del mondo": ("WLD", "Team World"),
+    "world": ("WLD", "Team World"),
+}
+
+KNOWN_COUNTRIES: Set[str] = set(COUNTRY_ALIASES.keys()) | set(SPECIAL_TEAM_ENTITIES.keys())
 
 CIRCUIT_NAMES = {"atp", "wta", "itf", "challenger", "davis cup", "bjk cup", "united cup", "laver cup"}
 
@@ -85,11 +233,15 @@ class TennisPosterService:
         try:
             POSTERS_DIR.mkdir(parents=True, exist_ok=True)
             ATHLETES_DIR.mkdir(parents=True, exist_ok=True)
+            FLAGS_DIR.mkdir(parents=True, exist_ok=True)
+            self.flags_dir = FLAGS_DIR
         except Exception as e:
             logger.warning("Primary POSTERS_DIR %s unavailable (%s). Switching to temp fallback.", POSTERS_DIR, e)
             self.posters_dir = Path(tempfile.gettempdir()) / "streamsport_data" / "posters"
             self.posters_dir.mkdir(parents=True, exist_ok=True)
             (self.posters_dir / "athletes").mkdir(parents=True, exist_ok=True)
+            self.flags_dir = self.posters_dir / "flags"
+            self.flags_dir.mkdir(parents=True, exist_ok=True)
 
         self._font_path = self._find_font()
         self._enrichment_task: Optional[asyncio.Task] = None
@@ -97,6 +249,14 @@ class TennisPosterService:
         self._unknown_male_cache: Optional[Image.Image] = None
         self._unknown_female_cache: Optional[Image.Image] = None
         self._poster_locks: weakref.WeakValueDictionary = weakref.WeakValueDictionary()
+
+        # ESPN Countries & Flags caches (24h index + persistent local flag PNGs)
+        self._espn_countries_by_abbr: Dict[str, Dict[str, str]] = {}
+        self._espn_countries_by_name: Dict[str, str] = {}
+        self._espn_countries_loaded_at: float = 0.0
+        self._countries_lock: Optional[asyncio.Lock] = None
+        self._missing_flags: Set[str] = set()
+        self._load_espn_countries_from_disk()
 
         # In-memory negative cache only (session-based). Clean any legacy .missing files from disk.
         self._missing_athletes: Set[str] = set()
@@ -451,16 +611,261 @@ class TennisPosterService:
 
         return None
 
-    def is_country_match(self, title: str, p1: str, p2: str, genre: str) -> bool:
-        """Identifies national team matches (Davis Cup, Billie Jean King Cup, United Cup)."""
-        combined = f"{title} {genre}".lower()
-        if any(w in combined for w in ["billie jean king", "bjk cup", "davis cup", "united cup"]):
-            return True
-        c1 = p1.lower().strip()
-        c2 = p2.lower().strip()
-        if c1 in KNOWN_COUNTRIES and c2 in KNOWN_COUNTRIES:
-            return True
-        return False
+    @staticmethod
+    def _norm_country_key(text: str) -> str:
+        """Normalizes a country or team name into a plain lowercase ASCII lookup key."""
+        s = re.sub(r"[\(\)\[\]]", " ", text or "")
+        s = unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode("ascii")
+        s = re.sub(r"[^a-zA-Z0-9]+", " ", s).strip().lower()
+        return s
+
+    def _seed_espn_countries(self, items: List[Dict[str, Any]], loaded_at: Optional[float] = None):
+        """Populates in-memory country abbreviation and name lookup tables from ESPN items."""
+        by_abbr: Dict[str, Dict[str, str]] = {}
+        by_name: Dict[str, str] = {}
+        for it in items:
+            if not isinstance(it, dict):
+                continue
+            abbr = (it.get("abbreviation") or "").strip().lower()
+            name = (it.get("name") or "").strip()
+            slug = (it.get("slug") or "").strip().replace("-", " ")
+            flag = (it.get("flag") or {}).get("href") or ""
+            if not abbr:
+                continue
+            entry = {
+                "abbr": abbr.upper(),
+                "name": name or abbr.upper(),
+                "flag_url": flag or ESPN_FLAG_CDN_TMPL.format(code=abbr),
+            }
+            if abbr not in by_abbr or (flag and not by_abbr[abbr].get("flag_url")):
+                by_abbr[abbr] = entry
+            if name:
+                k = self._norm_country_key(name)
+                if k:
+                    by_name[k] = abbr
+            if slug:
+                k_slug = self._norm_country_key(slug)
+                if k_slug:
+                    by_name[k_slug] = abbr
+        if by_abbr:
+            self._espn_countries_by_abbr = by_abbr
+            self._espn_countries_by_name = by_name
+            self._espn_countries_loaded_at = loaded_at if loaded_at is not None else time.time()
+
+    def _load_espn_countries_from_disk(self):
+        """Loads persisted ESPN country index if available in flags_dir."""
+        cache_file = self.flags_dir / "_espn_countries.json"
+        if not cache_file.exists():
+            return
+        try:
+            payload = json.loads(cache_file.read_text(encoding="utf-8"))
+            items = payload.get("items") or []
+            ts = float(payload.get("fetched_at") or 0.0)
+            if items:
+                self._seed_espn_countries(items, loaded_at=ts)
+        except Exception as e:
+            logger.debug("Failed reading ESPN countries disk cache %s: %s", cache_file, e)
+
+    async def _ensure_espn_country_index(self):
+        """Refreshes the 200+ ESPN tennis country index once per 24h (memory + disk cached)."""
+        now = time.time()
+        if self._espn_countries_by_abbr and (now - self._espn_countries_loaded_at < ESPN_COUNTRIES_TTL):
+            return
+        if self._countries_lock is None:
+            self._countries_lock = asyncio.Lock()
+        async with self._countries_lock:
+            now = time.time()
+            if self._espn_countries_by_abbr and (now - self._espn_countries_loaded_at < ESPN_COUNTRIES_TTL):
+                return
+            try:
+                async with httpx.AsyncClient(timeout=8.0, headers={"User-Agent": "curl/8.4.0"}) as client:
+                    res = await client.get(ESPN_COUNTRIES_URL)
+                if res.status_code == 200:
+                    data = res.json()
+                    items = data.get("items") or []
+                    if items:
+                        self._seed_espn_countries(items, loaded_at=now)
+                        try:
+                            self.flags_dir.mkdir(parents=True, exist_ok=True)
+                            (self.flags_dir / "_espn_countries.json").write_text(
+                                json.dumps({"fetched_at": now, "items": items}),
+                                encoding="utf-8",
+                            )
+                        except Exception as e:
+                            logger.debug("Could not persist ESPN countries cache: %s", e)
+                        return
+            except Exception as e:
+                logger.debug("ESPN countries index fetch failed (using offline aliases): %s", e)
+            # Mark attempted even on transient offline failure so every poster doesn't retry immediately
+            if not self._espn_countries_loaded_at:
+                self._espn_countries_loaded_at = now - ESPN_COUNTRIES_TTL + 300
+
+    def _build_country_result(self, abbr: str, raw_display: str) -> Dict[str, Any]:
+        """Builds a normalized country resolution record from a resolved ESPN 3-letter code."""
+        code_low = abbr.lower()
+        espn_entry = self._espn_countries_by_abbr.get(code_low, {})
+        flag_url = espn_entry.get("flag_url") or ESPN_FLAG_CDN_TMPL.format(code=code_low)
+        it_pref = COUNTRY_IT_DISPLAY.get(code_low)
+        # Prefer Italian name if input was English and an Italian form exists; keep clean IT input as-is
+        raw_clean = self.clean_player_name(raw_display).strip()
+        raw_key = self._norm_country_key(raw_clean)
+        display = raw_clean
+        if it_pref and raw_key == self._norm_country_key(espn_entry.get("name", "")):
+            display = it_pref
+        elif not display:
+            display = it_pref or espn_entry.get("name") or abbr.upper()
+        return {
+            "abbr": abbr.upper(),
+            "display": display,
+            "flag_url": flag_url,
+            "is_team": True,
+            "is_special": False,
+        }
+
+    def resolve_country(self, raw_name: str, alt_name: str = "") -> Dict[str, Any]:
+        """
+        Resolves a competitor string (IT, EN, or doubled EN+IT legacy strings) into
+        an ESPN flag code and clean Italianized fallback label.
+        """
+        cleaned_raw = self.clean_player_name(raw_name).strip()
+        cleaned_alt = self.clean_player_name(alt_name).strip()
+
+        for orig in (cleaned_raw, cleaned_alt):
+            k = self._norm_country_key(orig)
+            if not k:
+                continue
+            if k in SPECIAL_TEAM_ENTITIES:
+                code, label = SPECIAL_TEAM_ENTITIES[k]
+                return {"abbr": code, "display": label, "flag_url": None, "is_team": True, "is_special": True}
+
+            abbr = COUNTRY_ALIASES.get(k) or self._espn_countries_by_name.get(k)
+            if not abbr and k in self._espn_countries_by_abbr:
+                abbr = k
+            if abbr:
+                # For Italian display preference when alt_name matched first, keep cleaned_raw if non-empty
+                disp_seed = cleaned_raw or orig
+                return self._build_country_result(abbr, disp_seed)
+
+        # Recover legacy corrupted strings like "United Arab Emirates Emirati arabi uniti" or "Tajikistan Tagikistan"
+        k_raw = self._norm_country_key(cleaned_raw)
+        if k_raw:
+            known_lookup: List[Tuple[str, str]] = list(COUNTRY_ALIASES.items()) + list(self._espn_countries_by_name.items())
+            known_lookup.sort(key=lambda kv: -len(kv[0]))
+            for alias_k, abbr in known_lookup:
+                if len(alias_k) < 4:
+                    continue
+                if k_raw.startswith(alias_k + " "):
+                    rest = k_raw[len(alias_k):].strip()
+                    rest_abbr = COUNTRY_ALIASES.get(rest) or self._espn_countries_by_name.get(rest)
+                    if rest_abbr == abbr or rest == alias_k:
+                        # Rest is the localized Italian duplicate -> prefer IT display
+                        disp = COUNTRY_IT_DISPLAY.get(abbr.lower()) or rest.title()
+                        return self._build_country_result(abbr, disp)
+                elif k_raw.endswith(" " + alias_k):
+                    prefix = k_raw[: -len(alias_k)].strip()
+                    prefix_abbr = COUNTRY_ALIASES.get(prefix) or self._espn_countries_by_name.get(prefix)
+                    if prefix_abbr == abbr or prefix == alias_k:
+                        disp = COUNTRY_IT_DISPLAY.get(abbr.lower()) or alias_k.title()
+                        return self._build_country_result(abbr, disp)
+
+        fallback_disp = cleaned_raw or cleaned_alt or "TBD"
+        abbr_guess = re.sub(r"[^A-Za-z]", "", fallback_disp).upper()[:3] or "TBD"
+        return {"abbr": abbr_guess, "display": fallback_disp, "flag_url": None, "is_team": False, "is_special": False}
+
+    def is_country_match(
+        self,
+        title: str,
+        p1: str,
+        p2: str,
+        genre: str,
+        match: Optional[Dict[str, Any]] = None,
+    ) -> bool:
+        """
+        Returns True ONLY when both competitors resolve as nations or national-team entities.
+        Prevents individual singles/doubles rubbers inside Davis/BJK/United Cup (e.g. Sinner vs Alcaraz)
+        from being misclassified as nation-flag cards, while ensuring true country ties never search athletes.
+        """
+        if not p1 or not p2:
+            return False
+        alt_h = (match.get("alt_home") or "") if match else ""
+        alt_a = (match.get("alt_away") or "") if match else ""
+        c1 = self.resolve_country(p1, alt_name=alt_h)
+        c2 = self.resolve_country(p2, alt_name=alt_a)
+        return bool(c1.get("is_team") and c2.get("is_team"))
+
+    @staticmethod
+    def _crop_flag_image(img: Image.Image) -> Image.Image:
+        """Trims transparent padding around ESPN flag PNGs and removes 3px outer anti-aliased edges."""
+        rgba = img.convert("RGBA")
+        bbox = rgba.getbbox()
+        if bbox:
+            left, top, right, bottom = bbox
+            if (right - left) > 24 and (bottom - top) > 24:
+                rgba = rgba.crop((left + 3, top + 3, right - 3, bottom - 3))
+            else:
+                rgba = rgba.crop(bbox)
+        return rgba
+
+    async def _fetch_country_flag(self, info: Dict[str, Any]) -> Optional[Image.Image]:
+        """Fetches, trims, and caches an ESPN country flag PNG cleanly on disk."""
+        if not info.get("is_team") or info.get("is_special"):
+            return None
+        code = (info.get("abbr") or "").strip().lower()
+        flag_url = info.get("flag_url")
+        if not code or not flag_url or code in self._missing_flags:
+            return None
+
+        local_path = self.flags_dir / f"{code}.png"
+        if local_path.exists():
+            try:
+                with Image.open(local_path) as loaded:
+                    return loaded.convert("RGBA")
+            except Exception as e:
+                logger.debug("Corrupted local flag cache %s (%s), re-fetching", local_path, e)
+                try:
+                    local_path.unlink(missing_ok=True)
+                except Exception:
+                    pass
+
+        try:
+            async with httpx.AsyncClient(timeout=8.0, headers={"User-Agent": "curl/8.4.0"}) as client:
+                res = await client.get(flag_url)
+            if res.status_code == 200 and len(res.content) > 200:
+                with io.BytesIO(res.content) as bio:
+                    with Image.open(bio) as opened:
+                        if opened.width < 40 or opened.height < 40:
+                            return None
+                        cropped = self._crop_flag_image(opened)
+                try:
+                    self.flags_dir.mkdir(parents=True, exist_ok=True)
+                    tmp_path = local_path.with_suffix(".tmp.png")
+                    cropped.save(tmp_path, "PNG")
+                    tmp_path.replace(local_path)
+                except Exception as e:
+                    logger.debug("Could not write flag cache %s: %s", local_path, e)
+                return cropped
+        except Exception as e:
+            logger.debug("Failed downloading flag %s: %s", flag_url, e)
+
+        self._missing_flags.add(code)
+        return None
+
+    async def _fetch_match_flags(
+        self,
+        p1_name: str,
+        p2_name: str,
+        match: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Resolves both country records and fetches/caches their ESPN flag PNGs concurrently."""
+        alt_h = (match.get("alt_home") or "") if match else ""
+        alt_a = (match.get("alt_away") or "") if match else ""
+        info1 = self.resolve_country(p1_name, alt_name=alt_h)
+        info2 = self.resolve_country(p2_name, alt_name=alt_a)
+        f1, f2 = await asyncio.gather(
+            self._fetch_country_flag(info1),
+            self._fetch_country_flag(info2),
+        )
+        return {"c1": f1, "c2": f2, "info1": info1, "info2": info2}
 
     @staticmethod
     def is_female_competition(title: str, genre: str = "", match: Optional[Dict[str, Any]] = None) -> bool:
@@ -908,11 +1313,13 @@ class TennisPosterService:
         self._missing_athletes.add(slug)
         return None
 
-    def get_theme_palette(self, genre: str, title: str) -> Dict[str, Any]:
+    def get_theme_palette(self, genre: str, title: str, match: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Selects circuit background template and tournament title."""
         t_lower = (title or "").lower()
         g_lower = (genre or "").lower()
-        combined = f"{g_lower} {t_lower}"
+        comp_lower = ((match.get("competition") or match.get("_competition") or "") if match else "").lower()
+        canon_lower = ((match.get("canonical_competition") or match.get("_canonical_competition") or "") if match else "").lower()
+        combined = f"{g_lower} {t_lower} {comp_lower} {canon_lower}"
 
         # 1. Grand Slams (evaluated on title & genre)
         if "wimbledon" in combined:
@@ -926,15 +1333,29 @@ class TennisPosterService:
         if "slam" in combined:
             return {"bg_file": "bg_us_open.jpg", "badge_text": "GRAND SLAM"}
 
-        # 2. Team Cups (United Cup, Laver Cup, Davis Cup, Billie Jean King Cup)
-        if "united" in combined:
+        # 2. Team Cups (check title/competition/canonical first so genre "Coppa Davis e BJK Cup" never overrides Davis Cup with BJK Cup)
+        event_text = f"{t_lower} {comp_lower} {canon_lower}"
+        if re.search(r"\bunited\s*cup\b", event_text):
             return {"bg_file": "bg_united_cup.jpg", "badge_text": "UNITED CUP"}
-        if "laver" in combined:
+        if "laver" in event_text:
             return {"bg_file": "bg_laver_cup.jpg", "badge_text": "LAVER CUP"}
-        if any(w in t_lower for w in ("bjk", "billie", "king cup")):
-            return {"bg_file": "bg_bjk_cup.jpg", "badge_text": "DAVIS CUP"}
-        if "davis" in t_lower or any(w in g_lower for w in ("davis", "king cup", "bjk")):
+        if any(w in event_text for w in ("bjk", "billie", "king cup")):
+            return {"bg_file": "bg_bjk_cup.jpg", "badge_text": "BJK CUP"}
+        if "hopman" in event_text:
+            return {"bg_file": "bg_davis_cup.jpg", "badge_text": "HOPMAN CUP"}
+        if "davis" in event_text:
             return {"bg_file": "bg_davis_cup.jpg", "badge_text": "DAVIS CUP"}
+
+        if re.search(r"\bunited\s*cup\b", g_lower):
+            return {"bg_file": "bg_united_cup.jpg", "badge_text": "UNITED CUP"}
+        if "laver" in g_lower:
+            return {"bg_file": "bg_laver_cup.jpg", "badge_text": "LAVER CUP"}
+        if "hopman" in g_lower:
+            return {"bg_file": "bg_davis_cup.jpg", "badge_text": "HOPMAN CUP"}
+        if "davis" in g_lower:
+            return {"bg_file": "bg_davis_cup.jpg", "badge_text": "DAVIS CUP"}
+        if any(w in g_lower for w in ("bjk", "billie", "king cup")):
+            return {"bg_file": "bg_bjk_cup.jpg", "badge_text": "BJK CUP"}
 
         # 3. Explicit circuit identity in event TITLE (highest priority over any channel/genre noise)
         has_atp_title = bool(re.search(r"\batp\b", t_lower))
@@ -1194,43 +1615,109 @@ class TennisPosterService:
 
         return canvas
 
-    def _render_country_match(self, canvas: Image.Image, c1_name: str, c2_name: str, tourn_name: str) -> Image.Image:
-        """Renders National Team tie poster (e.g. 'ITALY vs CHINA') for Davis Cup and Billie Jean King Cup."""
+    def _fit_rounded_flag(self, flag_im: Image.Image, target_w: int, target_h: int, radius: int = 18) -> Image.Image:
+        """Aspect-fill crops a flag image and applies rounded corners."""
+        fw, fh = flag_im.size
+        scale = max(target_w / fw, target_h / fh)
+        nw, nh = int(round(fw * scale)), int(round(fh * scale))
+        resized = flag_im.resize((nw, nh), Image.Resampling.LANCZOS)
+        left = (nw - target_w) // 2
+        top = (nh - target_h) // 2
+        cropped = resized.crop((left, top, left + target_w, top + target_h))
+
+        mask = Image.new("L", (target_w, target_h), 0)
+        ImageDraw.Draw(mask).rounded_rectangle([0, 0, target_w - 1, target_h - 1], radius=radius, fill=255)
+
+        out = Image.new("RGBA", (target_w, target_h), (0, 0, 0, 0))
+        out.paste(cropped, (0, 0), mask)
+        return out
+
+    def _fit_wrapped_country_text(
+        self,
+        draw: ImageDraw.ImageDraw,
+        text: str,
+        max_w: int,
+    ) -> Tuple[List[str], ImageFont.ImageFont]:
+        """Chooses the largest crisp font (with optional 2-line wrap) fitting max_w for fallback cards."""
+        upper_text = (text or "TBD").upper().strip()
+        words = upper_text.split()
+        for size in (44, 38, 34, 30, 26, 22):
+            font = self._get_font(size)
+            bbox = draw.textbbox((0, 0), upper_text, font=font)
+            if (bbox[2] - bbox[0]) <= max_w:
+                return [upper_text], font
+            if len(words) >= 2:
+                # Try balanced 2-line split
+                best_split: Optional[Tuple[str, str]] = None
+                best_diff = 10**9
+                for idx in range(1, len(words)):
+                    l1 = " ".join(words[:idx])
+                    l2 = " ".join(words[idx:])
+                    w1 = draw.textbbox((0, 0), l1, font=font)[2]
+                    w2 = draw.textbbox((0, 0), l2, font=font)[2]
+                    if w1 <= max_w and w2 <= max_w and abs(w1 - w2) < best_diff:
+                        best_diff = abs(w1 - w2)
+                        best_split = (l1, l2)
+                if best_split:
+                    return list(best_split), font
+        return [upper_text], self._get_font(20)
+
+    def _render_country_match(
+        self,
+        canvas: Image.Image,
+        c1_name: str,
+        c2_name: str,
+        tourn_name: str,
+        flags: Optional[Dict[str, Any]] = None,
+    ) -> Image.Image:
+        """
+        Renders National Team tie posters (Davis Cup, Billie Jean King Cup, United Cup).
+        Draws clean standalone rounded flags directly on the canvas; only draws a dark card
+        with the clean Italianized nation name when a flag is unavailable.
+        """
         W, H = CANVAS_WIDTH, CANVAS_HEIGHT
         cy = int(H * 0.55)
+        box_w, box_h = 364, 236
+        radius = 18
         draw = ImageDraw.Draw(canvas)
 
-        code_map = {
-            "italy": "ITA", "italia": "ITA", "china": "CHN", "cina": "CHN", "usa": "USA",
-            "united states": "USA", "spain": "ESP", "spagna": "ESP", "france": "FRA", "francia": "FRA",
-            "germany": "GER", "germania": "GER", "great britain": "GBR", "gran bretagna": "GBR", "uk": "GBR",
-            "australia": "AUS", "canada": "CAN", "argentina": "ARG", "japan": "JPN", "giappone": "JPN",
-            "belgium": "BEL", "belgio": "BEL", "ukraine": "UKR", "ucraina": "UKR", "czech republic": "CZE",
-            "repubblica ceca": "CZE", "poland": "POL", "polonia": "POL", "brazil": "BRA", "brasile": "BRA",
-            "switzerland": "SUI", "svizzera": "SUI", "serbia": "SRB", "croatia": "CRO", "croazia": "CRO",
-            "netherlands": "NED", "olanda": "NED", "austria": "AUT", "sweden": "SWE", "svezia": "SWE",
-            "kazakhstan": "KAZ", "kazakistan": "KAZ", "slovakia": "SVK", "chile": "CHI", "colombia": "COL"
-        }
+        info1 = (flags or {}).get("info1") or self.resolve_country(c1_name)
+        info2 = (flags or {}).get("info2") or self.resolve_country(c2_name)
+        sides = [
+            (300, (flags or {}).get("c1"), info1["display"]),
+            (W - 300, (flags or {}).get("c2"), info2["display"]),
+        ]
 
-        c1_clean = self.clean_player_name(c1_name)
-        c2_clean = self.clean_player_name(c2_name)
-        code1 = code_map.get(c1_clean.lower(), c1_clean[:3].upper())
-        code2 = code_map.get(c2_clean.lower(), c2_clean[:3].upper())
-
-        # Country 1 (Left Shield)
-        draw.rounded_rectangle([(120, cy - 110), (480, cy + 100)], radius=18, fill=(10, 18, 35, 225), outline=(255, 255, 255, 100), width=2)
-        font_code = self._get_font(58)
-        draw.text((300, cy - 35), code1, font=font_code, fill=(255, 255, 255), anchor="mm")
-        font_c = self._get_font(24)
-        draw.text((300, cy + 28), c1_clean.upper(), font=font_c, fill=(255, 215, 0), anchor="mm")
-        font_nat = self._get_font(15)
-        draw.text((300, cy + 65), "NATIONAL TEAM", font=font_nat, fill=(147, 197, 253, 190), anchor="mm")
-
-        # Country 2 (Right Shield)
-        draw.rounded_rectangle([(W - 480, cy - 110), (W - 120, cy + 100)], radius=18, fill=(10, 18, 35, 225), outline=(255, 255, 255, 100), width=2)
-        draw.text((W - 300, cy - 35), code2, font=font_code, fill=(255, 255, 255), anchor="mm")
-        draw.text((W - 300, cy + 28), c2_clean.upper(), font=font_c, fill=(255, 215, 0), anchor="mm")
-        draw.text((W - 300, cy + 65), "NATIONAL TEAM", font=font_nat, fill=(147, 197, 253, 190), anchor="mm")
+        for cx, flag_im, display_name in sides:
+            fx = cx - box_w // 2
+            fy = cy - box_h // 2
+            if flag_im is not None:
+                rounded = self._fit_rounded_flag(flag_im, box_w, box_h, radius=radius)
+                canvas.paste(rounded, (fx, fy), rounded)
+                # Single subtle rim directly on the flag edge (no double outer card)
+                draw.rounded_rectangle(
+                    [(fx, fy), (fx + box_w - 1, fy + box_h - 1)],
+                    radius=radius,
+                    outline=(255, 255, 255, 115),
+                    width=2,
+                )
+            else:
+                # Fallback ONLY: dark card with clean, large Italianized country/team name
+                draw.rounded_rectangle(
+                    [(fx, fy), (fx + box_w - 1, fy + box_h - 1)],
+                    radius=radius,
+                    fill=(10, 18, 35, 225),
+                    outline=(255, 255, 255, 110),
+                    width=2,
+                )
+                lines, font_fallback = self._fit_wrapped_country_text(draw, display_name, box_w - 40)
+                if len(lines) == 1:
+                    draw.text((cx, cy), lines[0], font=font_fallback, fill=(255, 255, 255), anchor="mm")
+                else:
+                    line_gap = int(font_fallback.size * 1.28) if hasattr(font_fallback, "size") else 40
+                    top_y = cy - line_gap // 2
+                    for i, line in enumerate(lines[:2]):
+                        draw.text((cx, top_y + i * line_gap), line, font=font_fallback, fill=(255, 255, 255), anchor="mm")
 
         return canvas
 
@@ -1247,16 +1734,18 @@ class TennisPosterService:
         is_country: bool,
         is_fem: bool,
         cutouts: Optional[Dict[str, Any]],
+        match: Optional[Dict[str, Any]] = None,
+        flags: Optional[Dict[str, Any]] = None,
     ) -> Optional[str]:
         """Executes CPU-bound Pillow rendering and JPEG saving cleanly inside a worker thread."""
-        theme = self.get_theme_palette(genre, title)
+        theme = self.get_theme_palette(genre, title, match=match)
         tourn_name, _ = self.extract_tournament_and_stage(title, genre)
 
         canvas = self._render_cinematic_arena(theme, tourn_name)
         if stage_info:
             canvas = self._render_stage_card(canvas, stage_info["stage"], stage_info["tournament"])
         elif is_country:
-            canvas = self._render_country_match(canvas, p1_name, p2_name, tourn_name)
+            canvas = self._render_country_match(canvas, p1_name, p2_name, tourn_name, flags=flags)
         elif not p2_name:
             # Failsafe: if there is no second competitor, never render an asymmetric single-sided match
             canvas = self._render_stage_card(canvas, "LIVE BROADCAST", tourn_name)
@@ -1315,14 +1804,18 @@ class TennisPosterService:
             is_country = False
             is_fem = False
             cutouts: Optional[Dict[str, Any]] = None
+            flags: Optional[Dict[str, Any]] = None
 
             if not stage_info:
                 p1_name, p2_name = self.parse_players(title)
                 if not p1_name:
                     return None
+                await self._ensure_espn_country_index()
                 is_fem = self.is_female_competition(title, genre, match=match)
-                is_country = self.is_country_match(title, p1_name, p2_name, genre)
-                if not is_country and p2_name:
+                is_country = self.is_country_match(title, p1_name, p2_name, genre, match=match)
+                if is_country:
+                    flags = await self._fetch_match_flags(p1_name, p2_name, match=match)
+                elif p2_name:
                     cutouts = await self._fetch_match_cutouts(p1_name, p2_name, is_female=is_fem)
 
             return await asyncio.to_thread(
@@ -1338,6 +1831,8 @@ class TennisPosterService:
                 is_country,
                 is_fem,
                 cutouts,
+                match,
+                flags,
             )
 
     def start_background_enrichment(self, matches: List[Dict[str, Any]]):

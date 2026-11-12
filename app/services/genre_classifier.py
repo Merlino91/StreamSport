@@ -264,7 +264,7 @@ class GenreClassifier:
                     return "volley", "Volley Femminile"
                 if canon.startswith("basketball_"):
                     return "basket", "WNBA e Femminile"
-                if canon.startswith("tennis_"):
+                if canon.startswith("tennis_") and canon != "tennis_davis_bjk":
                     return "tennis", "WTA"
             if is_youth:
                 # Never hijack senior professional Serie C matches (e.g. Atalanta U23, Juventus Next Gen, Milan Futuro)
