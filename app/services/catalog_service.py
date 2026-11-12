@@ -395,14 +395,22 @@ class CatalogService:
         raw_comp = match.get("competition") or match.get("_competition") or comp_name or ""
         c_clean = re.sub(r"[\U00010000-\U0010ffff]", "", raw_comp).strip(": -")
 
-        # 1. Specific Canonical competition first (official display name, unless it was generic hockey_euro)
-        if canon and canon != "hockey_euro":
+        # 1. Specific Canonical competition first (unless multi-tournament macro buckets like hockey_euro / tennis_davis_bjk)
+        if canon and canon not in ("hockey_euro", "tennis_davis_bjk"):
             comp_display = get_canonical_display_name(canon)
             if comp_display:
                 comp_badge = f"🏆 {comp_display}"
 
         # 2. Specific competition from Diretta / Livesport / TheSportsDB
         if not comp_badge:
+            if canon == "tennis_davis_bjk" and c_clean:
+                # Compact redundant Flashscore category prefixes (e.g. "SQUADRE - UOMINI: ") while keeping location/details
+                c_clean = re.sub(
+                    r"^(?:(?:SQUADRE|TEAMS?|SINGOLARE|SINGLES|DOPPIO|DOUBLES|MISTO|MIXED|UOMINI|DONNE|MEN|WOMEN)(?:\s*[-–/&]\s*(?:SQUADRE|TEAMS?|SINGOLARE|SINGLES|DOPPIO|DOUBLES|MISTO|MIXED|UOMINI|DONNE|MEN|WOMEN))*)\s*:\s*",
+                    "",
+                    c_clean,
+                    flags=re.I,
+                ).strip(": -")
             if c_clean and c_clean.lower() not in GENERIC_GENRES:
                 comp_badge = f"🏆 {c_clean}"
 

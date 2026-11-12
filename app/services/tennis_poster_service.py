@@ -1349,8 +1349,8 @@ class TennisPosterService:
         if "slam" in combined:
             return {"bg_file": "bg_us_open.jpg", "badge_text": "GRAND SLAM"}
 
-        # 2. Team Cups (check title/competition/canonical first so genre "Coppa Davis e BJK Cup" never overrides Davis Cup with BJK Cup)
-        event_text = f"{t_lower} {comp_lower} {canon_lower}"
+        # 2. Team Cups (inspect title & real competition only; omit macro slug 'tennis_davis_bjk' which contains 'bjk' for all cups)
+        event_text = f"{t_lower} {comp_lower}"
         if re.search(r"\bunited\s*cup\b", event_text):
             return {"bg_file": "bg_united_cup.jpg", "badge_text": "UNITED CUP"}
         if "laver" in event_text:

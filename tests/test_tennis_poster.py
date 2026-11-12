@@ -96,14 +96,28 @@ class TennisPosterTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(davis["badge_text"], "DAVIS CUP")
         self.assertEqual(davis["bg_file"], "bg_davis_cup.jpg")
 
-        # "United Arab Emirates" must NOT false-trigger bg_united_cup.jpg
+        # "United Arab Emirates" must NOT false-trigger bg_united_cup.jpg, and canon "tennis_davis_bjk" must NOT trigger BJK
         davis_uae = tennis_poster_service.get_theme_palette(
             "Coppa Davis e BJK Cup",
             "United Arab Emirates vs Yemen",
-            match={"competition": "SQUADRE - UOMINI: Davis Cup - Group V"},
+            match={
+                "competition": "SQUADRE - UOMINI: Davis Cup - Group V",
+                "canonical_competition": "tennis_davis_bjk",
+            },
         )
         self.assertEqual(davis_uae["badge_text"], "DAVIS CUP")
         self.assertEqual(davis_uae["bg_file"], "bg_davis_cup.jpg")
+
+        bjk_canon = tennis_poster_service.get_theme_palette(
+            "Coppa Davis e BJK Cup",
+            "Laos vs Bhutan",
+            match={
+                "competition": "SQUADRE - DONNE: Billie Jean King Cup",
+                "canonical_competition": "tennis_davis_bjk",
+            },
+        )
+        self.assertEqual(bjk_canon["badge_text"], "BJK CUP")
+        self.assertEqual(bjk_canon["bg_file"], "bg_bjk_cup.jpg")
 
         ucup = tennis_poster_service.get_theme_palette("Coppa Davis e BJK Cup", "Italy vs Spain (United Cup)")
         self.assertEqual(ucup["badge_text"], "UNITED CUP")
@@ -342,6 +356,36 @@ class TennisPosterTestCase(unittest.IsolatedAsyncioTestCase):
             m_espn.assert_not_awaited()
             m_atp.assert_not_awaited()
             m_wta.assert_not_awaited()
+
+    def test_catalog_description_shows_real_davis_competition_only(self):
+        """tennis_davis_bjk shows cleaned real competition in UI description; tennis_atp keeps canonical display."""
+        from app.services.catalog_service import catalog_service
+
+        davis_match = {
+            "id": "diretta-davis-desc-test",
+            "title": "Bahrain vs Nepal",
+            "category": "tennis",
+            "date": 1794535200000,
+            "competition": "SQUADRE - UOMINI: Davis Cup - Group V (Mondo)",
+            "canonical_competition": "tennis_davis_bjk",
+            "sources": [],
+        }
+        davis_meta = catalog_service.build_meta_item(davis_match, "Coppa Davis e BJK Cup")
+        self.assertIn("🏆 Davis Cup - Group V (Mondo)", davis_meta["description"])
+        self.assertNotIn("Coppa Davis & BJK", davis_meta["description"])
+        self.assertEqual(davis_meta["genres"], ["Coppa Davis e BJK Cup"])
+
+        atp_match = {
+            "id": "diretta-atp-desc-test",
+            "title": "Alex Michelsen vs Alejandro Tabilo",
+            "category": "tennis",
+            "date": 1794535200000,
+            "competition": "ATP - SINGOLARE: Stoccolma (Svezia), cemento (al coperto)",
+            "canonical_competition": "tennis_atp",
+            "sources": [],
+        }
+        atp_meta = catalog_service.build_meta_item(atp_match, "ATP")
+        self.assertIn("🏆 ATP •", atp_meta["description"])
 
 
 if __name__ == "__main__":
