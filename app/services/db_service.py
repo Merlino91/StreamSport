@@ -116,6 +116,9 @@ class DBService:
                         alt_home TEXT,
                         alt_away TEXT,
                         alt_title TEXT,
+                        alt_league TEXT,
+                        alt_competition TEXT,
+                        alt_country TEXT,
                         is_women INTEGER DEFAULT 0,
                         is_youth INTEGER DEFAULT 0,
                         updated_at INTEGER NOT NULL
@@ -143,6 +146,12 @@ class DBService:
                     cursor.execute("ALTER TABLE matches ADD COLUMN alt_away TEXT")
                 if "alt_title" not in cols:
                     cursor.execute("ALTER TABLE matches ADD COLUMN alt_title TEXT")
+                if "alt_league" not in cols:
+                    cursor.execute("ALTER TABLE matches ADD COLUMN alt_league TEXT")
+                if "alt_competition" not in cols:
+                    cursor.execute("ALTER TABLE matches ADD COLUMN alt_competition TEXT")
+                if "alt_country" not in cols:
+                    cursor.execute("ALTER TABLE matches ADD COLUMN alt_country TEXT")
                 if "is_women" not in cols:
                     cursor.execute("ALTER TABLE matches ADD COLUMN is_women INTEGER DEFAULT 0")
                 if "is_youth" not in cols:
@@ -197,9 +206,12 @@ class DBService:
             alt_home = m.get("alt_home") or ""
             alt_away = m.get("alt_away") or ""
             alt_title = m.get("alt_title") or ""
+            alt_league = m.get("alt_league") or ""
+            alt_comp = m.get("alt_competition") or ""
+            alt_country = m.get("alt_country") or ""
             is_w = 1 if m.get("is_women") else 0
             is_y = 1 if m.get("is_youth") else 0
-            records.append((m_id, title, category, date, end_date, poster, popular, sources, comp, country, canon, teams_str, alt_home, alt_away, alt_title, is_w, is_y, now))
+            records.append((m_id, title, category, date, end_date, poster, popular, sources, comp, country, canon, teams_str, alt_home, alt_away, alt_title, alt_league, alt_comp, alt_country, is_w, is_y, now))
 
         if not records:
             return
@@ -208,8 +220,8 @@ class DBService:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.executemany("""
-                    INSERT INTO matches (id, title, category, date, end_date, poster, popular, sources, competition, country, canonical_competition, teams, alt_home, alt_away, alt_title, is_women, is_youth, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO matches (id, title, category, date, end_date, poster, popular, sources, competition, country, canonical_competition, teams, alt_home, alt_away, alt_title, alt_league, alt_competition, alt_country, is_women, is_youth, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(id) DO UPDATE SET
                         title = excluded.title,
                         category = excluded.category,
@@ -251,6 +263,18 @@ class DBService:
                         alt_title = CASE
                             WHEN excluded.alt_title IS NOT NULL AND excluded.alt_title != '' THEN excluded.alt_title
                             ELSE matches.alt_title
+                        END,
+                        alt_league = CASE
+                            WHEN excluded.alt_league IS NOT NULL AND excluded.alt_league != '' THEN excluded.alt_league
+                            ELSE matches.alt_league
+                        END,
+                        alt_competition = CASE
+                            WHEN excluded.alt_competition IS NOT NULL AND excluded.alt_competition != '' THEN excluded.alt_competition
+                            ELSE matches.alt_competition
+                        END,
+                        alt_country = CASE
+                            WHEN excluded.alt_country IS NOT NULL AND excluded.alt_country != '' THEN excluded.alt_country
+                            ELSE matches.alt_country
                         END,
                         is_women = CASE
                             WHEN excluded.is_women = 1 THEN 1
@@ -481,6 +505,12 @@ class DBService:
             d["alt_away"] = row["alt_away"]
         if "alt_title" in keys and row["alt_title"]:
             d["alt_title"] = row["alt_title"]
+        if "alt_league" in keys and row["alt_league"]:
+            d["alt_league"] = row["alt_league"]
+        if "alt_competition" in keys and row["alt_competition"]:
+            d["alt_competition"] = row["alt_competition"]
+        if "alt_country" in keys and row["alt_country"]:
+            d["alt_country"] = row["alt_country"]
         if "is_women" in keys and row["is_women"]:
             d["is_women"] = True
         if "is_youth" in keys and row["is_youth"]:

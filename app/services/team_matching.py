@@ -266,7 +266,9 @@ def calculate_match_score(
         m_silo = (match.get("_silo") or match.get("category") or "").lower()
         c_silo = (candidate.get("_silo") or candidate.get("category") or "").lower()
         if m_silo == "motor-sports" or c_silo == "motor-sports":
-            m_text = f"{match.get('title', '')} {match.get('competition', '')}".lower()
+            m_alt_c = match.get("alt_competition") or match.get("alt_league") or ""
+            m_alt_t = match.get("alt_title") or ""
+            m_text = f"{m_alt_t} {m_alt_c} {match.get('title', '')} {match.get('competition', '')}".lower()
             c_text = f"{candidate.get('title', '')} {candidate.get('competition', '')}".lower()
 
             from app.services.thesportsdb_service import TheSportsDBService
@@ -348,13 +350,14 @@ def calculate_match_score(
             return result
 
         # 3. Trait Evaluation: Youth and Women
+        m_alt_c = (match.get("alt_competition") or match.get("alt_league") or "").lower().strip()
         m_comp = (match.get("competition") or match.get("league") or "").lower().strip()
         c_comp = (candidate.get("competition") or candidate.get("league") or "").lower().strip()
 
         if match.get("is_youth") is not None:
             m_youth = bool(match.get("is_youth"))
         else:
-            _, m_youth = extract_demographics(f"{m_comp} {match.get('title', '')}")
+            _, m_youth = extract_demographics(f"{m_alt_c} {m_comp} {match.get('title', '')}")
 
         if candidate.get("is_youth") is not None:
             c_youth = bool(candidate.get("is_youth"))
@@ -409,8 +412,9 @@ def calculate_match_score(
                 from app.services.canonical_competition_service import is_competition_conflict
                 if is_competition_conflict(c1, c2):
                     comp_mod = -0.20
-        elif m_comp and c_comp:
-            if m_comp in c_comp or c_comp in m_comp:
+        elif (m_alt_c or m_comp) and c_comp:
+            targets = [x for x in (m_alt_c, m_comp) if x]
+            if any(t in c_comp or c_comp in t for t in targets):
                 comp_mod = 0.04
 
         final_score = min(1.0, max(0.0, (h_score + a_score) / 2.0 - trait_penalty + comp_mod))

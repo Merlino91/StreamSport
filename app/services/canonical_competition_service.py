@@ -1386,21 +1386,26 @@ def is_tier_match(m: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
     Returns (True, canonical_slug) if admitted, or (False, None) if excluded.
     """
     silo = (m.get("_silo") or m.get("category") or "").lower().strip()
-    country = (m.get("country") or "").lower().strip()
-    league = (m.get("league") or m.get("competition") or "").lower().strip()
+    alt_country = (m.get("alt_country") or "").lower().strip()
+    alt_league = (m.get("alt_league") or m.get("alt_competition") or "").lower().strip()
+    country = (alt_country or m.get("country") or m.get("_country") or "").lower().strip()
+    league = (alt_league or m.get("league") or m.get("competition") or m.get("_competition") or "").lower().strip()
     sport = (m.get("sport") or "").lower().strip()
+
+    c_it = (m.get("country") or "").lower().strip()
+    l_it = (m.get("league") or m.get("competition") or "").lower().strip()
 
     if m.get("is_women") is not None:
         is_women = bool(m.get("is_women"))
     else:
         from app.utils.demographics import extract_demographics
-        is_women, _ = extract_demographics(f"{country} {league}")
+        is_women, _ = extract_demographics(f"{country} {league} {c_it} {l_it}")
 
     if m.get("is_youth") is not None:
         is_youth = bool(m.get("is_youth"))
     else:
         from app.utils.demographics import extract_demographics
-        _, is_youth = extract_demographics(f"{country} {league}")
+        _, is_youth = extract_demographics(f"{country} {league} {c_it} {l_it}")
 
     # ========================== CALCIO ==========================
     if silo == "football" or "calcio" in sport or "soccer" in sport:
@@ -1545,7 +1550,7 @@ def is_tier_match(m: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
     if silo == "basketball" or "basket" in sport:
         if "nba" in league:
             return True, "basketball_nba"
-        if "euroleague" in league:
+        if "euroleague" in league or "eurolega" in league or "eurolega" in l_it:
             return True, "basketball_euroleague"
         if "eurocup" in league:
             return True, "basketball_eurocup"

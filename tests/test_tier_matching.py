@@ -82,6 +82,22 @@ class TestTierMatching(unittest.TestCase):
         self.assertTrue(ok)
         self.assertEqual(slug, "basketball_euroleague")
 
+        # Euroleague via Italian Diretta name "Eurolega"
+        ok, slug = is_tier_match({"_silo": "basketball", "country": "Europa", "league": "Eurolega"})
+        self.assertTrue(ok)
+        self.assertEqual(slug, "basketball_euroleague")
+
+        # Euroleague via English alt_league with Italian display league
+        ok, slug = is_tier_match({
+            "_silo": "basketball",
+            "country": "Europa",
+            "league": "Eurolega",
+            "alt_country": "Europe",
+            "alt_league": "Euroleague",
+        })
+        self.assertTrue(ok)
+        self.assertEqual(slug, "basketball_euroleague")
+
         ok, slug = is_tier_match({"_silo": "basketball", "country": "Italia", "league": "Serie A (LBA)"})
         self.assertTrue(ok)
         self.assertEqual(slug, "basketball_lba_serie_a")

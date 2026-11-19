@@ -816,13 +816,23 @@ class CatalogService:
                     continue
 
                 if ep_silo == "motor-sports":
-                    m_ser = TheSportsDBService.get_motorsport_series_key(off_title)
-                    e_ser = TheSportsDBService.get_motorsport_series_key(ep_title)
+                    m_ser = TheSportsDBService.get_motorsport_series_key(
+                        f"{off_title} {off.get('competition', '')} {off.get('canonical_competition', '')}"
+                    )
+                    e_ser = TheSportsDBService.get_motorsport_series_key(
+                        f"{ep_title} {ep.get('competition', '')} {ep.get('canonical_competition', '')} {ep.get('eventSynopsis', '')}"
+                    )
                     if m_ser and e_ser and m_ser == e_ser:
                         off_sess = TheSportsDBService.normalize_motorsport_session_name(off_title)
                         ep_sess = TheSportsDBService.normalize_motorsport_session_name(ep_title)
-                        if off_sess == ep_sess:
+                        if (off_sess and ep_sess and off_sess == ep_sess) or (off_sess == "" and ep_sess == "" and time_diff <= 15 * 60 * 1000):
                             already_covered = True
+                            # Merge Sky/TV sources into official match card to eliminate duplicate
+                            existing_src_ids = {str(s.get("id")) for s in off.get("sources", []) if isinstance(s, dict)}
+                            for src in ep.get("sources", []):
+                                if isinstance(src, dict) and str(src.get("id")) not in existing_src_ids:
+                                    existing_src_ids.add(str(src.get("id")))
+                                    off.setdefault("sources", []).append(src)
                             break
                 elif ep_silo == "tennis":
                     # Tennis multicourt/tournament channel sessions (e.g. "ATP 1000 - Sky Sport Tennis")

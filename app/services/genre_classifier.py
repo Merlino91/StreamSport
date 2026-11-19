@@ -214,17 +214,21 @@ class GenreClassifier:
         title_lower = title.lower()
         comp = (match.get("competition") or match.get("_competition") or match.get("league") or "").lower().strip()
         country = (match.get("country") or match.get("_country") or "").lower().strip()
+        alt_comp = (match.get("alt_competition") or match.get("alt_league") or "").lower().strip()
+        alt_country = (match.get("alt_country") or "").lower().strip()
+        alt_title = (match.get("alt_title") or "").lower().strip()
         raw_title_lower = (match.get("raw_title") or "").strip().lower()
-        eval_text = f"{title_lower} {country} {comp} {raw_title_lower}".strip()
+        synopsis = (match.get("eventSynopsis") or "").strip().lower()
+        eval_text = f"{alt_title} {alt_country} {alt_comp} {title_lower} {country} {comp} {raw_title_lower} {synopsis}".strip()
         if match.get("is_women") is not None:
             is_women = bool(match.get("is_women"))
         else:
-            is_women, _ = extract_demographics(f"{comp} {title_lower} {raw_title_lower}")
+            is_women, _ = extract_demographics(f"{alt_comp} {comp} {title_lower} {raw_title_lower}")
 
         if match.get("is_youth") is not None:
             is_youth = bool(match.get("is_youth"))
         else:
-            _, is_youth = extract_demographics(f"{comp} {title_lower} {raw_title_lower}")
+            _, is_youth = extract_demographics(f"{alt_comp} {comp} {title_lower} {raw_title_lower}")
 
         # 0. Early Simulcast & Multi-match show routing (NFL RedZone, Golazo, Diretta Gol, etc.)
         sim_info = get_simulcast_info(title_lower, match.get("category") or match.get("_silo")) or get_simulcast_info(str(match.get("id", "")))
@@ -251,7 +255,7 @@ class GenreClassifier:
             # A men's senior canonical competition must NEVER hijack a women or youth event!
             if is_women:
                 if canon.startswith("football_"):
-                    country_clean = (match.get("country") or "").strip().lower()
+                    country_clean = (match.get("alt_country") or match.get("country") or match.get("_country") or "").strip().lower()
                     is_ita = country_clean in ("italia", "italy") or "🇮🇹" in eval_text or canon == "football_serie_a_women"
                     if is_ita:
                         return "calcio_italiano", "Calcio Femminile"
@@ -285,7 +289,7 @@ class GenreClassifier:
 
             # Country-specific guard for homonym league names
             # If the event explicitly originates from a non-domestic country, invalidate canonical override
-            country_clean = (match.get("country") or "").strip().lower()
+            country_clean = (match.get("alt_country") or match.get("country") or match.get("_country") or "").strip().lower()
             if canon in ("football_serie_a", "football_serie_b", "football_serie_c"):
                 if country_clean and country_clean not in ("italia", "italy"):
                     canon = None
@@ -363,8 +367,9 @@ class GenreClassifier:
             ):
                 # Guard: if title explicitly matches a dedicated sport, don't let a generic "altri_sport" or "other" trap it!
                 if val in ("altri_sport", "altri-sport", "altri sport", "other"):
-                    if self._GENERIC_MOTORSPORT_REGEX.search(eval_text):
-                        return "motor-sports"
+                    if not any(w in eval_text for w in ("pattinaggio", "skating", "sci", "ski", "curling", "biathlon", "atletica", "athletics")):
+                        if self._GENERIC_MOTORSPORT_REGEX.search(eval_text):
+                            return "motor-sports"
                     if self._GENERIC_TENNIS_REGEX.search(eval_text):
                         return "tennis"
                     if self._GENERIC_BASKET_REGEX.search(eval_text):
@@ -382,6 +387,11 @@ class GenreClassifier:
                 return "altri_sport"
 
         # 2. Unlabeled / Generic items: inspect eval_text for definitive sport tokens
+        # Winter sports & Athletics guard against generic 'gp' motorsport token (e.g. GP Skate America, GP Atletica)
+        if any(w in eval_text for w in ("pattinaggio", "skating", "sci", "ski", "curling", "biathlon", "atletica", "athletics", "nuoto", "swimming")):
+            if not any(k in eval_text for k in ("f1", "formula 1", "formula one", "motogp", "moto2", "moto3", "superbike", "rally", "nascar", "indycar")):
+                return "altri_sport"
+
         if self._GENERIC_MOTORSPORT_REGEX.search(eval_text):
             return "motor-sports"
         if self._GENERIC_TENNIS_REGEX.search(eval_text):
@@ -436,7 +446,7 @@ class GenreClassifier:
             return "tennis", "Grandi Slam"
         if self._TENNIS_DAVIS_BJK_REGEX.search(eval_text):
             return "tennis", "Coppa Davis e BJK Cup"
-        comp_text = (match.get("competition") or match.get("_competition") or match.get("league") or "").lower()
+        comp_text = (match.get("alt_competition") or match.get("alt_league") or match.get("competition") or match.get("_competition") or match.get("league") or "").lower()
         if self._TENNIS_CHALLENGER_REGEX.search(eval_text) or self._TENNIS_CHALLENGER_REGEX.search(comp_text):
             return "tennis", "Challenger e Altri"
         if is_women or "wta" in comp_text or "wta" in eval_text:
@@ -446,6 +456,16 @@ class GenreClassifier:
         return "tennis", "Challenger e Altri"
 
     def _classify_motorsport(self, match: Dict[str, Any], eval_text: str) -> Tuple[str, str]:
+        canon = match.get("canonical_competition")
+        if canon == "motorsport_f1":
+            return "motori", "Formula 1"
+        if canon in ("motorsport_motogp", "motorsport_sbk"):
+            return "motori", "MotoGP e Superbike"
+        if canon == "motorsport_rally_wrc":
+            return "motori", "Rally e WRC"
+        if canon in ("motorsport_nascar", "motorsport_indycar"):
+            return "motori", "NASCAR e IndyCar"
+
         if self._F1_REGEX.search(eval_text):
             return "motori", "Formula 1"
         if self._MOTOGP_REGEX.search(eval_text):
@@ -474,7 +494,7 @@ class GenreClassifier:
             return "basket", "NCAA e College Basket"
 
         # LIVELLO 2: Campionati Nazionali (DOPPIO FILTRO: 1° Nazione -> 2° Torneo)
-        country = (match.get("country") or match.get("_country") or "").lower().strip()
+        country = (match.get("alt_country") or match.get("country") or match.get("_country") or "").lower().strip()
         has_foreign_flag = any(flag in eval_text for flag in ("🇨🇳", "🇪🇸", "🇦🇺", "🇩🇪", "🇫🇷", "🇬🇷", "🇹🇷", "🇧🇷", "🇯🇵", "🇰🇷"))
         is_foreign_country = country in (
             "china", "cina", "cn", "spain", "spagna", "es", "australia", "germany", "germania", "de",
@@ -522,7 +542,7 @@ class GenreClassifier:
             return "volley", "Nazionali e Internazionale"
 
         # LIVELLO 2: Campionati Nazionali Maschili (DOPPIO FILTRO: 1° Nazione -> 2° Torneo)
-        country = (match.get("country") or match.get("_country") or "").lower().strip()
+        country = (match.get("alt_country") or match.get("country") or match.get("_country") or "").lower().strip()
         is_foreign_country = country in (
             "poland", "polonia", "pl", "turkey", "turchia", "tr", "russia", "ru",
             "brazil", "brasile", "br", "france", "francia", "fr", "germany", "germania", "de",
@@ -548,7 +568,7 @@ class GenreClassifier:
         return "volley", "Nazionali e Internazionale"
 
     def _classify_american_football(self, match: Dict[str, Any], eval_text: str, is_youth: bool) -> Tuple[str, str]:
-        country = (match.get("country") or match.get("_country") or "").lower().strip()
+        country = (match.get("alt_country") or match.get("country") or match.get("_country") or "").lower().strip()
         # 1. CFL & Altre Leghe
         is_canada = country in ("canada", "ca") or "🇨🇦" in eval_text
         is_cfl = bool(self._CFL_REGEX.search(eval_text))
@@ -584,7 +604,7 @@ class GenreClassifier:
             return "baseball", "NCAA College Baseball"
 
         # 2. Campionati Internazionali
-        country = (match.get("country") or match.get("_country") or "").lower().strip()
+        country = (match.get("alt_country") or match.get("country") or match.get("_country") or "").lower().strip()
         has_baseball_foreign_flag = any(flag in eval_text for flag in ("🇯🇵", "🇰🇷", "🇲🇽", "🇹🇼", "🇨🇺"))
         is_foreign_baseball = (
             country in ("japan", "giappone", "jp", "korea", "corea", "kr", "mexico", "messico", "mx", "taiwan", "tw", "cuba", "cu", "dominican", "república dominicana")
@@ -608,7 +628,7 @@ class GenreClassifier:
             return "hockey", "Mondiali e Nazionali"
 
         # 2. Leghe Europee
-        country = (match.get("country") or match.get("_country") or "").lower().strip()
+        country = (match.get("alt_country") or match.get("country") or match.get("_country") or "").lower().strip()
         has_hockey_eu_flag = any(flag in eval_text for flag in ("🇸🇪", "🇫🇮", "🇩🇪", "🇨🇿", "🇨🇭", "🇷🇺", "🇦🇹", "🇸🇰", "🇳🇴"))
         is_european_hockey = (
             country in ("sweden", "svezia", "se", "finland", "finlandia", "fi", "germany", "germania", "de", "czech", "cechia", "cz", "swiss", "switzerland", "svizzera", "ch", "russia", "ru", "austria", "at", "slovakia", "sk", "norway", "norvegia", "no", "uk", "great britain")
@@ -645,7 +665,7 @@ class GenreClassifier:
     def _classify_altri_sport(self, match: Dict[str, Any], eval_text: str) -> Tuple[str, str]:
         cat = (match.get("category") or "").lower().strip()
         silo = (match.get("_silo") or match.get("category") or match.get("silo") or "").lower().strip()
-        country = (match.get("country") or match.get("_country") or "").lower().strip()
+        country = (match.get("alt_country") or match.get("country") or match.get("_country") or "").lower().strip()
         title_lower = (match.get("title") or "").lower().strip()
 
         is_afl_match = (
@@ -675,7 +695,7 @@ class GenreClassifier:
         is_extra_eu = bool(self._EXTRA_EU_CONFED_REGEX.search(eval_text) or self._EXTRA_EU_LEAGUES_REGEX.search(eval_text) or has_extra_eu_flag)
         is_foreign = bool(self._FOREIGN_LEAGUE_REGEX.search(eval_text)) or is_extra_eu
         is_extra_eu_confed = bool(self._EXTRA_EU_CONFED_REGEX.search(eval_text))
-        country = (match.get("country") or match.get("_country") or "").lower().strip()
+        country = (match.get("alt_country") or match.get("country") or match.get("_country") or "").lower().strip()
 
         # 1. YOUTH & COLLEGE
         if is_youth:

@@ -569,7 +569,7 @@ class TheSportsDBService:
                 continue
 
             m_date = m.get("date", 0)
-            m_comp = m.get("competition") or m.get("_competition") or ""
+            m_comp = m.get("alt_competition") or m.get("alt_league") or m.get("competition") or m.get("_competition") or ""
             m_is_youth = bool(m.get("is_youth"))
             m_is_women = bool(m.get("is_women"))
             if not m_is_youth or not m_is_women:
@@ -579,7 +579,8 @@ class TheSportsDBService:
 
             m_canon = m.get("canonical_competition")
             if not m_canon:
-                m_canon = detect_canonical_competition(f"{m_comp} : {m.get('title', '')}", silo_hint=tsdb_silo)
+                alt_t = m.get("alt_title") or m.get("title", "")
+                m_canon = detect_canonical_competition(f"{m_comp} : {alt_t} : {m.get('title', '')}", silo_hint=tsdb_silo)
             if m_is_women and m_canon == "football_uefa_cl":
                 m_canon = "football_uwcl"
 
@@ -706,6 +707,30 @@ class TheSportsDBService:
         return ""
 
     @staticmethod
+    def normalize_motorsport_session_name(text: str) -> str:
+        """Normalizes motorsport session names across Italian EPG, Official registries, and providers."""
+        s = (text or "").lower()
+        if re.search(r"\b(?:fp1|prove\s*libere\s*1|free\s*practice\s*1|practice\s*1)\b", s):
+            return "fp1"
+        if re.search(r"\b(?:fp2|prove\s*libere\s*2|free\s*practice\s*2|practice\s*2)\b", s):
+            return "fp2"
+        if re.search(r"\b(?:fp3|prove\s*libere\s*3|free\s*practice\s*3|practice\s*3)\b", s):
+            return "fp3"
+        if re.search(r"\b(?:pre\s*qualifiche|pre\s*qualifying)\b", s):
+            return "pre_qualifying"
+        if re.search(r"\b(?:sprint\s*shootout|sprint\s*qualifying|qualifiche\s*sprint)\b", s):
+            return "sprint_qualifying"
+        if re.search(r"\b(?:sprint|sprint\s*race|gara\s*sprint)\b", s):
+            return "sprint"
+        if re.search(r"\b(?:qualifiche|qualifying|qualif|pole)\b", s):
+            return "qualifying"
+        if re.search(r"\b(?:warm\s*up)\b", s):
+            return "warm_up"
+        if re.search(r"\b(?:gara|race|main\s*race|grand\s*prix)\b", s):
+            return "race"
+        return ""
+
+    @staticmethod
     def is_motorsport_match(m: Dict[str, Any]) -> bool:
         """Determines if a match belongs to motorsport category."""
         silo = (m.get("_silo") or "").lower()
@@ -762,8 +787,10 @@ class TheSportsDBService:
             if poster and "nostream" not in str(poster) and str(poster).startswith("http"):
                 continue
 
-            # Identify series key from title, competition, official_event or genre
-            m_text = f"{m.get('title', '')} {m.get('competition', '')} {m.get('_official_event', '')} {m.get('_genre', '')}"
+            # Identify series key from title, competition, official_event or genre (prioritizing English metadata)
+            alt_c = m.get("alt_competition") or m.get("alt_league") or ""
+            alt_t = m.get("alt_title") or ""
+            m_text = f"{alt_t} {alt_c} {m.get('title', '')} {m.get('competition', '')} {m.get('_official_event', '')} {m.get('_genre', '')}"
             m_series = self.get_motorsport_series_key(m_text)
             if not m_series:
                 continue

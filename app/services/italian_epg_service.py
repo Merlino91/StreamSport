@@ -874,12 +874,12 @@ class ItalianEPGService:
             return "basket", "basketball"
         if any(k in combined for k in ("tennis", "atp", "wta", "padel", "wimbledon", "us open", "roland garros", "australian open")):
             return "tennis", "tennis"
-        if cls._MOTORSPORT_REGEX.search(combined):
-            return "motori", "motor-sports"
         if any(k in combined for k in ("sci", "ski", "pattinaggio", "curling", "biathlon", "snowboard", "bob", "slittino", "skeleton")):
             return "altri_sport", "winter-sports"
         if any(k in combined for k in ("olimp", "nuoto", "atletica", "tuffi", "pallanuoto", "ginnastica", "scherma", "pentathlon", "canottaggio", "canoa", "triathlon", "orienteering", "orientamento")):
             return "altri_sport", "olympics"
+        if cls._MOTORSPORT_REGEX.search(combined):
+            return "motori", "motor-sports"
         if any(k in combined for k in ("rugby", "sei nazioni", "six nations")):
             return "altri_sport", "rugby"
         if any(k in combined for k in ("baseball", "mlb")):
@@ -1161,7 +1161,9 @@ class ItalianEPGService:
                     "_silo": silo,
                     "competition": comp,
                     "_competition": comp,
-                    "canonical_competition": detect_canonical_competition(f"{comp} : {title}", silo_hint=silo),
+                    "canonical_competition": detect_canonical_competition(
+                        f"{ch_name} : {comp} : {title} : {synopsis}", silo_hint=silo
+                    ),
                     "date": date_ms,
                     "end_date": end_date_ms,
                     "sources": sources,
@@ -1444,7 +1446,9 @@ class ItalianEPGService:
                     "_silo": silo,
                     "competition": comp,
                     "_competition": comp,
-                    "canonical_competition": detect_canonical_competition(f"{comp} : {title}", silo_hint=silo),
+                    "canonical_competition": detect_canonical_competition(
+                        f"{ch_name} : {comp} : {title} : {synopsis}", silo_hint=silo
+                    ),
                     "date": date_ms,
                     "end_date": end_date_ms,
                     "sources": sources,

@@ -305,14 +305,24 @@ class DirettaService:
                     else:
                         fail_count += 1
 
-                # Enrich Italian events with alt_home / alt_away from English feed
+                # Enrich Italian events with alt_home / alt_away / alt_league / alt_competition / alt_country from English feed
                 for it_ev in it_events:
                     fid = it_ev.get("flashscore_id")
                     if fid and fid in en_by_id:
                         en_m = en_by_id[fid]
-                        it_ev["alt_home"] = en_m["home"]
-                        it_ev["alt_away"] = en_m["away"]
-                        it_ev["alt_title"] = en_m["title"]
+                        it_ev["alt_home"] = en_m.get("home", "")
+                        it_ev["alt_away"] = en_m.get("away", "")
+                        it_ev["alt_title"] = en_m.get("title", "")
+                        it_ev["alt_league"] = en_m.get("league", "")
+                        it_ev["alt_competition"] = en_m.get("competition", "")
+                        it_ev["alt_country"] = en_m.get("country", "")
+                    else:
+                        it_ev["alt_home"] = it_ev.get("home", "")
+                        it_ev["alt_away"] = it_ev.get("away", "")
+                        it_ev["alt_title"] = it_ev.get("title", "")
+                        it_ev["alt_league"] = it_ev.get("league", "")
+                        it_ev["alt_competition"] = it_ev.get("competition", "")
+                        it_ev["alt_country"] = it_ev.get("country", "")
 
                 # Consolidated cache: IT events + EN-only sports (Hockey, American Football, Baseball)
                 # and any EN events not covered by IT
@@ -321,6 +331,12 @@ class DirettaService:
                 for en_ev in en_events:
                     fid = en_ev.get("flashscore_id")
                     if fid not in it_fids:
+                        en_ev["alt_home"] = en_ev.get("home", "")
+                        en_ev["alt_away"] = en_ev.get("away", "")
+                        en_ev["alt_title"] = en_ev.get("title", "")
+                        en_ev["alt_league"] = en_ev.get("league", "")
+                        en_ev["alt_competition"] = en_ev.get("competition", "")
+                        en_ev["alt_country"] = en_ev.get("country", "")
                         all_consolidated.append(en_ev)
 
                 if len(all_consolidated) > 100:
@@ -383,6 +399,9 @@ class DirettaService:
             silo = m.get("_silo", "altri_sport")
             comp = m.get("competition") or m.get("league", "")
             country = m.get("country", "")
+            alt_comp = m.get("alt_competition") or comp
+            alt_league = m.get("alt_league") or m.get("league", comp)
+            alt_country = m.get("alt_country") or country
 
             # Italian names are primary for UI/catalog; English (Flashscore UK) are kept in alt_* for TSDB/providers
             if silo == "motor-sports":
@@ -409,9 +428,12 @@ class DirettaService:
                     {"home": {"name": alt_home}, "away": {"name": alt_away}},
                 ]
 
-            # Infer canonical slug fallback if needed
+            # Infer canonical slug fallback if needed (prioritizing English metadata)
             if not slug:
-                fallback_text = title if silo == "motor-sports" else f"{country}: {comp} {title}"
+                fallback_text = (
+                    alt_title if silo == "motor-sports"
+                    else f"{alt_country}: {alt_comp} {alt_title} {country}: {comp} {title}"
+                )
                 slug = detect_canonical_competition(fallback_text, silo_hint=silo)
 
             official_match = {
@@ -438,6 +460,9 @@ class DirettaService:
                 "country": country,
                 "_country": country,
                 "league": m.get("league", comp),
+                "alt_league": alt_league,
+                "alt_competition": alt_comp,
+                "alt_country": alt_country,
                 "canonical_competition": slug,
                 "_canonical_competition": slug,
                 "tv_channels": m.get("tv_channels", []),

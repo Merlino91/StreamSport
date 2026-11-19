@@ -34,6 +34,79 @@ class TestDirettaService(unittest.TestCase):
         self.assertEqual(m2["home"], "Milan")
         self.assertEqual(m2["away"], "Napoli")
 
+    def test_enrich_with_alt_metadata(self):
+        it_feed = (
+            "~ZA÷Eurolega¬ZY÷Europa¬"
+            "~AA÷match_euro01¬AD÷1728846000¬AE÷Real Madrid¬AF÷Olimpia Milano¬"
+        )
+        en_feed = (
+            "~ZA÷Euroleague¬ZY÷Europe¬"
+            "~AA÷match_euro01¬AD÷1728846000¬AE÷Real Madrid¬AF÷Olimpia Milano¬"
+        )
+        it_events = self.service.parse_flashscore_feed(it_feed, "Basket", "basketball")
+        en_events = self.service.parse_flashscore_feed(en_feed, "Basketball", "basketball")
+
+        en_by_id = {e["flashscore_id"]: e for e in en_events if e.get("flashscore_id")}
+
+        for it_ev in it_events:
+            fid = it_ev.get("flashscore_id")
+            if fid and fid in en_by_id:
+                en_m = en_by_id[fid]
+                it_ev["alt_home"] = en_m.get("home", "")
+                it_ev["alt_away"] = en_m.get("away", "")
+                it_ev["alt_title"] = en_m.get("title", "")
+                it_ev["alt_league"] = en_m.get("league", "")
+                it_ev["alt_competition"] = en_m.get("competition", "")
+                it_ev["alt_country"] = en_m.get("country", "")
+
+        ev = it_events[0]
+        self.assertEqual(ev["league"], "Eurolega")
+        self.assertEqual(ev["country"], "Europa")
+        self.assertEqual(ev["alt_league"], "Euroleague")
+        self.assertEqual(ev["alt_competition"], "Euroleague")
+        self.assertEqual(ev["alt_country"], "Europe")
+
+    @patch.object(DirettaService, "get_events")
+    def test_official_sliding_schedule_preserves_alt_fields(self, mock_get_events):
+        now_ms = 1728840000 * 1000
+        mock_get_events.return_value = [
+            {
+                "id": "diretta-euro01",
+                "title": "Real Madrid vs Olimpia Milano",
+                "sport": "Basket",
+                "category": "basketball",
+                "_silo": "basketball",
+                "country": "Europa",
+                "league": "Eurolega",
+                "competition": "Eurolega",
+                "alt_country": "Europe",
+                "alt_league": "Euroleague",
+                "alt_competition": "Euroleague",
+                "home": "Real Madrid",
+                "away": "Olimpia Milano",
+                "alt_home": "Real Madrid",
+                "alt_away": "Olimpia Milano",
+                "alt_title": "Real Madrid vs Olimpia Milano",
+                "date": now_ms + 7200 * 1000,
+                "status": "scheduled",
+            }
+        ]
+
+        with patch("time.time", return_value=1728840000):
+            schedule = asyncio.run(self.service.get_official_sliding_schedule())
+
+        self.assertEqual(len(schedule), 1)
+        m = schedule[0]
+        # UI fields remain Italian
+        self.assertEqual(m["competition"], "Eurolega")
+        self.assertEqual(m["country"], "Europa")
+        # Internal fields carry English metadata
+        self.assertEqual(m["alt_league"], "Euroleague")
+        self.assertEqual(m["alt_competition"], "Euroleague")
+        self.assertEqual(m["alt_country"], "Europe")
+        # Canonical competition correctly detected as basketball_euroleague
+        self.assertEqual(m["canonical_competition"], "basketball_euroleague")
+
 
 class TestBuildMetaItemAndMerging(unittest.TestCase):
     def test_merge_provider_streams_and_build_meta(self):

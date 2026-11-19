@@ -207,6 +207,72 @@ class TestMotorsportsIntegration(unittest.TestCase):
 
         asyncio.run(_run())
 
+    def test_epg_synopsis_and_channel_canonical_detection(self):
+        # Sky Sport Uno with F1 in synopsis
+        c1 = detect_canonical_competition(
+            "Sky Sport Uno : GP Las Vegas : GP Las Vegas: Prove libere 1 : ... 1 F1. - Inizia il weekend in Nevada",
+            silo_hint="motor-sports"
+        )
+        self.assertEqual(c1, "motorsport_f1")
+
+        # Sky Sport Uno with Moto3 in synopsis
+        c2 = detect_canonical_competition(
+            "Sky Sport Uno : GP Portogallo : GP Portogallo: Prove libere 1 : ... libere 1 Moto3. - Ventunesimo appuntamento",
+            silo_hint="motor-sports"
+        )
+        self.assertEqual(c2, "motorsport_motogp")
+
+        # Sky Sport MotoGP with Pre Qualifiche
+        c3 = detect_canonical_competition(
+            "Sky Sport MotoGP : GP Portogallo : GP Portogallo: Pre Qualifiche : ... MotoGP.",
+            silo_hint="motor-sports"
+        )
+        self.assertEqual(c3, "motorsport_motogp")
+
+    def test_figure_skating_not_hijacked_by_motorsport_gp(self):
+        # Event with GP in title should not be hijacked into motor-sports
+        m = {
+            "title": "Pattinaggio di Figura - GP Skate America 2026: Programma libero Uomini",
+            "category": "altri_sport",
+            "_silo": "winter-sports",
+        }
+        c_cat, c_genre = genre_classifier.classify(m)
+        self.assertEqual(c_cat, "altri_sport")
+        self.assertEqual(c_genre, "Sport Invernali")
+
+    def test_epg_motorsport_session_merge_with_5min_diff(self):
+        from app.services.catalog_service import catalog_service
+        off_vegas = {
+            "id": "off_vegas_fp1",
+            "title": "Formula 1: Las Vegas Grand Prix - FP1",
+            "competition": "Formula 1",
+            "canonical_competition": "motorsport_f1",
+            "date": 1795134600000,  # 00:30 UTC
+            "_silo": "motor-sports",
+            "category": "motor-sports",
+            "sources": [{"id": "dlhd_1", "name": "Sky Sports F1 UK"}]
+        }
+        ep_vegas = {
+            "id": "sky_9097_gp-las-vegas-prove-libere-1_1795134300",
+            "title": "GP Las Vegas: Prove libere 1",
+            "competition": "GP Las Vegas",
+            "canonical_competition": "motorsport_f1",
+            "date": 1795134300000,  # 00:25 UTC (5 min earlier)
+            "_silo": "motor-sports",
+            "category": "motori",
+            "eventSynopsis": "... 1 F1. - Inizia il weekend in Nevada...",
+            "sources": [{"id": "tvvoo_sky_uno", "name": "Sky Sport Uno"}]
+        }
+
+        schedule = [off_vegas]
+        catalog_service._merge_epg_certified_sessions(schedule, [ep_vegas])
+
+        # Must merge into single card and inherit Sky source
+        self.assertEqual(len(schedule), 1)
+        src_names = [s.get("name") for s in schedule[0].get("sources", [])]
+        self.assertIn("Sky Sport Uno", src_names)
+        self.assertIn("Sky Sports F1 UK", src_names)
+
 
 if __name__ == "__main__":
     unittest.main()
