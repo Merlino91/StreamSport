@@ -66,8 +66,11 @@ def is_safe_vavoo_play_url(url: str) -> bool:
     if not hostname:
         return False
 
-    # Check against authorized Vavoo mirrors
-    allowed_domains = {"vavoo.to", "vavoo.net", "huhu.to", "kool.to", "oha.to", "vavoo.tv"}
+    # Check against authorized Vavoo / Geil mirrors
+    allowed_domains = {
+        "geil.app", "geil.win", "geil.to",
+        "vavoo.to", "vavoo.net", "huhu.to", "kool.to", "oha.to", "vavoo.tv"
+    }
     is_allowed = any(
         hostname == domain or hostname.endswith(f".{domain}")
         for domain in allowed_domains
@@ -76,7 +79,7 @@ def is_safe_vavoo_play_url(url: str) -> bool:
         return False
 
     path = parsed.path or ""
-    if not any(path.startswith(prefix) for prefix in ("/play", "/vavoo-iptv/play")):
+    if not any(path.startswith(prefix) for prefix in ("/play", "/live/play", "/vavoo-iptv/play")):
         return False
 
     return True
@@ -283,7 +286,33 @@ class LiveManifestManager:
             session = await self._refresh_session(session, play_url, client_ip)
             if not session:
                 return None
-            raw_m3u8 = await self._fetch_upstream(session.stream_url)
+            try:
+                raw_m3u8 = await self._fetch_upstream(session.stream_url)
+            except Exception as exc2:
+                logger.warning("[LiveManifest] Second upstream fetch attempt failed (%s) for %s", exc2, play_url[:80])
+                raw_m3u8 = None
+                meta = self.service._url_to_channel_meta.get(play_url)
+                if meta:
+                    canonical = meta.get("canonical")
+                    country = meta.get("country")
+                    siblings = self.service.get_channel_streams(channel_name=canonical, country=country)
+                    for sib in siblings:
+                        sib_url = sib.get("url")
+                        if sib_url and sib_url != play_url:
+                            logger.info("[LiveManifest] Attempting failover to sibling server '%s' (%s) for '%s'...", sib.get("raw_name"), sib_url[-25:], canonical)
+                            sib_res = await self.service.resolve_clean_stream_url(sib_url, client_ip)
+                            if sib_res and sib_res.get("url"):
+                                try:
+                                    raw_m3u8 = await self._fetch_upstream(sib_res["url"])
+                                    last_slash = sib_res["url"].rfind("/")
+                                    session.stream_url = sib_res["url"]
+                                    session.base_url = sib_res["url"][:last_slash + 1] if last_slash != -1 else sib_res["url"]
+                                    session.valid_until = sib_res.get("valid_until", time.time() + 1200)
+                                    break
+                                except Exception:
+                                    continue
+                if not raw_m3u8:
+                    return None
 
         rewritten = self._rewrite_manifest(raw_m3u8, session.base_url)
         async with self._lock:
@@ -381,7 +410,8 @@ class TvVooService:
     """
 
     PING_URL = "https://www.vypn.net/api/app/ping"
-    DEFAULT_DOMAIN = "vavoo.to"
+    GEIL_MIRRORS: List[str] = ["https://geil.app", "https://geil.win", "https://geil.to"]
+    DEFAULT_DOMAIN = "geil.app"
     DOMAIN_MIRRORS: List[str] = ["vavoo.to", "huhu.to", "kool.to", "oha.to", "vavoo.net"]
 
     # Supported Vavoo country groups for sports broadcasting
@@ -1520,80 +1550,133 @@ class TvVooService:
             if not force and self._channels_by_canonical and (now - self._last_sync_time) < TVVOO_CACHE_INTERVAL:
                 return self._channels_by_canonical
 
-            sig = await self.get_vavoo_signature()
-            if not sig:
-                logger.warning("Cannot sync Vavoo channels without a valid session signature.")
-                return self._channels_by_canonical
-
-            cat_headers = {
-                "user-agent": "okhttp/4.11.0",
-                "accept": "application/json",
-                "content-type": "application/json; charset=utf-8",
-                "mediahubmx-signature": sig,
-            }
-
             all_raw_items: List[Dict[str, Any]] = []
 
-            # Determine mirror candidate order: start with default/active domain first
-            candidate_domains = [self._active_domain]
-            for mirror in self.DOMAIN_MIRRORS:
-                if mirror not in candidate_domains:
-                    candidate_domains.append(mirror)
+            # 1. Primary: MediaHubMX v2 / Geil API (fast, open, no token required)
+            geil_headers = {
+                "user-agent": "MediaHubMX/2",
+                "accept": "application/json",
+            }
+            target_groups_lower = {g.lower(): g for g in self.TVVOO_COUNTRY_GROUPS}
 
-            for domain in candidate_domains:
-                catalog_url = self.get_catalog_url(domain)
+            for mirror in self.GEIL_MIRRORS:
                 domain_items: List[Dict[str, Any]] = []
                 domain_succeeded = True
-
                 try:
-                    async with httpx.AsyncClient(timeout=15.0, verify=False) as client:
-                        for group in self.TVVOO_COUNTRY_GROUPS:
-                            cursor: Any = 0
-                            while True:
-                                cat_body = {
-                                    "language": "de",
-                                    "region": "AT",
-                                    "catalogId": "iptv",
-                                    "id": "iptv",
-                                    "adult": False,
-                                    "search": "",
-                                    "sort": "name",
-                                    "filter": {"group": group},
-                                    "cursor": cursor,
-                                    "clientVersion": "3.1.0",
-                                }
-                                r_cat = await client.post(catalog_url, headers=cat_headers, json=cat_body)
-                                if r_cat.status_code != 200:
-                                    logger.warning("Vavoo catalog query to %s group %s returned HTTP %s", domain, group, r_cat.status_code)
-                                    domain_succeeded = False
-                                    break
-                                data = r_cat.json()
-                                items = data.get("items", [])
-                                if not items:
-                                    break
-                                for it in items:
-                                    it["_country_group"] = group
-                                domain_items.extend(items)
-                                cursor = data.get("nextCursor")
-                                if not cursor:
-                                    break
-                            if not domain_succeeded:
+                    async with httpx.AsyncClient(timeout=12.0, verify=False) as client:
+                        cursor: Any = None
+                        pages = 0
+                        max_pages = 40
+                        while pages < max_pages:
+                            catalog_url = f"{mirror.rstrip('/')}/live/catalog/live/channels.json"
+                            if cursor:
+                                catalog_url += f"?cursor={urllib.parse.quote(str(cursor), safe='')}"
+                            r_cat = await client.get(catalog_url, headers=geil_headers)
+                            if r_cat.status_code != 200:
+                                logger.warning("Geil catalog query to %s returned HTTP %s", mirror, r_cat.status_code)
+                                domain_succeeded = False
+                                break
+                            data = r_cat.json()
+                            items = data.get("items", [])
+                            if not items:
+                                break
+                            for it in items:
+                                tags = [str(t).lower() for t in it.get("tags", [])]
+                                for g_low, g_orig in target_groups_lower.items():
+                                    if g_low in tags:
+                                        it_copy = dict(it)
+                                        it_copy["_country_group"] = g_orig
+                                        domain_items.append(it_copy)
+                                        break
+                            cursor = data.get("nextCursor")
+                            pages += 1
+                            if not cursor:
                                 break
                 except Exception as e:
-                    logger.warning("Error fetching Vavoo catalog from %s: %s", domain, e)
+                    logger.warning("Error fetching Geil catalog from %s: %s", mirror, e)
                     domain_succeeded = False
 
                 if domain_succeeded and domain_items:
                     all_raw_items = domain_items
-                    if domain != self._active_domain:
-                        logger.info("TvVoo fallback activated: switched active domain from %s to %s", self._active_domain, domain)
-                        self._active_domain = domain
+                    active_host = urllib.parse.urlsplit(mirror).netloc or mirror
+                    if active_host != self._active_domain:
+                        logger.info("TvVoo Geil mirror active: using %s (%d channels)", active_host, len(domain_items))
+                        self._active_domain = active_host
                     break
                 else:
-                    logger.warning("TvVoo mirror %s failed or returned empty items. Trying next fallback mirror...", domain)
+                    logger.warning("Geil mirror %s failed or returned empty items. Trying next fallback mirror...", mirror)
+
+            # 2. Secondary fallback: Legacy Vavoo MediaHubMX API (requires vypn/vavoo signature)
+            if not all_raw_items:
+                logger.info("Geil mirrors unavailable; falling back to legacy Vavoo catalog query...")
+                sig = await self.get_vavoo_signature()
+                if sig:
+                    cat_headers = {
+                        "user-agent": "okhttp/4.11.0",
+                        "accept": "application/json",
+                        "content-type": "application/json; charset=utf-8",
+                        "mediahubmx-signature": sig,
+                    }
+
+                    candidate_domains = [self._active_domain]
+                    for m in self.DOMAIN_MIRRORS:
+                        if m not in candidate_domains:
+                            candidate_domains.append(m)
+
+                    for domain in candidate_domains:
+                        catalog_url = self.get_catalog_url(domain)
+                        domain_items = []
+                        domain_succeeded = True
+
+                        try:
+                            async with httpx.AsyncClient(timeout=15.0, verify=False) as client:
+                                for group in self.TVVOO_COUNTRY_GROUPS:
+                                    cursor = 0
+                                    while True:
+                                        cat_body = {
+                                            "language": "de",
+                                            "region": "AT",
+                                            "catalogId": "iptv",
+                                            "id": "iptv",
+                                            "adult": False,
+                                            "search": "",
+                                            "sort": "name",
+                                            "filter": {"group": group},
+                                            "cursor": cursor,
+                                            "clientVersion": "3.1.0",
+                                        }
+                                        r_cat = await client.post(catalog_url, headers=cat_headers, json=cat_body)
+                                        if r_cat.status_code != 200:
+                                            logger.warning("Vavoo catalog query to %s group %s returned HTTP %s", domain, group, r_cat.status_code)
+                                            domain_succeeded = False
+                                            break
+                                        data = r_cat.json()
+                                        items = data.get("items", [])
+                                        if not items:
+                                            break
+                                        for it in items:
+                                            it["_country_group"] = group
+                                        domain_items.extend(items)
+                                        cursor = data.get("nextCursor")
+                                        if not cursor:
+                                            break
+                                    if not domain_succeeded:
+                                        break
+                        except Exception as e:
+                            logger.warning("Error fetching Vavoo catalog from %s: %s", domain, e)
+                            domain_succeeded = False
+
+                        if domain_succeeded and domain_items:
+                            all_raw_items = domain_items
+                            if domain != self._active_domain:
+                                logger.info("TvVoo fallback activated: switched active domain from %s to %s", self._active_domain, domain)
+                                self._active_domain = domain
+                            break
+                        else:
+                            logger.warning("TvVoo mirror %s failed or returned empty items. Trying next fallback mirror...", domain)
 
             if not all_raw_items:
-                logger.error("All TvVoo catalog mirrors (%s) failed to provide channels.", ", ".join(candidate_domains))
+                logger.error("All TvVoo catalog mirrors (%s) failed to provide channels.", ", ".join(self.DOMAIN_MIRRORS))
                 return self._channels_by_canonical
 
             # Group and map channels to canonical names respecting country silos
@@ -1612,9 +1695,20 @@ class TvVooService:
                 if not canonical:
                     continue
 
-                # Determine server/mirror tag (.c, .s, or .b)
+                # Determine server/mirror tag (.c, .s, or .b, or (6), (7), (1))
                 raw_lower = raw_name.lower()
-                tag = "c" if ".c" in raw_lower else ("s" if ".s" in raw_lower else ("b" if ".b" in raw_lower else "live"))
+                m_tag = re.search(r"\s*\((\d{1,2})\)\s*$", raw_name)
+                if m_tag:
+                    num = m_tag.group(1)
+                    tag = {"6": "c", "7": "s", "1": "b"}.get(num, num)
+                elif ".c" in raw_lower:
+                    tag = "c"
+                elif ".s" in raw_lower:
+                    tag = "s"
+                elif ".b" in raw_lower:
+                    tag = "b"
+                else:
+                    tag = "live"
                 display_name = self.CANONICAL_DISPLAY_NAMES.get(canonical, canonical.title())
 
                 channel_entry = {
@@ -1775,11 +1869,39 @@ class TvVooService:
 
     async def resolve_clean_stream_url(self, play_url: str, client_ip: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """
-        Resolves a Vavoo play URL (https://vavoo.to/play/.../index.m3u8) to a direct playable stream URL.
+        Resolves a Vavoo / Geil play URL to a direct playable stream URL.
+        Tries Geil API first (no signature needed), then legacy MediaHubMX API if needed.
         """
         if not is_safe_vavoo_play_url(play_url):
             return None
 
+        # 1. Geil resolver (preferred: tokenless, fast, direct CDN playback)
+        geil_headers = {
+            "user-agent": "MediaHubMX/2",
+            "accept": "application/json",
+        }
+        for mirror in self.GEIL_MIRRORS:
+            try:
+                resolve_url = f"{mirror.rstrip('/')}/live/resolve?url={urllib.parse.quote(play_url, safe='')}"
+                async with httpx.AsyncClient(timeout=8.0, verify=False) as client:
+                    res = await client.get(resolve_url, headers=geil_headers)
+                    if res.status_code == 200:
+                        data = res.json()
+                        direct_url = None
+                        if isinstance(data, dict):
+                            direct_url = data.get("url") or data.get("streamUrl")
+                        elif isinstance(data, list) and data and isinstance(data[0], dict):
+                            direct_url = data[0].get("url")
+
+                        if direct_url and is_safe_stream_target(str(direct_url)):
+                            return {
+                                "url": str(direct_url),
+                                "valid_until": time.time() + 1200,
+                            }
+            except Exception as e:
+                logger.debug("Geil resolve via %s failed for %s: %s", mirror, play_url[-25:], e)
+
+        # 2. Legacy Vavoo MediaHubMX fallback (requires vypn/vavoo signature)
         valid_ip = sanitize_ip(client_ip)
         sig = await self.get_vavoo_signature(valid_ip)
         if not sig:

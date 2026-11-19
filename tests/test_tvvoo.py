@@ -331,6 +331,56 @@ class TestTvVooService(unittest.IsolatedAsyncioTestCase):
         self.assertIn("sky sport uno", res)
         self.assertEqual(self.service.active_domain, "huhu.to")
 
+    @patch("app.services.tvvoo_service.httpx.AsyncClient")
+    async def test_geil_catalog_sync_and_tagging(self, mock_client_cls):
+        """Tests that Geil MediaHubMX v2 catalog is synced without tokens and tags are mapped properly."""
+        mock_client = AsyncMock()
+        mock_client_cls.return_value.__aenter__.return_value = mock_client
+
+        # Geil catalog response
+        mock_geil_resp = MagicMock()
+        mock_geil_resp.status_code = 200
+        mock_geil_resp.json.return_value = {
+            "items": [
+                {"name": "SKY SPORT UNO (6)", "url": "https://geil.app/live/play/100", "tags": ["Italy"]},
+                {"name": "SKY SPORT UNO (7)", "url": "https://geil.app/live/play/101", "tags": ["Italy"]},
+                {"name": "DAZN 1 (6)", "url": "https://geil.app/live/play/200", "tags": ["Italy"]},
+                {"name": "SKY SPORT BUNDESLIGA 1 (6)", "url": "https://geil.app/live/play/300", "tags": ["Germany"]},
+            ],
+            "nextCursor": None,
+        }
+        mock_client.get.return_value = mock_geil_resp
+
+        res = await self.service.sync_channels(force=True)
+
+        self.assertIn("sky sport uno", res)
+        streams = res["sky sport uno"]
+        self.assertEqual(len(streams), 2)
+        # Server 6 should map to tag 'c', Server 7 to tag 's'
+        self.assertEqual(streams[0]["tag"], "c")
+        self.assertEqual(streams[1]["tag"], "s")
+
+        self.assertIn("dazn 1", res)
+        self.assertIn("sky sport bundesliga 1", res)
+
+    @patch("app.services.tvvoo_service.httpx.AsyncClient")
+    async def test_geil_resolve_direct_stream(self, mock_client_cls):
+        """Tests resolving a Geil play URL to direct CDN stream URL."""
+        mock_client = AsyncMock()
+        mock_client_cls.return_value.__aenter__.return_value = mock_client
+
+        mock_res = MagicMock()
+        mock_res.status_code = 200
+        mock_res.json.return_value = {
+            "url": "https://cdn.example.com/sunshine/hls/index.m3u8",
+            "live": True,
+        }
+        mock_client.get.return_value = mock_res
+
+        resolved = await self.service.resolve_clean_stream_url("https://geil.app/live/play/100")
+        self.assertIsNotNone(resolved)
+        self.assertEqual(resolved["url"], "https://cdn.example.com/sunshine/hls/index.m3u8")
+
 
 if __name__ == "__main__":
     unittest.main()
