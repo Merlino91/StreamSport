@@ -387,6 +387,30 @@ class TennisPosterTestCase(unittest.IsolatedAsyncioTestCase):
         atp_meta = catalog_service.build_meta_item(atp_match, "ATP")
         self.assertIn("🏆 ATP •", atp_meta["description"])
 
+    def test_bjk_cup_country_resolution_with_d_suffix(self):
+        # Ties from Diretta with ' D' suffix must resolve as country teams without trailing ' D'
+        ties = [
+            ("Slovenia D", "SLO", "Slovenia"),
+            ("Indonesia D", "INA", "Indonesia"),
+            ("Polonia D", "POL", "Polonia"),
+            ("Svezia D", "SWE", "Svezia"),
+            ("Brasile D", "BRA", "Brasile"),
+            ("Canada D", "CAN", "Canada"),
+        ]
+        for raw, expected_abbr, expected_disp in ties:
+            res = tennis_poster_service.resolve_country(raw)
+            self.assertTrue(res["is_team"], f"{raw} must resolve as team")
+            self.assertEqual(res["abbr"], expected_abbr)
+            self.assertEqual(res["display"], expected_disp)
+            self.assertIsNotNone(res["flag_url"])
+
+        # Title pairing matching
+        t = "Slovenia D vs Indonesia D"
+        p1, p2 = tennis_poster_service.parse_players(t)
+        self.assertEqual(p1, "Slovenia")
+        self.assertEqual(p2, "Indonesia")
+        self.assertTrue(tennis_poster_service.is_country_match(t, p1, p2, "Coppa Davis e BJK Cup"))
+
 
 if __name__ == "__main__":
     unittest.main()

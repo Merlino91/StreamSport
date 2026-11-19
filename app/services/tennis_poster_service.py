@@ -41,7 +41,7 @@ STATIC_ASSETS_DIR = STATIC_DIR / "assets"
 
 CANVAS_WIDTH = 1225
 CANVAS_HEIGHT = 700
-TENNIS_POSTER_VERSION = 4
+TENNIS_POSTER_VERSION = 5
 
 ESPN_COUNTRIES_URL = "https://sports.core.api.espn.com/v2/sports/tennis/leagues/atp/countries?limit=300"
 ESPN_FLAG_CDN_TMPL = "https://a.espncdn.com/i/teamlogos/countries/500/{code}.png"
@@ -187,7 +187,8 @@ COUNTRY_IT_DISPLAY: Dict[str, str] = {
     "civ": "Costa d'Avorio", "lux": "Lussemburgo", "bih": "Bosnia ed Erzegovina",
     "mkd": "Macedonia del Nord", "pur": "Porto Rico", "dom": "Repubblica Dominicana",
     "mda": "Moldavia", "irl": "Irlanda", "cyp": "Cipro", "aze": "Azerbaigian",
-    "ple": "Palestina",
+    "ple": "Palestina", "slo": "Slovenia", "ina": "Indonesia", "arg": "Argentina",
+    "can": "Canada", "col": "Colombia", "aus": "Australia", "aut": "Austria",
 }
 
 SPECIAL_TEAM_ENTITIES: Dict[str, Tuple[str, str]] = {
@@ -307,12 +308,14 @@ class TennisPosterService:
 
     @staticmethod
     def clean_player_name(raw: str) -> str:
-        """Strips flag emojis, seeds, and bracketed notes."""
+        """Strips flag emojis, seeds, bracketed notes, and trailing demographic markers."""
         s = raw or ""
         s = re.sub(r"[\U0001F1E6-\U0001F1FF]", "", s)
         s = re.sub(r"\[[^\]]*\]", "", s)
         s = re.sub(r"\([^)]*\)", "", s)
         s = re.sub(r"^\d+\s+", "", s)  # e.g. '1 Sinner' -> 'Sinner'
+        s = re.sub(r"\b(donne|femminile|women|ladies)\b", "", s, flags=re.I)
+        s = re.sub(r"(?<=\w)\s+[dwf]\b", "", s, flags=re.I)
         s = re.sub(r"\s+", " ", s)
         return s.strip()
 
@@ -616,6 +619,8 @@ class TennisPosterService:
         """Normalizes a country or team name into a plain lowercase ASCII lookup key."""
         s = re.sub(r"[\(\)\[\]]", " ", text or "")
         s = unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode("ascii")
+        s = re.sub(r"\b(donne|femminile|women|ladies|frauen|dames|damen)\b", " ", s, flags=re.I)
+        s = re.sub(r"(?<=\w)\s+[dwf]\b", " ", s, flags=re.I)
         s = re.sub(r"[^a-zA-Z0-9]+", " ", s).strip().lower()
         return s
 
@@ -706,14 +711,13 @@ class TennisPosterService:
         espn_entry = self._espn_countries_by_abbr.get(code_low, {})
         flag_url = espn_entry.get("flag_url") or ESPN_FLAG_CDN_TMPL.format(code=code_low)
         it_pref = COUNTRY_IT_DISPLAY.get(code_low)
-        # Prefer Italian name if input was English and an Italian form exists; keep clean IT input as-is
+        # Prefer Italian name if available; ensure demographic suffixes (D, Donne) are cleanly stripped
         raw_clean = self.clean_player_name(raw_display).strip()
-        raw_key = self._norm_country_key(raw_clean)
-        display = raw_clean
-        if it_pref and raw_key == self._norm_country_key(espn_entry.get("name", "")):
-            display = it_pref
-        elif not display:
-            display = it_pref or espn_entry.get("name") or abbr.upper()
+        raw_clean = re.sub(r"(?<=\w)\s+[dwf]\b", "", raw_clean, flags=re.I).strip()
+        raw_clean = re.sub(r"\b(donne|femminile|women|ladies)\b", "", raw_clean, flags=re.I).strip()
+        display = it_pref or raw_clean
+        if not display:
+            display = espn_entry.get("name") or abbr.upper()
         return {
             "abbr": abbr.upper(),
             "display": display,

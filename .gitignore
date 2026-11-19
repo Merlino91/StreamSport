@@ -25,6 +25,7 @@ data/posters/athletes/
 data/posters/assets/
 data/posters/backgrounds/
 data/posters/banners/
+data/posters/flags/
 
 # Local backup files (never push to GitHub)
 *_backup.py

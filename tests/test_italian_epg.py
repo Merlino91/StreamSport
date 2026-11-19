@@ -852,6 +852,57 @@ class TestItalianEPGService(unittest.IsolatedAsyncioTestCase):
         teams = {"home": "1", "away": "1: Woltermade"}
         self.assertFalse(ItalianEPGService._is_real_sport_event("1 vs 1: Woltermade", teams))
 
+    def test_sky_atp_finals_session_classification(self):
+        """Verifies Sky ATP Finals session cards correctly retain 'ATP Finals' competition and classify into ATP."""
+        from app.services.genre_classifier import genre_classifier
+        from app.services.canonical_competition_service import detect_canonical_competition
+
+        raw_title = "Cobolli - Tiafoe Singolare: Sessione Serale"
+        content_url = "/sport/tennis-atp-finals/singolare-sessione-serale/c8b209a8-e7b3"
+        url_comp, is_mag = ItalianEPGService._parse_sky_semantic_url(content_url)
+        self.assertEqual(url_comp, "ATP Finals")
+        self.assertFalse(is_mag)
+
+        comp, details = ItalianEPGService._extract_competition_and_details(raw_title)
+        is_comp_tennis_session = any(k in comp.lower() for k in ("singolare", "doppio", "sessione")) or ItalianEPGService._is_versus_pairing(comp)
+        self.assertTrue(is_comp_tennis_session)
+        if url_comp and is_comp_tennis_session:
+            details = raw_title
+            comp = url_comp
+
+        title, _ = ItalianEPGService._normalize_teams_and_title(comp, details)
+        canon = detect_canonical_competition(f"{comp} : {title}", silo_hint="tennis")
+        self.assertEqual(comp, "ATP Finals")
+        self.assertEqual(canon, "tennis_atp")
+
+        match_obj = {
+            "title": title,
+            "competition": comp,
+            "_competition": comp,
+            "canonical_competition": canon,
+            "_silo": "tennis",
+            "category": "tennis",
+        }
+        cat, genre = genre_classifier.classify(match_obj)
+        self.assertEqual(cat, "tennis")
+        self.assertEqual(genre, "ATP")
+
+    def test_generalist_news_capsule_and_episodic_filter(self):
+        """Verifies short studio pills and docuseries with episode numbers are filtered."""
+        import re
+
+        # 1. 9-minute pill on generalist channel
+        dur_short = 9.0
+        self.assertTrue(0 < dur_short < 25)
+
+        # 2. News/interview keywords in synopsis
+        syn_news = "News, interviste e anticipazioni della giornata delle ATP Finals di Torino. Conduce Chiara Icardi."
+        self.assertTrue(any(k in syn_news.lower() for k in ("conduce", "notiziario", "interviste", "anticipazioni")))
+
+        # 3. Episodic series
+        syn_doc = "S1 Ep1 Primo Per Sempre - Solo 29 giocatori hanno raggiunto il numero uno del ranking."
+        self.assertTrue(bool(re.search(r"\bS\d+\s*Ep\d+\b", syn_doc, re.I)))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -20,6 +20,7 @@ from app.utils.demographics import extract_demographics
 from app.services.canonical_competition_service import (
     is_simulcast_event,
     get_simulcast_info,
+    detect_canonical_competition,
 )
 
 try:
@@ -993,20 +994,40 @@ class ItalianEPGService:
                 except Exception:
                     continue
 
+                duration_min = (end_date_ms - date_ms) / 60000.0 if end_date_ms and date_ms else 0
+                if is_generalist:
+                    if 0 < duration_min < 25:
+                        logger.debug("Sky Filter: scartata pillola/rubrica breve (%s min) su canale generalista: %s", duration_min, raw_title)
+                        continue
+                    syn_low = synopsis.lower()
+                    if any(k in syn_low for k in ("conduce", "notiziario", "interviste", "anticipazioni", "rassegna stampa")):
+                        logger.debug("Sky Filter: scartata rubrica/notiziario su canale generalista: %s", raw_title)
+                        continue
+
+                # Filter out documentary series / episodic shows (e.g. 'S1 Ep1 Primo Per Sempre') when not a real team match
+                if synopsis and re.search(r"\bS\d+\s*Ep\d+\b", synopsis, re.I):
+                    logger.debug("Sky Filter: scartato documentario/serie a episodi: %s", raw_title)
+                    continue
+
                 # Title & Teams
                 comp, details = self._extract_competition_and_details(raw_title)
 
                 # If competition is missing or generic, enrich using semantic URL or synopsis
                 GENERIC_COMPS = ("sport", "tennis", "calcio", "basket", "motori", "pallavolo", "diretta", "live", "altri sport")
-                if not comp or comp.lower() in GENERIC_COMPS or len(comp) < 3:
-                    if url_comp and url_comp.lower() not in GENERIC_COMPS:
+                is_comp_generic = not comp or comp.lower() in GENERIC_COMPS or len(comp) < 3
+                # Check if extracted 'comp' is actually players/discipline/session (e.g. 'Cobolli - Tiafoe Singolare' or 'Doppio')
+                is_comp_tennis_session = any(k in comp.lower() for k in ("singolare", "doppio", "sessione")) or self._is_versus_pairing(comp)
+
+                if url_comp and (is_comp_generic or is_comp_tennis_session):
+                    if is_comp_tennis_session:
+                        details = raw_title
+                    comp = url_comp
+                elif is_comp_generic:
+                    syn_comp = self._extract_competition_from_synopsis(synopsis)
+                    if syn_comp:
+                        comp = syn_comp
+                    elif url_comp:
                         comp = url_comp
-                    else:
-                        syn_comp = self._extract_competition_from_synopsis(synopsis)
-                        if syn_comp:
-                            comp = syn_comp
-                        elif url_comp:
-                            comp = url_comp
 
                 title, teams_dict = self._normalize_teams_and_title(comp, details)
                 if not title or not self._is_real_sport_event(title, teams_dict):
@@ -1140,6 +1161,7 @@ class ItalianEPGService:
                     "_silo": silo,
                     "competition": comp,
                     "_competition": comp,
+                    "canonical_competition": detect_canonical_competition(f"{comp} : {title}", silo_hint=silo),
                     "date": date_ms,
                     "end_date": end_date_ms,
                     "sources": sources,
@@ -1264,6 +1286,21 @@ class ItalianEPGService:
                     if not end_date_ms:
                         end_date_ms = date_ms + 120 * 60 * 1000
                 except Exception:
+                    continue
+
+                duration_min = (end_date_ms - date_ms) / 60000.0 if end_date_ms and date_ms else 0
+                if is_generalist:
+                    if 0 < duration_min < 25:
+                        logger.debug("Tivusat Filter: scartata pillola/rubrica breve (%s min) su canale generalista: %s", duration_min, raw_title)
+                        continue
+                    syn_low = synopsis.lower()
+                    if any(k in syn_low for k in ("conduce", "notiziario", "interviste", "anticipazioni", "rassegna stampa")):
+                        logger.debug("Tivusat Filter: scartata rubrica/notiziario su canale generalista: %s", raw_title)
+                        continue
+
+                # Filter out documentary series / episodic shows (e.g. 'S1 Ep1') when not a real team match
+                if synopsis and re.search(r"\bS\d+\s*Ep\d+\b", synopsis, re.I):
+                    logger.debug("Tivusat Filter: scartato documentario/serie a episodi: %s", raw_title)
                     continue
 
                 # Title & Teams
@@ -1407,6 +1444,7 @@ class ItalianEPGService:
                     "_silo": silo,
                     "competition": comp,
                     "_competition": comp,
+                    "canonical_competition": detect_canonical_competition(f"{comp} : {title}", silo_hint=silo),
                     "date": date_ms,
                     "end_date": end_date_ms,
                     "sources": sources,
