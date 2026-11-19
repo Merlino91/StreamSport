@@ -995,18 +995,32 @@ CANONICAL_LEAGUES = {
         "patterns": [r"serie\s*a\s*elite", r"\btop\s*10\b", r"eccellenza\s*rugby"],
     },
     "rugby_six_nations": {
-        "display": "Sei Nazioni",
+        "display": "Sei Nazioni & Internazionali",
         "silo": "altri_sport",
         "catalog": "altri_sport",
         "genre": "Rugby e AFL",
-        "patterns": [r"six\s*nations", r"sei\s*nazioni", r"rugby\s*championship"],
+        "patterns": [
+            r"six\s*nations",
+            r"sei\s*nazioni",
+            r"rugby\s*championship",
+            r"nations\s*championship",
+            r"autumn\s*nations",
+            r"world\s*rugby\s*nations\s*cup",
+            r"world\s*cup",
+            r"coppa\s*del\s*mondo",
+        ],
     },
     "rugby_top_14": {
-        "display": "Top 14 & Coppe Rugby",
+        "display": "URC & Coppe Rugby",
         "silo": "altri_sport",
         "catalog": "altri_sport",
         "genre": "Rugby e AFL",
-        "patterns": [r"top\s*14", r"premiership\s*rugby", r"\burc\b", r"united\s*rugby\s*championship", r"champions\s*cup", r"challenge\s*cup", r"super\s*rugby"],
+        "patterns": [
+            r"\burc\b",
+            r"united\s*rugby\s*championship",
+            r"champions\s*cup",
+            r"challenge\s*cup",
+        ],
     },
     "afl_footy": {
         "display": "AFL (Australian Rules)",
@@ -1637,13 +1651,43 @@ def is_tier_match(m: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
 
     # ========================== RUGBY ==========================
     if silo == "rugby" or "rugby" in sport:
-        if country in ("italia", "italy"):
-            if any(w in league for w in ("serie a elite", "elite", "coppa italia", "eccellenza", "top 10", "top10", "serie a")):
+        c_all = f"{country} {c_it}".lower()
+        l_all = f"{league} {l_it}".lower()
+
+        # 1. Strictly exclude women, youth, and friendly / exhibition / test matches
+        if is_women or is_youth:
+            return False, None
+        if any(w in l_all for w in ("amichevol", "friendly", "esibizione", "exhibition", "test match", "test")):
+            return False, None
+
+        # 2. Italia: Serie A Elite & Coppa Italia (senior male)
+        if any(k in c_all for k in ("italia", "italy")):
+            if any(w in l_all for w in ("serie a elite", "elite", "coppa italia", "top 10", "top10")):
                 return True, "rugby_serie_a_elite"
-        if any(w in league for w in ("urc", "united rugby championship", "top 14", "champions cup", "challenge cup", "premiership", "super rugby")):
-            return True, "rugby_top_14"
-        if any(w in league for w in ("sei nazioni", "six nations", "rugby championship")):
-            return True, "rugby_six_nations"
+            return False, None
+
+        # 3. Europa: Sei Nazioni Maschile, URC (Benetton/Zebre) & Coppe Europee
+        if any(k in c_all for k in ("europa", "europe")):
+            if any(w in l_all for w in ("sei nazioni", "six nations")):
+                return True, "rugby_six_nations"
+            if any(w in l_all for w in ("urc", "united rugby championship", "champions cup", "challenge cup")):
+                return True, "rugby_top_14"
+            return False, None
+
+        # 4. Mondo: Grandi Tornei Ufficiali delle Nazionali Senior
+        if any(k in c_all for k in ("mondo", "world")):
+            if any(w in l_all for w in (
+                "nations championship",
+                "autumn nations",
+                "world rugby nations cup",
+                "rugby championship",
+                "world cup",
+                "coppa del mondo",
+            )):
+                return True, "rugby_six_nations"
+            return False, None
+
+        # All domestic leagues of single foreign countries (England, Wales, France, Germany, Poland, Georgia, etc.) are excluded
         return False, None
 
     # ========================== COMBAT / UFC ==========================

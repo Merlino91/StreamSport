@@ -83,6 +83,130 @@ class TestRugbyAndBasketTheSportsDB(unittest.TestCase):
         admitted_noise, _ = is_tier_match(m_noise)
         self.assertFalse(admitted_noise)
 
+        # 1. World senior official tournament admitted
+        m_nations_champ = {
+            "title": "Inghilterra vs Nuova Zelanda",
+            "_silo": "rugby",
+            "category": "rugby",
+            "country": "Mondo",
+            "league": "Nations Championship",
+            "alt_country": "World",
+            "alt_league": "Nations Championship",
+            "sport": "rugby",
+        }
+        admitted_nc, slug_nc = is_tier_match(m_nations_champ)
+        self.assertTrue(admitted_nc)
+        self.assertEqual(slug_nc, "rugby_six_nations")
+
+        m_wrnc = {
+            "title": "Georgia vs USA",
+            "_silo": "rugby",
+            "category": "rugby",
+            "country": "Mondo",
+            "league": "World Rugby Nations Cup",
+            "alt_country": "World",
+            "alt_league": "World Rugby Nations Cup",
+            "sport": "rugby",
+        }
+        admitted_wrnc, slug_wrnc = is_tier_match(m_wrnc)
+        self.assertTrue(admitted_wrnc)
+        self.assertEqual(slug_wrnc, "rugby_six_nations")
+
+        # 2. Friendlies and test matches excluded
+        m_friendly = {
+            "title": "Perù vs Isole Cayman",
+            "_silo": "rugby",
+            "category": "rugby",
+            "country": "Mondo",
+            "league": "Amichevoli Internazionali",
+            "alt_country": "World",
+            "alt_league": "Friendly International",
+            "sport": "rugby",
+        }
+        admitted_f, _ = is_tier_match(m_friendly)
+        self.assertFalse(admitted_f)
+
+        # 3. Women competitions strictly excluded
+        m_women_feed = {
+            "title": "Francia D vs Argentina D",
+            "_silo": "rugby",
+            "category": "rugby",
+            "country": "Mondo",
+            "league": "Amichevoli Internazionali - Donne",
+            "alt_country": "World",
+            "alt_league": "Friendly International Women",
+            "sport": "rugby",
+        }
+        admitted_wf, _ = is_tier_match(m_women_feed)
+        self.assertFalse(admitted_wf)
+
+        m_six_nations_women = {
+            "title": "Inghilterra D vs Francia D",
+            "_silo": "rugby",
+            "category": "rugby",
+            "country": "Europa",
+            "league": "Sei Nazioni Femminile",
+            "alt_country": "Europe",
+            "alt_league": "Women's Six Nations",
+            "sport": "rugby",
+        }
+        admitted_snw, _ = is_tier_match(m_six_nations_women)
+        self.assertFalse(admitted_snw)
+
+        # 4. Youth competitions strictly excluded
+        m_six_nations_u20 = {
+            "title": "Italia U20 vs Galles U20",
+            "_silo": "rugby",
+            "category": "rugby",
+            "country": "Europa",
+            "league": "Sei Nazioni Under 20",
+            "alt_country": "Europe",
+            "alt_league": "Six Nations Under 20",
+            "sport": "rugby",
+        }
+        admitted_u20, _ = is_tier_match(m_six_nations_u20)
+        self.assertFalse(admitted_u20)
+
+        # 5. Domestic foreign leagues excluded (Inghilterra, Galles, Francia, etc.)
+        m_prem_cup = {
+            "title": "Bristol vs Bath",
+            "_silo": "rugby",
+            "category": "rugby",
+            "country": "Inghilterra",
+            "league": "Premiership Rugby Cup",
+            "alt_country": "England",
+            "alt_league": "Premiership Rugby Cup",
+            "sport": "rugby",
+        }
+        admitted_pc, _ = is_tier_match(m_prem_cup)
+        self.assertFalse(admitted_pc)
+
+        m_wales_prem = {
+            "title": "Bargoed vs Llangennech",
+            "_silo": "rugby",
+            "category": "rugby",
+            "country": "Galles",
+            "league": "Premiership",
+            "alt_country": "Wales",
+            "alt_league": "Premiership",
+            "sport": "rugby",
+        }
+        admitted_wp, _ = is_tier_match(m_wales_prem)
+        self.assertFalse(admitted_wp)
+
+        m_france_prod2 = {
+            "title": "Grenoble vs Pays d'Aix",
+            "_silo": "rugby",
+            "category": "rugby",
+            "country": "Francia",
+            "league": "Pro D2",
+            "alt_country": "France",
+            "alt_league": "Pro D2",
+            "sport": "rugby",
+        }
+        admitted_pd2, _ = is_tier_match(m_france_prod2)
+        self.assertFalse(admitted_pd2)
+
     def test_basket_tenerife_canarias_and_thesportsdb_reconciliation(self):
         """
         Verify that Tenerife vs Canarias and other basketball cross-namings
