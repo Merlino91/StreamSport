@@ -714,7 +714,11 @@ CANONICAL_LEAGUES = {
         "silo": "motor-sports",
         "catalog": "motori",
         "genre": "Formula 1",
-        "patterns": [r"formula\s*1", r"formula\s*one", r"\bf1\b", r"f1\s*grand\s*prix", r"formula\s*1\s*gp"],
+        "patterns": [
+            r"formula\s*1", r"formula\s*one", r"\bf1\b", r"f1\s*grand\s*prix", r"formula\s*1\s*gp",
+            r"\b(q3|pole\s*position|monoposto|paddock)\b",
+            r"\b(carlo\s*vanzini|marc\s*gene|roberto\s*chinchero)\b",
+        ],
     },
     "motorsport_motogp": {
         "display": "MotoGP",

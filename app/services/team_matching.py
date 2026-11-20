@@ -275,16 +275,23 @@ def calculate_match_score(
             m_ser = TheSportsDBService.get_motorsport_series_key(m_text)
             c_ser = TheSportsDBService.get_motorsport_series_key(c_text)
 
-            series_ok = (m_ser == c_ser) if (m_ser and c_ser) else False
+            series_ok = bool(m_ser and c_ser and m_ser == c_ser)
             if not series_ok and m_ser:
-                if m_ser == "f1" and ("f1" in c_text or "formula 1" in c_text):
+                if m_ser == "f1" and ("formula 1" in c_text or re.search(r"\bf1\b", c_text)):
                     series_ok = True
-                elif m_ser in ("motogp", "moto2", "moto3") and ("motogp" in c_text or "moto2" in c_text or "moto3" in c_text):
+                elif m_ser == "motogp" and ("motogp" in c_text or "moto gp" in c_text):
+                    series_ok = True
+                elif m_ser == "moto2" and ("moto2" in c_text or "moto 2" in c_text):
+                    series_ok = True
+                elif m_ser == "moto3" and ("moto3" in c_text or "moto 3" in c_text):
                     series_ok = True
                 elif m_ser == "nascar" and "nascar" in c_text:
                     series_ok = True
 
             if series_ok:
+                m_sess = TheSportsDBService.normalize_motorsport_session_name(m_text)
+                c_sess = TheSportsDBService.normalize_motorsport_session_name(c_text)
+
                 m_is_race = "gara" in m_text or "race" in m_text
                 c_is_race = "gara" in c_text or "race" in c_text or "grand prix" in c_text or "gp" in c_text
                 m_is_qual = "qualif" in m_text
@@ -297,8 +304,29 @@ def calculate_match_score(
                     (m_is_qual and not c_is_qual and (c_is_race or c_is_fp)) or
                     (m_is_fp and not c_is_fp and (c_is_race or c_is_qual))
                 )
+                if m_sess and c_sess and m_sess != c_sess:
+                    sess_conflict = True
 
-                if not sess_conflict:
+                # Dynamic track/event keywords check: if candidate specifies an event or track location,
+                # it must share at least one distinctive keyword with match (prevents matching across different GPs)
+                _MOTOR_STOPWORDS = {
+                    "formula", "motogp", "moto2", "moto3", "superbike", "prove", "libere",
+                    "practice", "qualifiche", "qualifying", "gara", "race", "sprint",
+                    "warm", "world", "championship", "motorsport", "motori", "live", "diretta",
+                    "sky", "sport", "sports", "channel", "canal", "stream", "italia"
+                }
+                c_words = {w for w in re.findall(r"[a-z0-9]+", c_text) if len(w) >= 4 and w not in _MOTOR_STOPWORDS}
+                m_words = {w for w in re.findall(r"[a-z0-9]+", m_text) if len(w) >= 4 and w not in _MOTOR_STOPWORDS}
+
+                track_ok = True
+                if c_words and m_words:
+                    track_ok = any(
+                        w1 == w2 or (len(w1) >= 4 and len(w2) >= 4 and SequenceMatcher(None, w1, w2).ratio() >= 0.65)
+                        for w1 in m_words
+                        for w2 in c_words
+                    )
+
+                if not sess_conflict and track_ok:
                     result["matched"] = True
                     result["score"] = 0.90
                     result["reason"] = "motorsport_session_matched"

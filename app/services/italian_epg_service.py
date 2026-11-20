@@ -1652,7 +1652,7 @@ class ItalianEPGService:
         import unicodedata
         t = (title or "").lower().strip()
         t = unicodedata.normalize("NFKD", t).encode("ascii", "ignore").decode("utf-8")
-        t = re.sub(r"\b(vs|v|\-|\bep\b|gp|gara|qualifiche|sprint|fp[1-3]|warm\s*up|practice|atp|wta|padel|masters|slam|round|match)\b", " ", t)
+        t = re.sub(r"\b(vs|v|\-|\bep\b|gp|gara|qualifiche|sprint|fp[1-3]|warm\s*up|practice|prove|libere|atp|wta|padel|masters|slam|round|match)\b", " ", t)
         t = re.sub(r"\b(fc|ac|cf|sc|as|bc|united|city|club|de|la|el|del|di)\b", " ", t)
         t = re.sub(r"[^a-z0-9]+", " ", t)
         return re.sub(r"\s+", " ", t).strip()
@@ -1808,7 +1808,7 @@ class ItalianEPGService:
                     if self._teams_match_fuzzy(m_teams, ep_teams):
                         is_same = True
 
-                if not is_same and m_tokens and ep_tokens:
+                if not is_same and m_tokens and ep_tokens and m_silo != "motor-sports" and ep_silo != "motor-sports":
                     w1 = set(m_tokens.split())
                     w2 = set(ep_tokens.split())
                     if w1 and w2:
@@ -1823,7 +1823,7 @@ class ItalianEPGService:
                 # Competition-reinforced matching:
                 # If team tokens share at least 1 significant token and competition names match
                 # (e.g. 'Serie A', 'Premier League', 'Eurolega', 'Formula 1', 'MotoGP'), confirm match
-                if not is_same and m_tokens and ep_tokens:
+                if not is_same and m_tokens and ep_tokens and m_silo != "motor-sports" and ep_silo != "motor-sports":
                     m_c = (m.get("competition") or m.get("canonical_competition") or "").lower()
                     ep_c = (ep.get("competition") or ep.get("_competition") or "").lower()
                     if m_c and ep_c:
@@ -1846,38 +1846,37 @@ class ItalianEPGService:
                     m_ser = TheSportsDBService.get_motorsport_series_key(m_eval)
                     ep_ser = TheSportsDBService.get_motorsport_series_key(ep_full)
 
-                    ser_ok = (m_ser == ep_ser) if (m_ser and ep_ser) else False
-                    if not ser_ok and m_ser:
-                        if m_ser == "f1" and ("f1" in ep_chans or "formula 1" in ep_full or "formula 1" in ep_eval):
-                            ser_ok = True
-                        elif m_ser in ("motogp", "moto2", "moto3") and ("motogp" in ep_chans or "motogp" in ep_full):
-                            ser_ok = True
-
+                    ser_ok = bool(m_ser and ep_ser and m_ser == ep_ser)
                     if ser_ok:
-                        m_is_race = "gara" in m_eval or "race" in m_eval
-                        ep_is_race = "gara" in ep_eval or "race" in ep_eval
-                        m_is_qual = "qualif" in m_eval
-                        ep_is_qual = "qualif" in ep_eval
-                        m_is_fp = "prove liber" in m_eval or "practice" in m_eval or "fp" in m_eval or "warm up" in m_eval
-                        ep_is_fp = "prove liber" in ep_eval or "practice" in ep_eval or "fp" in ep_eval or "warm up" in ep_eval
+                        m_sess = TheSportsDBService.normalize_motorsport_session_name(m_eval)
+                        ep_sess = TheSportsDBService.normalize_motorsport_session_name(ep_eval)
 
-                        sess_conflict = (
-                            (m_is_race and not ep_is_race and (ep_is_qual or ep_is_fp)) or
-                            (m_is_qual and not ep_is_qual and (ep_is_race or ep_is_fp)) or
-                            (m_is_fp and not ep_is_fp and (ep_is_race or ep_is_qual))
-                        )
+                        sess_ok = False
+                        if m_sess and ep_sess:
+                            sess_ok = (m_sess == ep_sess)
+                        elif not m_sess and not ep_sess:
+                            sess_ok = (abs(m_date - ep_date) <= 20 * 60 * 1000)
 
-                        locs = [
-                            "messico", "mexico", "sepang", "malesia", "malaysia", "austin", "texas",
-                            "interlagos", "brasile", "brazil", "vegas", "qatar", "monza", "imola",
-                            "mugello", "misano", "valencia", "barcellona", "silverstone", "spa", "belgio",
-                            "zandvoort", "austria", "suzuka", "giappone", "shanghai", "cina", "bahrain",
-                            "jeddah", "arabia", "miami", "monaco", "montecarlo", "montreal", "canada",
-                            "baku", "azerbaijan", "singapore"
-                        ]
-                        loc_match = any(loc in m_eval and loc in ep_full for loc in locs)
+                        # Event / Track keyword match: dynamically extract words >= 4 chars excluding generic stopwords.
+                        # NEVER hardcode track names!
+                        _MOTOR_STOPWORDS = {
+                            "formula", "motogp", "moto2", "moto3", "superbike", "prove", "libere",
+                            "practice", "qualifiche", "qualifying", "gara", "race", "sprint",
+                            "warm", "world", "championship", "motorsport", "motori", "live", "diretta",
+                            "campionato", "mondiale", "sessione", "stati", "uniti", "italia"
+                        }
+                        m_words = {w for w in re.findall(r"[a-z0-9]+", m_eval) if len(w) >= 4 and w not in _MOTOR_STOPWORDS}
+                        ep_words = {w for w in re.findall(r"[a-z0-9]+", ep_full) if len(w) >= 4 and w not in _MOTOR_STOPWORDS}
 
-                        if (loc_match or not any(loc in m_eval for loc in locs)) and not sess_conflict:
+                        loc_match = True
+                        if m_words and ep_words:
+                            loc_match = any(
+                                w1 == w2 or (len(w1) >= 4 and len(w2) >= 4 and SequenceMatcher(None, w1, w2).ratio() >= 0.65)
+                                for w1 in m_words
+                                for w2 in ep_words
+                            )
+
+                        if sess_ok and loc_match:
                             is_same = True
 
                 if is_same:

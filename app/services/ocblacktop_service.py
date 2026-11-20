@@ -271,13 +271,9 @@ class OCBlacktopService:
                 }
                 label = series_labels.get(series, "Motori")
                 
-                # Format: "Formula 1: Azerbaijan Grand Prix - Gara (Baku City Circuit)"
-                if circ_name:
-                    m["title"] = f"{label}: {ev_name} - {clean_sess} ({circ_name})"
-                else:
-                    m["title"] = f"{label}: {ev_name} - {clean_sess}"
-
-                if best_session["date_ms"] > 0:
+                # Enrich metadata while strictly preserving specific session titles
+                # (e.g. Q1, Q2, Q3, FP1, FP2, FP3 are distinct sub-sessions and must never be flattened)
+                if not m.get("date") and best_session["date_ms"] > 0:
                     m["date"] = best_session["date_ms"]
 
                 m["_catalog"] = best_session["catalog"]

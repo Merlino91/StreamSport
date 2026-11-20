@@ -674,7 +674,7 @@ class TheSportsDBService:
     def get_motorsport_series_key(text: str) -> str:
         """Extracts canonical motorsport series identifier."""
         s = (text or "").lower()
-        if "formula 1" in s or "formula one" in s or re.search(r"\bf1\b", s):
+        if "formula 1" in s or "formula one" in s or re.search(r"\bf1\b", s) or re.search(r"\b(q3|pole\s*position|monoposto|vanzini|marc\s*gene)\b", s):
             return "f1"
         if "formula 2" in s or re.search(r"\bf2\b", s):
             return "f2"

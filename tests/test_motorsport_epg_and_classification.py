@@ -273,6 +273,151 @@ class TestMotorsportsIntegration(unittest.TestCase):
         self.assertIn("Sky Sport Uno", src_names)
         self.assertIn("Sky Sports F1 UK", src_names)
 
+    def test_distinct_motorsport_sessions_not_flattened_by_ocblacktop(self):
+        from app.services.ocblacktop_service import ocblacktop_service
+        matches = [
+            {"id": "d_q1", "title": "FORMULA 1: GP Stati Uniti - Las Vegas (USA) - Qualifiche 1", "competition": "GP Stati Uniti - Las Vegas", "date": 1795230000000, "_silo": "motor-sports"},
+            {"id": "d_q2", "title": "FORMULA 1: GP Stati Uniti - Las Vegas (USA) - Qualifiche 2", "competition": "GP Stati Uniti - Las Vegas", "date": 1795231500000, "_silo": "motor-sports"},
+            {"id": "d_q3", "title": "FORMULA 1: GP Stati Uniti - Las Vegas (USA) - Qualifiche 3", "competition": "GP Stati Uniti - Las Vegas", "date": 1795233000000, "_silo": "motor-sports"},
+            {"id": "d_q", "title": "FORMULA 1: GP Stati Uniti - Las Vegas (USA) - Qualifiche", "competition": "GP Stati Uniti - Las Vegas", "date": 1795230000000, "_silo": "motor-sports"},
+        ]
+        ocb_sessions = [
+            {
+                "series": "formula1",
+                "event_name": "Las Vegas Grand Prix",
+                "session_name": "Qualifying",
+                "circuit": "Las Vegas Strip Circuit",
+                "city": "Las Vegas",
+                "country": "USA",
+                "date_ms": 1795230000000,
+                "catalog": "motori",
+                "genre": "Formula 1",
+            }
+        ]
+        matched = ocblacktop_service.reconcile_matches(matches, ocb_sessions)
+        self.assertGreaterEqual(matched, 1)
+
+        # Titles must remain strictly distinct and must NOT be overwritten into identical titles
+        titles = [m["title"] for m in matches]
+        self.assertIn("FORMULA 1: GP Stati Uniti - Las Vegas (USA) - Qualifiche 1", titles)
+        self.assertIn("FORMULA 1: GP Stati Uniti - Las Vegas (USA) - Qualifiche 2", titles)
+        self.assertIn("FORMULA 1: GP Stati Uniti - Las Vegas (USA) - Qualifiche 3", titles)
+        self.assertIn("FORMULA 1: GP Stati Uniti - Las Vegas (USA) - Qualifiche", titles)
+        self.assertEqual(len(set(titles)), 4)
+
+        # Dates must NOT be collapsed to the same timestamp if already distinct
+        self.assertEqual(matches[0]["date"], 1795230000000)
+        self.assertEqual(matches[1]["date"], 1795231500000)
+        self.assertEqual(matches[2]["date"], 1795233000000)
+
+        # Metadata should still be enriched
+        for m in matches:
+            self.assertTrue(m.get("_ocb_matched"))
+            self.assertEqual(m.get("_genre"), "Formula 1")
+
+    def test_moto3_and_f1_strict_isolation(self):
+        # 1. Team matching: Moto 3 Algarve vs F1 Las Vegas Practice 2
+        m_moto3 = {
+            "title": "Moto 3: Algarve (Portogallo) - Prove libere 1",
+            "competition": "GP Portogallo",
+            "_silo": "motor-sports",
+            "date": 1795179300000,
+        }
+        c_f1 = {
+            "title": "GP Las Vegas: Prove libere 2 (Formula 1)",
+            "competition": "GP Las Vegas",
+            "category": "motor-sports",
+            "date": 1795179300000,
+        }
+        res = calculate_match_score(m_moto3, c_f1, phase="phase1_diretta")
+        self.assertFalse(res["matched"])
+
+        # 2. Italian EPG bridge: Moto 3 Algarve must never match Sky F1 Las Vegas
+        m_card = {
+            "id": "diretta_moto3_algarve",
+            "title": "Moto 3: Algarve (Portogallo) - Prove libere 1",
+            "competition": "GP Portogallo",
+            "_silo": "motor-sports",
+            "date": 1795179300000,
+            "poster": "https://default.com/poster.jpg",
+        }
+        epg_f1 = {
+            "id": "sky_9096_vegas_fp2",
+            "title": "GP Las Vegas: Prove libere 2",
+            "competition": "GP Las Vegas",
+            "_silo": "motor-sports",
+            "date": 1795179300000,
+            "poster": "https://guidatv.sky.it/f1_vegas.jpg",
+            "sources": [{"name": "Sky Sport F1", "id": "sky_f1"}],
+        }
+
+        async def _test():
+            async def mock_get():
+                return [epg_f1]
+            orig = italian_epg_service.get_matches
+            italian_epg_service.get_matches = mock_get
+            try:
+                await italian_epg_service.enrich_matches_with_epg_channels([m_card])
+                # Poster and matched ID must NOT be assigned to Moto3 card
+                self.assertIsNone(m_card.get("_matched_epg_id"))
+                self.assertEqual(m_card["poster"], "https://default.com/poster.jpg")
+                self.assertNotEqual(m_card.get("_poster_source"), "sky")
+            finally:
+                italian_epg_service.get_matches = orig
+
+        asyncio.run(_test())
+
+    def test_sky_uno_f1_session_classification_and_merge(self):
+        from app.services.catalog_service import catalog_service
+
+        ep_sky_uno_qual = {
+            "id": "sky_9097_gp-las-vegas-qualifiche_1795233300",
+            "title": "GP Las Vegas: Qualifiche",
+            "competition": "GP Las Vegas",
+            "eventSynopsis": "E' sfida per la pole e per scattare piu' avanti possibile in griglia di partenza. Q1, Q2 e Q3 con l'adrenalina che sale. Telecronaca di Carlo Vanzini, Marc Gene' e Roberto Chinchero.",
+            "sources": [{"name": "Sky Sport Uno", "id": "sky_uno"}],
+            "_silo": "motor-sports",
+            "category": "motori",
+            "date": 1795233300000,
+        }
+
+        # 1. Canonical competition must detect Formula 1 from synopsis/channel
+        canon = detect_canonical_competition(
+            f"{ep_sky_uno_qual['sources'][0]['name']} : {ep_sky_uno_qual['competition']} : {ep_sky_uno_qual['title']} : {ep_sky_uno_qual['eventSynopsis']}",
+            silo_hint="motor-sports"
+        )
+        self.assertEqual(canon, "motorsport_f1")
+
+        # 2. Genre classification must be Formula 1, NOT NASCAR e IndyCar
+        ep_sky_uno_qual["canonical_competition"] = canon
+        cat, genre = genre_classifier.classify(ep_sky_uno_qual)
+        self.assertEqual(cat, "motori")
+        self.assertEqual(genre, "Formula 1")
+
+        # 3. Even without canonical_competition set, genre classifier must still classify into Formula 1
+        ep_sky_uno_qual_no_canon = dict(ep_sky_uno_qual)
+        ep_sky_uno_qual_no_canon["canonical_competition"] = None
+        cat2, genre2 = genre_classifier.classify(ep_sky_uno_qual_no_canon)
+        self.assertEqual(cat2, "motori")
+        self.assertEqual(genre2, "Formula 1")
+
+        # 4. Merging with official schedule: must merge and not orphan-duplicate
+        off_f1_qual = {
+            "id": "diretta_f1_vegas_qual",
+            "title": "FORMULA 1: GP Stati Uniti - Las Vegas (USA) - Qualifiche",
+            "competition": "GP Stati Uniti - Las Vegas",
+            "canonical_competition": "motorsport_f1",
+            "date": 1795233300000,
+            "_silo": "motor-sports",
+            "category": "motor-sports",
+            "sources": [{"id": "stream_1", "name": "Stream 1"}],
+        }
+        schedule = [off_f1_qual]
+        catalog_service._merge_epg_certified_sessions(schedule, [ep_sky_uno_qual])
+        self.assertEqual(len(schedule), 1)
+        src_ids = [s.get("id") for s in schedule[0].get("sources", [])]
+        self.assertIn("sky_uno", src_ids)
+
 
 if __name__ == "__main__":
     unittest.main()

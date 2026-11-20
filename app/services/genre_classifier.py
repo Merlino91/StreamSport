@@ -157,7 +157,7 @@ class GenreClassifier:
     _TENNIS_CHALLENGER_REGEX = re.compile(r"\b(challenger|itf|exhibition|esibizione|uts|ultimate\s*tennis)\b", re.I)
 
     # Motori
-    _F1_REGEX = re.compile(r"\b(f1|formula\s*1|formula\s*one)\b", re.I)
+    _F1_REGEX = re.compile(r"\b(f1|formula\s*1|formula\s*one|q3|vanzini|marc\s*gene)\b", re.I)
     _MOTOGP_REGEX = re.compile(r"\b(motogp|moto\s*gp|moto\s*[23e]|motomondiale|motociclismo|superbike|wsbk|worldsbk|civ|supersport|mxgp|motocross|supercross)\b", re.I)
     _RALLY_REGEX = re.compile(r"\b(rally|wrc|dakar|erc)\b", re.I)
     _NASCAR_REGEX = re.compile(r"\b(nascar|indycar|indy\s*500|supercars|dtm|le\s*mans|wec|world\s*(?:championship\s*)?endurance|endurance|imsa|gt\s*world|porsche\s*supercup|bathurst|automobilismo|(?:6|12|24)\s*ore)\b", re.I)
@@ -466,15 +466,35 @@ class GenreClassifier:
         if canon in ("motorsport_nascar", "motorsport_indycar"):
             return "motori", "NASCAR e IndyCar"
 
-        if self._F1_REGEX.search(eval_text):
+        sources = match.get("sources", [])
+        src_names = " ".join([s.get("name", "") for s in sources if isinstance(s, dict)]).lower()
+        full_text = f"{eval_text} {src_names}".lower()
+
+        if self._F1_REGEX.search(full_text) or "sky sport f1" in src_names or "sports f1" in src_names:
             return "motori", "Formula 1"
-        if self._MOTOGP_REGEX.search(eval_text):
+        if self._MOTOGP_REGEX.search(full_text) or "sky sport motogp" in src_names:
             return "motori", "MotoGP e Superbike"
-        if self._RALLY_REGEX.search(eval_text):
+        if self._RALLY_REGEX.search(full_text):
             return "motori", "Rally e WRC"
-        if self._NASCAR_REGEX.search(eval_text):
+        if self._NASCAR_REGEX.search(full_text):
             return "motori", "NASCAR e IndyCar"
-        return "motori", "NASCAR e IndyCar"
+
+        from app.services.thesportsdb_service import TheSportsDBService
+        ser = TheSportsDBService.get_motorsport_series_key(full_text)
+        if ser == "f1":
+            return "motori", "Formula 1"
+        if ser in ("motogp", "moto2", "moto3", "superbike"):
+            return "motori", "MotoGP e Superbike"
+        if ser == "wrc":
+            return "motori", "Rally e WRC"
+        if ser in ("nascar", "indycar", "wec", "dtm", "imsa"):
+            return "motori", "NASCAR e IndyCar"
+
+        # Generic Grand Prix sessions without NASCAR/Rally markers default to Formula 1
+        if re.search(r"\b(gp|gran\s*premio|monoposto|pole|paddock|griglia)\b", full_text):
+            return "motori", "Formula 1"
+
+        return "motori", "Formula 1"
 
     def _classify_basketball(self, match: Dict[str, Any], eval_text: str, is_women: bool, is_youth: bool) -> Tuple[str, str]:
         # 1. WNBA & Basket Femminile

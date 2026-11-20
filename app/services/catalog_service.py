@@ -819,8 +819,9 @@ class CatalogService:
                     m_ser = TheSportsDBService.get_motorsport_series_key(
                         f"{off_title} {off.get('competition', '')} {off.get('canonical_competition', '')}"
                     )
+                    ep_chans = " ".join([s.get("name", "") for s in ep.get("sources", []) if isinstance(s, dict)]).lower()
                     e_ser = TheSportsDBService.get_motorsport_series_key(
-                        f"{ep_title} {ep.get('competition', '')} {ep.get('canonical_competition', '')} {ep.get('eventSynopsis', '')}"
+                        f"{ep_title} {ep.get('competition', '')} {ep.get('canonical_competition', '')} {ep.get('eventSynopsis', '')} {ep_chans}"
                     )
                     if m_ser and e_ser and m_ser == e_ser:
                         off_sess = TheSportsDBService.normalize_motorsport_session_name(off_title)
