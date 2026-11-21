@@ -1830,6 +1830,10 @@ class ItalianEPGService:
 
             matched_epg = None
             for ep in epg_events:
+                # Discard non-live replays and differite from channel enrichment
+                if ep.get("_is_replay") or ep.get("is_replay") or ep.get("is_differita"):
+                    continue
+
                 ep_title = ep.get("title", "")
                 ep_teams = ep.get("teams")
                 ep_is_1v1 = bool(

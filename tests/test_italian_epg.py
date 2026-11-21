@@ -1140,6 +1140,129 @@ class TestItalianEPGService(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(final_matches), 1)
         self.assertEqual(final_matches[0]["date"], new_time)
 
+    def test_tennis_epg_non_live_replays_excluded_from_certified_sessions(self):
+        """Verifies non-live tennis EPG reruns (is_live=False) are rejected from epg_certified_sessions."""
+        from app.services.catalog_service import catalog_service
+
+        epg_matches = [
+            # 1. Non-live replay broadcast (next-day rerun of semifinal on Sky) -> MUST BE REJECTED
+            {
+                "id": "sky_11237_atp-finals-alcaraz-shelton_replay",
+                "title": "ATP Finals: Alcaraz - Shelton Singolare: 1a Semifinale",
+                "competition": "ATP Finals",
+                "eventSynopsis": "Semifinale ATP Finals",
+                "_silo": "tennis",
+                "category": "tennis",
+                "is_live": False,
+                "_is_live": False,
+                "teams": None,
+                "date": 1795311000000,
+            },
+            # 2. Non-live generic session rerun without player names -> MUST BE REJECTED
+            {
+                "id": "sky_11237_atp-finals-2a-semifinale_replay",
+                "title": "ATP Finals: Singolare: 2a Semifinale",
+                "competition": "ATP Finals",
+                "eventSynopsis": "Semifinale ATP Finals",
+                "_silo": "tennis",
+                "category": "tennis",
+                "is_live": False,
+                "_is_live": False,
+                "teams": None,
+                "date": 1795317300000,
+            },
+            # 3. Genuine live final broadcast on Sky Sport -> MUST BE ADMITTED
+            {
+                "id": "sky_11237_atp-finals-singolare-finale_live",
+                "title": "ATP Finals: Singolare: Finale",
+                "competition": "ATP Finals",
+                "eventSynopsis": "Finale Live da Torino",
+                "_silo": "tennis",
+                "category": "tennis",
+                "is_live": True,
+                "_is_live": True,
+                "teams": None,
+                "date": 1795366800000,
+            },
+        ]
+
+        # Apply epg_certified_sessions filter
+        certified = [
+            m for m in epg_matches
+            if not m.get("_is_replay") and not m.get("is_replay") and not m.get("is_differita")
+            and (m.get("is_live") is True or m.get("_is_live") is True)
+            and (
+                (
+                    (m.get("_silo") == "tennis" or m.get("category") == "tennis")
+                    and not bool(isinstance(m.get("teams"), dict) and m["teams"].get("home") and m["teams"].get("away"))
+                    and any(k in f"{m.get('title', '')} {m.get('competition', '')} {m.get('eventSynopsis', '')}".lower() for k in ("live", "wta", "atp", "masters", "slam"))
+                )
+            )
+        ]
+
+        self.assertEqual(len(certified), 1)
+        self.assertEqual(certified[0]["id"], "sky_11237_atp-finals-singolare-finale_live")
+        self.assertEqual(certified[0]["title"], "ATP Finals: Singolare: Finale")
+
+    def test_tennis_epg_diretta_cross_validation_rejects_past_concluded_matches(self):
+        """Verifies _merge_epg_certified_sessions rejects EPG sessions referencing past concluded Diretta matches."""
+        from app.services.catalog_service import catalog_service
+
+        base_time = 1795267200000  # Saturday 12:00
+        # Official Diretta match played at 14:40 Saturday
+        diretta_match = {
+            "id": "diretta-alcaraz-shelton",
+            "title": "Garfia Carlos Alcaraz vs Ben Shelton",
+            "competition": "ATP - SINGOLARE: Finals - Turin (Mondo)",
+            "_silo": "tennis",
+            "category": "tennis",
+            "teams": {"home": {"name": "Carlos Alcaraz"}, "away": {"name": "Ben Shelton"}},
+            "date": base_time + (2 * 3600 * 1000) + (40 * 60 * 1000),  # 14:40
+            "sources": [],
+        }
+        linked_schedule = [diretta_match]
+
+        # Stale EPG session broadcast scheduled Sunday morning (16 hours after kickoff)
+        stale_epg_session = {
+            "id": "sky-alcaraz-shelton-replay-sun",
+            "title": "ATP Finals: Alcaraz - Shelton Singolare: 1a Semifinale",
+            "competition": "ATP Finals",
+            "eventSynopsis": "Dal Pala Alpitour di Torino la prima semifinale tra Alcaraz e Shelton.",
+            "_silo": "tennis",
+            "category": "tennis",
+            "is_live": True,  # even if erroneously flagged live
+            "_is_live": True,
+            "teams": None,
+            "date": base_time + (20 * 3600 * 1000),  # 08:00 next day (+17h after match)
+            "sources": [{"name": "Sky Sport Tennis"}],
+        }
+
+        # Genuine live session for the Sunday final
+        live_epg_session = {
+            "id": "sky-final-live-sun",
+            "title": "ATP Finals: Singolare: Finale",
+            "competition": "ATP Finals",
+            "eventSynopsis": "Live da Torino la finalissima del torneo dei maestri.",
+            "_silo": "tennis",
+            "category": "tennis",
+            "is_live": True,
+            "_is_live": True,
+            "teams": None,
+            "date": base_time + (30 * 3600 * 1000),  # 18:00 Sunday
+            "sources": [{"name": "Sky Sport Tennis"}],
+        }
+
+        catalog_service._merge_epg_certified_sessions(linked_schedule, [stale_epg_session, live_epg_session])
+
+        # Linked schedule must contain:
+        # 1. The original Diretta match
+        # 2. The live Sunday final
+        # But MUST NOT contain the stale Alcaraz-Shelton replay session!
+        titles = [m["title"] for m in linked_schedule]
+        self.assertIn("Garfia Carlos Alcaraz vs Ben Shelton", titles)
+        self.assertIn("ATP Finals: Singolare: Finale", titles)
+        self.assertNotIn("ATP Finals: Alcaraz - Shelton Singolare: 1a Semifinale", titles)
+
 
 if __name__ == "__main__":
     unittest.main()

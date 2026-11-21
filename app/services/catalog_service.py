@@ -866,6 +866,32 @@ class CatalogService:
                         break
 
             if not already_covered:
+                if ep_silo == "tennis":
+                    # Ensure the session is live
+                    if not (ep.get("is_live") is True or ep.get("_is_live") is True or bool(re.search(r"\b(live|diretta)\b", ep.get("title", ""), re.IGNORECASE))):
+                        continue
+                    # Cross-validate against official schedule (Diretta) to reject stale replays
+                    is_stale_replay = False
+                    ep_text = f"{ep_title} {ep.get('eventSynopsis', '')}".lower()
+                    ep_tokens = set(re.findall(r"[a-z]{3,}", ep_text))
+                    for off in linked_schedule:
+                        off_silo = (off.get("_silo") or off.get("category") or "").lower()
+                        if off_silo != "tennis":
+                            continue
+                        off_teams = off.get("teams") or {}
+                        h_name = (off_teams.get("home", {}).get("name") or "").lower()
+                        a_name = (off_teams.get("away", {}).get("name") or "").lower()
+                        h_parts = [tok for tok in re.findall(r"[a-z]{4,}", h_name)]
+                        a_parts = [tok for tok in re.findall(r"[a-z]{4,}", a_name)]
+                        if h_parts and a_parts:
+                            if any(p in ep_tokens for p in h_parts) and any(p in ep_tokens for p in a_parts):
+                                off_date = off.get("date", 0)
+                                if off_date and (ep_date - off_date) > (3.5 * 3600 * 1000):
+                                    is_stale_replay = True
+                                    break
+                    if is_stale_replay:
+                        logger.debug("Rejected stale tennis replay session referencing past match: %s", ep_title)
+                        continue
                 orphan_epg.append(ep)
 
         # Deduplicate orphan EPG events among themselves before extending linked_schedule
@@ -962,6 +988,7 @@ class CatalogService:
                 epg_certified_sessions = [
                     m for m in epg_matches
                     if not m.get("_is_replay") and not m.get("is_replay") and not m.get("is_differita")
+                    and (m.get("is_live") is True or m.get("_is_live") is True or bool(re.search(r"\b(live|diretta)\b", m.get("title", ""), re.IGNORECASE)))
                     and (
                         (
                             (m.get("_silo") == "tennis" or m.get("category") == "tennis")
@@ -976,12 +1003,10 @@ class CatalogService:
                             # Certified live Padel tournament sessions (e.g. Premier Padel)
                             (m.get("_silo") in ("padel", "altri_sport") or m.get("category") in ("padel", "altri_sport"))
                             and any(k in (m.get("title") or "").lower() or k in (m.get("competition") or "").lower() for k in ("padel", "premier padel"))
-                            and m.get("is_live") is True
                         )
                         or (
                             # Certified live Motorsport sessions from Sky (if not covered by Diretta)
                             (m.get("_silo") == "motor-sports" or m.get("category") == "motori")
-                            and m.get("is_live") is True
                             and any(k in (m.get("title") or "").lower() for k in ("prove libere", "qualifiche", "gara", "sprint", "warm up"))
                             and not any(k in (m.get("title") or "").lower() for k in ("race anatomy", "aspettando", "storie di", "rubrica", "highlights"))
                         )
