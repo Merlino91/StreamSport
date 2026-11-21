@@ -722,6 +722,12 @@ class TheSportsDBService:
             return "sprint_qualifying"
         if re.search(r"\b(?:sprint|sprint\s*race|gara\s*sprint)\b", s):
             return "sprint"
+        if re.search(r"\b(?:qualifiche\s*1|qualifying\s*1|q1)\b", s):
+            return "qualifying_1"
+        if re.search(r"\b(?:qualifiche\s*2|qualifying\s*2|q2)\b", s):
+            return "qualifying_2"
+        if re.search(r"\b(?:qualifiche\s*3|qualifying\s*3|q3)\b", s):
+            return "qualifying_3"
         if re.search(r"\b(?:qualifiche|qualifying|qualif|pole)\b", s):
             return "qualifying"
         if re.search(r"\b(?:warm\s*up)\b", s):

@@ -707,9 +707,10 @@ class ItalianEPGService:
         t = re.sub(r"-\s*Stag\.\s*\d+\s*Ep\.\s*\d+\s*-", "-", t, flags=re.I)
         t = re.sub(r"\bStag\.\s*\d+\b", "", t, flags=re.I)
         t = re.sub(r"\bEp\.\s*\d+\b", "", t, flags=re.I)
-        # Normalize whitespace and trailing punctuation
+        # Normalize whitespace, strip ellipses and trailing punctuation
         t = re.sub(r"\s+-\s+-", " -", t)
-        t = re.sub(r"\s+", " ", t).strip(" -:")
+        t = re.sub(r"\s*\.{2,}\s*", " ", t)
+        t = re.sub(r"\s+", " ", t).strip(" -:.")
         return t
 
     @classmethod
@@ -1480,52 +1481,129 @@ class ItalianEPGService:
     def _deduplicate_epg_events(cls, events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
         Deduplicates raw events fetched across Italian EPG sources:
-        1. Merges concurrent simulcasts (e.g. TV8 + Sky Sport Uno within 30m window).
-        2. Absorbs TV session / program reruns within 24h into the earliest airing.
+        1. Merges concurrent simulcasts (e.g. TV8 + Sky Sport Uno within 45m window),
+           unifying the streaming window from min(date) to max(end_date) and merging streams.
+        2. Absorbs TV session / program reruns within 24h into the earliest airing if explicitly flagged.
+        3. Strict safety: NEVER merges distinct sessions (FP1 vs FP2, Qualifying vs Race, Tennis Singles vs Doubles).
         """
+        from difflib import SequenceMatcher
+        from app.services.thesportsdb_service import TheSportsDBService
+
         merged_epg: List[Dict[str, Any]] = []
         for m in events:
             m_date = m.get("date", 0)
-            m_title = m.get("title", "")
-            m_silo = m.get("_silo", "")
-
+            m_title = (m.get("title") or "").strip()
+            m_clean_title = cls._clean_event_title(m_title)
+            m_silo = (m.get("_silo") or m.get("category") or "").lower()
             is_m_tv = not bool(m.get("teams"))
+
             duplicate = None
             for existing in merged_epg:
-                if existing.get("_silo") != m_silo:
-                    continue
+                ex_silo = (existing.get("_silo") or existing.get("category") or "").lower()
+                if ex_silo != m_silo:
+                    if not ((m_silo in ("football", "soccer") and ex_silo in ("football", "soccer")) or
+                            (m_silo in ("volley", "volleyball") and ex_silo in ("volley", "volleyball")) or
+                            (m_silo in ("basket", "basketball") and ex_silo in ("basket", "basketball")) or
+                            (m_silo in ("motori", "motorsport", "motor-sports") and ex_silo in ("motori", "motorsport", "motor-sports"))):
+                        continue
+
+                ex_date = existing.get("date", 0)
+                ex_title = (existing.get("title") or "").strip()
+                ex_clean_title = cls._clean_event_title(ex_title)
                 is_ex_tv = not bool(existing.get("teams"))
+                time_diff = abs(ex_date - m_date)
 
-                # 1. Standard concurrent simulcast (within 30m window)
-                if abs(existing.get("date", 0) - m_date) < (30 * 60 * 1000):
-                    if existing.get("title") == m_title:
+                # Guard 1: Motorsport Session Type Safety
+                # NEVER merge different sessions (e.g. FP1 vs FP2, Qualifying vs Race, Sprint vs Gara)
+                if m_silo in ("motori", "motorsport", "motor-sports"):
+                    m_ser = TheSportsDBService.get_motorsport_series_key(f"{m_title} {m.get('competition', '')}")
+                    ex_ser = TheSportsDBService.get_motorsport_series_key(f"{ex_title} {existing.get('competition', '')}")
+                    m_sess = TheSportsDBService.normalize_motorsport_session_name(m_title)
+                    ex_sess = TheSportsDBService.normalize_motorsport_session_name(ex_title)
+                    if m_ser and ex_ser and m_ser != ex_ser:
+                        continue
+                    if m_sess and ex_sess and m_sess != ex_sess:
+                        continue
+
+                # Guard 2: Tennis Singles vs Doubles Safety
+                # NEVER merge Singles with Doubles
+                if m_silo == "tennis":
+                    if cls._is_tennis_doubles(f"{m_title} {m.get('competition', '')}") != cls._is_tennis_doubles(f"{ex_title} {existing.get('competition', '')}"):
+                        continue
+
+                # 1. Standard concurrent / simulcast broadcast (within 45m window)
+                if time_diff <= (45 * 60 * 1000):
+                    # Exact or normalized clean title match
+                    if m_title == ex_title or (m_clean_title and ex_clean_title and m_clean_title.lower() == ex_clean_title.lower()):
                         duplicate = existing
                         break
-                    if m.get("teams") and existing.get("teams") and m.get("teams") == existing.get("teams"):
-                        duplicate = existing
-                        break
+                    # Team match for 1v1
+                    if m.get("teams") and existing.get("teams"):
+                        if m.get("teams") == existing.get("teams") or cls._teams_match_fuzzy(m.get("teams"), existing.get("teams")):
+                            duplicate = existing
+                            break
+                    # Motorsport session match within 45m on same series & session
+                    if m_silo in ("motori", "motorsport", "motor-sports"):
+                        if m_ser and ex_ser and m_ser == ex_ser and m_sess and ex_sess and m_sess == ex_sess:
+                            m_toks = cls._clean_tokens(m_title)
+                            ex_toks = cls._clean_tokens(ex_title)
+                            if m_toks == ex_toks or SequenceMatcher(None, m_toks, ex_toks).ratio() >= 0.70:
+                                duplicate = existing
+                                break
 
-                # 2. Non-1v1 TV program / session rerun (identical title within 24h, e.g. Abu Dhabi Judo 01:20 vs 22:15)
-                elif is_m_tv and is_ex_tv and existing.get("title") == m_title:
-                    time_diff = abs(existing.get("date", 0) - m_date)
+                # 2. Non-1v1 TV program / session rerun (within 24h)
+                elif is_m_tv and is_ex_tv and (m_title == ex_title or (m_clean_title and ex_clean_title and m_clean_title.lower() == ex_clean_title.lower())):
                     if time_diff <= 24 * 3600 * 1000:
-                        duplicate = existing
-                        if m_date < existing.get("date", 0):
-                            existing["date"] = m_date
-                            existing["id"] = m.get("id")
-                        break
+                        is_replay = bool(
+                            m.get("_is_replay") or m.get("is_differita") or existing.get("_is_replay") or existing.get("is_differita")
+                            or re.search(r"\b(replica|differita|highlights?)\b", f"{m_title} {ex_title}", re.I)
+                        )
+                        # Avoid collapsing distinct morning and evening live sessions for sports
+                        if (m_silo in ("motor-sports", "tennis", "motori")) and not is_replay and time_diff > 90 * 60 * 1000:
+                            pass
+                        else:
+                            duplicate = existing
+                            if m_date < existing.get("date", 0):
+                                existing["date"] = m_date
+                                existing["id"] = m.get("id")
+                            break
 
             if duplicate:
-                # Merge streams from both channels (e.g. Sky Sport Uno + TV8)
-                exist_keys = {(s.get("canonical"), s.get("tag")) for s in duplicate.get("sources", [])}
+                # 1. Unify streaming time window: min(date) to max(end_date)
+                dup_date = duplicate.get("date", 0)
+                dup_end = duplicate.get("end_date", 0) or 0
+                m_end = m.get("end_date", 0) or 0
+
+                if m_date and dup_date:
+                    duplicate["date"] = min(dup_date, m_date)
+                elif m_date:
+                    duplicate["date"] = m_date
+
+                if m_end and dup_end:
+                    duplicate["end_date"] = max(dup_end, m_end)
+                elif m_end:
+                    duplicate["end_date"] = m_end
+
+                # 2. Preserve cleanest title (without '...' and without trailing punctuation)
+                if ("..." in duplicate.get("title", "") or duplicate.get("title", "").endswith(".")) and "..." not in m_title:
+                    duplicate["title"] = m_title
+
+                # 3. Poster priority: Prefer Sky 16:9 official poster over generic Tivùsat
+                m_post = m.get("poster", "")
+                dup_post = duplicate.get("poster", "")
+                if m_post and str(m_post).startswith("http"):
+                    if not dup_post or "tivulaguida" in str(dup_post).lower() or "guidatv.sky.it" in str(m_post):
+                        duplicate["poster"] = m_post
+                        duplicate["background"] = m.get("background") or m_post
+
+                # 4. Merge streams from both channels (e.g. Sky Sport Uno + TV8)
+                exist_keys = {(s.get("canonical"), s.get("tag")) for s in duplicate.get("sources", []) if isinstance(s, dict)}
                 for s in m.get("sources", []):
-                    k = (s.get("canonical"), s.get("tag"))
-                    if k not in exist_keys:
-                        exist_keys.add(k)
-                        duplicate["sources"].append(s)
-                if not duplicate.get("poster") and m.get("poster"):
-                    duplicate["poster"] = m["poster"]
-                    duplicate["background"] = m.get("background") or m["poster"]
+                    if isinstance(s, dict):
+                        k = (s.get("canonical"), s.get("tag"))
+                        if k not in exist_keys:
+                            exist_keys.add(k)
+                            duplicate.setdefault("sources", []).append(s)
             else:
                 merged_epg.append(m)
         return merged_epg
@@ -1599,7 +1677,23 @@ class ItalianEPGService:
             for prev_m in self._cached_matches:
                 p_date = prev_m.get("date", 0)
                 if p_date and (now_ms - p_date) < (3.5 * 3600 * 1000):
-                    if not any(curr.get("id") == prev_m.get("id") for curr in merged_epg):
+                    if any(curr.get("id") == prev_m.get("id") for curr in merged_epg):
+                        continue
+
+                    # If this is the same event whose start time was adjusted by the broadcaster
+                    # on the same channel within 90 minutes, do not retain stale time duplicate
+                    prev_title = cls._clean_tokens(prev_m.get("title", ""))
+                    prev_chans = {s.get("canonical") for s in prev_m.get("sources", []) if isinstance(s, dict) and s.get("canonical")}
+                    is_time_shifted = False
+                    for curr in merged_epg:
+                        curr_chans = {s.get("canonical") for s in curr.get("sources", []) if isinstance(s, dict) and s.get("canonical")}
+                        if prev_chans and curr_chans and (prev_chans & curr_chans):
+                            if abs(curr.get("date", 0) - p_date) <= (90 * 60 * 1000):
+                                curr_title = cls._clean_tokens(curr.get("title", ""))
+                                if prev_title and curr_title and (prev_title == curr_title or (len(prev_title) >= 5 and prev_title in curr_title) or (len(curr_title) >= 5 and curr_title in prev_title)):
+                                    is_time_shifted = True
+                                    break
+                    if not is_time_shifted:
                         retained_old.append(prev_m)
 
             final_matches = retained_old + merged_epg
@@ -1648,11 +1742,17 @@ class ItalianEPGService:
         return False
 
     @staticmethod
+    def _is_tennis_doubles(text: str) -> bool:
+        return bool(re.search(r"\b(doubles?|doppi[oa]?)\b", text or "", re.IGNORECASE))
+
+    @staticmethod
     def _clean_tokens(title: str) -> str:
         import unicodedata
         t = (title or "").lower().strip()
         t = unicodedata.normalize("NFKD", t).encode("ascii", "ignore").decode("utf-8")
         t = re.sub(r"\b(vs|v|\-|\bep\b|gp|gara|qualifiche|sprint|fp[1-3]|warm\s*up|practice|prove|libere|atp|wta|padel|masters|slam|round|match)\b", " ", t)
+        t = re.sub(r"\b(finals?|semifinal[ei]?|quarti|ottavi|preliminar[ei]|batterie|giornata|turno|sessione|campo|court|day|night|diretta|live|singolare|doppio|singles?|doubles?)\b", " ", t)
+        t = re.sub(r"\b\d+a\b", " ", t)
         t = re.sub(r"\b(fc|ac|cf|sc|as|bc|united|city|club|de|la|el|del|di)\b", " ", t)
         t = re.sub(r"[^a-z0-9]+", " ", t)
         return re.sub(r"\s+", " ", t).strip()
@@ -1685,7 +1785,7 @@ class ItalianEPGService:
         # Pattern 2: e.g. "ATP Masters 1000 Shanghai - 8a giornata", "WTA 1000 Wuhan", "ATP 500 Vienna"
         if not city:
             m_city2 = re.search(
-                r"\b(?:atp|wta|challenger)(?:\s+(?:masters|finals|\d{3,4}|series|tour|singles|men|women|uomini|donne))*\s+([a-z]+)",
+                r"\b(?:atp|wta|challenger)(?:\s+(?:masters|finals|\d{3,4}|series|tour|singles|doubles|doppio|singolare|men|women|uomini|donne))*\s+([a-z]+)",
                 t,
             )
             if m_city2 and m_city2.group(1).strip() not in cls._TENNIS_EXCLUDED_TOKENS:
@@ -1722,14 +1822,20 @@ class ItalianEPGService:
             m_teams = m.get("teams")
             m_title = m.get("title", "")
             m_tokens = self._clean_tokens(m_title)
-            m_is_1v1 = bool(isinstance(m_teams, dict) and m_teams.get("home") and m_teams.get("away"))
+            m_is_1v1 = bool(
+                (isinstance(m_teams, dict) and m_teams.get("home") and m_teams.get("away"))
+                or (re.search(r"\b(vs\.?| v\. )\b", m_title, re.IGNORECASE) and not is_simulcast_event(m_title))
+            )
             m_is_sim = is_simulcast_event(m_title) or is_simulcast_event(str(m.get("id", ""))) or (m_silo == "tennis" and not m_is_1v1)
 
             matched_epg = None
             for ep in epg_events:
                 ep_title = ep.get("title", "")
                 ep_teams = ep.get("teams")
-                ep_is_1v1 = bool(isinstance(ep_teams, dict) and ep_teams.get("home") and ep_teams.get("away"))
+                ep_is_1v1 = bool(
+                    (isinstance(ep_teams, dict) and ep_teams.get("home") and ep_teams.get("away"))
+                    or (re.search(r"\b(vs\.?| v\. )\b", ep_title, re.IGNORECASE) and not is_simulcast_event(ep_title))
+                )
                 ep_is_sim = is_simulcast_event(ep_title) or is_simulcast_event(str(ep.get("id", ""))) or ((ep.get("_silo") or ep.get("category") or "").lower() == "tennis" and not ep_is_1v1)
 
                 # CRITICAL: A simulcast/session show and a regular 1v1 match MUST NEVER match!
@@ -1744,21 +1850,32 @@ class ItalianEPGService:
                     if not ((m_silo in ("football", "soccer") and ep_silo in ("football", "soccer")) or (m_silo in ("volley", "volleyball") and ep_silo in ("volley", "volleyball")) or (m_silo in ("basket", "basketball") and ep_silo in ("basket", "basketball")) or (m_silo in ("motori", "motorsport", "motor-sports") and ep_silo in ("motori", "motorsport", "motor-sports"))):
                         continue
 
+                # Tennis Singles vs Doubles guard: Never bridge Singles match/session with Doubles broadcast
+                if m_silo == "tennis" and ep_silo == "tennis":
+                    m_eval = f"{m.get('competition', '')} {m.get('title', '')}"
+                    ep_eval = f"{ep.get('competition', '')} {ep.get('title', '')}"
+                    if self._is_tennis_doubles(m_eval) != self._is_tennis_doubles(ep_eval):
+                        continue
+
                 ep_date = ep.get("date", 0)
                 if m_date and ep_date:
                     if m_is_sim and ep_is_sim:
-                        if abs(m_date - ep_date) > 240 * 60 * 1000:
+                        if abs(m_date - ep_date) > 45 * 60 * 1000:
                             continue
                     else:
                         # Asymmetric TV window:
                         # Pre-match broadcast/studio can start up to 90 min before kickoff (m_date - ep_date up to +90m).
                         # Broadcast start after kickoff allowed only up to 20 min late (ep_date - m_date up to +20m).
                         # For motorsports, coverage can start up to 120 min before session.
-                        # For tennis, tournament coverage sessions can span up to 360 min (6 hours) of play.
+                        # For tennis, 6-hour window (360m) is ONLY used to attach TV channels to individual 1v1 matches.
                         if m_silo == "tennis":
-                            pre_max = 360 * 60 * 1000
-                            post_max = 60 * 60 * 1000
-                        elif m_silo == "motor-sports":
+                            if m_is_1v1:
+                                pre_max = 360 * 60 * 1000
+                                post_max = 60 * 60 * 1000
+                            else:
+                                pre_max = 60 * 60 * 1000
+                                post_max = 30 * 60 * 1000
+                        elif m_silo in ("motori", "motorsport", "motor-sports"):
                             pre_max = 120 * 60 * 1000
                             post_max = 20 * 60 * 1000
                         else:
@@ -1768,18 +1885,31 @@ class ItalianEPGService:
                         if time_diff > pre_max or time_diff < -post_max:
                             continue
 
-                if m_is_sim and ep_is_sim:
-                    if m_silo == "tennis" and ep_silo == "tennis":
-                        m_eval = f"{m.get('competition', '')} {m.get('title', '')} {m.get('canonical_competition', '')}"
-                        ep_eval = f"{ep.get('competition', '')} {ep.get('title', '')} {ep.get('eventSynopsis', '')}"
-                        m_circ, m_city = self._extract_tennis_circuit_and_city(m_eval)
-                        ep_circ, ep_city = self._extract_tennis_circuit_and_city(ep_eval)
-                        circ_match = (m_circ == ep_circ) if (m_circ and ep_circ) else True
-                        city_match = bool(m_city and ep_city and (m_city == ep_city or m_city in ep_eval.lower() or ep_city in m_eval.lower()))
-                        if circ_match and city_match:
-                            matched_epg = ep
-                            break
+                # Tennis Tournament Session Bridge:
+                # Matches tennis broadcast session with match or session in the same tournament/circuit/city
+                if m_silo == "tennis" and ep_silo == "tennis":
+                    # For SuperTennis, generic tournament sessions must NEVER bridge to individual 1v1 matches;
+                    # individual matches receive SuperTennis strictly if Diretta.it certified it or if ep is a specific 1v1 match.
+                    ep_sources = ep.get("sources", [])
+                    is_supertennis_session = any(
+                        s.get("canonical") == "supertennis" or "supertennis" in (s.get("name") or "").lower()
+                        for s in ep_sources if isinstance(s, dict)
+                    )
+                    if is_supertennis_session and m_is_1v1:
                         continue
+
+                    m_eval = f"{m.get('competition', '')} {m.get('title', '')} {m.get('canonical_competition', '')}"
+                    ep_eval = f"{ep.get('competition', '')} {ep.get('title', '')} {ep.get('eventSynopsis', '')}"
+                    m_circ, m_city = self._extract_tennis_circuit_and_city(m_eval)
+                    ep_circ, ep_city = self._extract_tennis_circuit_and_city(ep_eval)
+                    circ_match = (m_circ == ep_circ) if (m_circ and ep_circ) else True
+                    city_match = bool(m_city and ep_city and (m_city == ep_city or m_city in ep_eval.lower() or ep_city in m_eval.lower()))
+                    if circ_match and city_match:
+                        matched_epg = ep
+                        break
+                    continue
+
+                if m_is_sim and ep_is_sim:
                     m_info = get_simulcast_info(m_title)
                     ep_info = get_simulcast_info(ep_title)
                     if m_info and ep_info and m_info["title"] == ep_info["title"]:
@@ -1905,7 +2035,13 @@ class ItalianEPGService:
                                 db_service.update_match_poster(m["id"], ep_poster)
                             except Exception:
                                 pass
-                # 2. ALL OTHER SPORTS: Restore strict non-1v1 rule.
+                # 2. TENNIS: Inherit tournament session poster if match has no poster or placeholder
+                elif m_silo == "tennis" and matched_epg.get("poster"):
+                    if not m.get("poster") or "unknown" in str(m.get("poster")).lower() or "nostream" in str(m.get("poster")).lower():
+                        m["poster"] = matched_epg["poster"]
+                        if not m.get("background"):
+                            m["background"] = matched_epg.get("background") or matched_epg["poster"]
+                # 3. ALL OTHER SPORTS: Restore strict non-1v1 rule.
                 # 1v1 matches and team sports MUST NEVER inherit EPG artwork (they belong exclusively to TheSportsDB / athlete poster generators).
                 elif not is_m_1v1 and matched_epg.get("poster"):
                     if not m.get("poster") or "unknown" in str(m.get("poster")).lower() or "nostream" in str(m.get("poster")).lower():
@@ -1917,8 +2053,15 @@ class ItalianEPGService:
                 ep_teams_obj = matched_epg.get("teams")
                 is_ep_1v1 = bool(isinstance(ep_teams_obj, dict) and ep_teams_obj.get("home") and ep_teams_obj.get("away"))
                 if not is_m_1v1 and not is_ep_1v1:
-                    if m_silo != "motor-sports":
-                        m["title"] = matched_epg.get("title") or m.get("title")
+                    # Multicourt aggregated events (e.g. "Ningbo-WTA Early Rounds") adopt Sky certified session metadata
+                    # Confirmed session cards (such as Doubles) and motorsports NEVER have their titles overwritten
+                    if m_silo == "tennis":
+                        m_is_multicourt_placeholder = bool(re.search(r"\b(early\s*rounds?|courts?|multicourt|qualifying\s*rounds?)\b", m_title, re.IGNORECASE))
+                        if m_is_multicourt_placeholder and not self._is_tennis_doubles(m_title):
+                            m["title"] = matched_epg.get("title") or m.get("title")
+                    elif not m.get("title"):
+                        m["title"] = matched_epg.get("title")
+
                     if matched_epg.get("competition") and not m.get("competition"):
                         m["competition"] = matched_epg["competition"]
                     if matched_epg.get("eventSynopsis"):

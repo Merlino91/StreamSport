@@ -903,6 +903,243 @@ class TestItalianEPGService(unittest.IsolatedAsyncioTestCase):
         syn_doc = "S1 Ep1 Primo Per Sempre - Solo 29 giocatori hanno raggiunto il numero uno del ranking."
         self.assertTrue(bool(re.search(r"\bS\d+\s*Ep\d+\b", syn_doc, re.I)))
 
+    def test_true_duplicate_simulcast_unification_and_window_extension(self):
+        """
+        Verifies true simulcast duplication (e.g. TV8 at 16:00 with trailing ellipsis
+        and Sky Sport Uno at 15:30) unifies into 1 card with min(date), max(end_date),
+        clean title, Sky poster, and extended streaming live window.
+        """
+        sky_start = 1763735400000   # 15:30
+        tv8_start = 1763737200000   # 16:00 (+30 min)
+        end_time = 1763739900000    # 16:45
+
+        sky_event = {
+            "id": "sky_201_gp-portogallo-sprint-race_1763735400",
+            "title": "GP Portogallo: Sprint Race",
+            "competition": "MotoGP: GP Portogallo",
+            "_silo": "motor-sports",
+            "category": "motor-sports",
+            "date": sky_start,
+            "end_date": end_time,
+            "poster": "https://guidatv.sky.it/images/motogp_sprint.jpg",
+            "sources": [{"canonical": "sky_sport_uno", "tag": "sky1", "name": "Sky Sport Uno"}],
+        }
+
+        tv8_event = {
+            "id": "tivusat_8_gp-portogallo-sprint-race_1763737200",
+            "title": "GP Portogallo: Sprint Race...",
+            "competition": "MotoGP",
+            "_silo": "motor-sports",
+            "category": "motor-sports",
+            "date": tv8_start,
+            "end_date": end_time,
+            "poster": "https://services.tivulaguida.it/images/tv8_generic.png",
+            "sources": [{"canonical": "tv8_hd", "tag": "tv8", "name": "TV8 HD"}],
+        }
+
+        # Deduplicate
+        deduped = self.service._deduplicate_epg_events([sky_event, tv8_event])
+        self.assertEqual(len(deduped), 1)
+
+        merged = deduped[0]
+        # 1. Start is min(date) = 15:30
+        self.assertEqual(merged["date"], sky_start)
+        # 2. End is max(end_date) = 16:45
+        self.assertEqual(merged["end_date"], end_time)
+        # 3. Clean title preserved (no ellipses)
+        self.assertEqual(merged["title"], "GP Portogallo: Sprint Race")
+        # 4. Poster is Sky official 16:9 graphic
+        self.assertEqual(merged["poster"], "https://guidatv.sky.it/images/motogp_sprint.jpg")
+        # 5. Streams from both Sky and TV8 merged
+        src_keys = {s["canonical"] for s in merged["sources"]}
+        self.assertEqual(src_keys, {"sky_sport_uno", "tv8_hd"})
+
+        # 6. Live window duration covers full interval (75 min + 10 = 85 min)
+        from app.services.catalog_service import catalog_service
+        live_window = catalog_service.get_live_window_minutes(merged)
+        self.assertEqual(live_window, 85)
+
+    def test_distinct_motorsport_sessions_never_merged(self):
+        """
+        Verifies distinct motorsport sessions (FP1, FP2, Qualifiche 1, Qualifiche 2, Gara)
+        on the same track within 30-45 minutes are NEVER merged into each other.
+        """
+        base_ts = 1763720000000
+        fp1 = {
+            "id": "motogp_fp1",
+            "title": "MotoGP: GP Portogallo - Prove Libere 1",
+            "_silo": "motor-sports",
+            "category": "motor-sports",
+            "date": base_ts,
+            "end_date": base_ts + 45 * 60 * 1000,
+            "sources": [{"canonical": "sky_sport_motogp", "tag": "fp1"}],
+        }
+        fp2 = {
+            "id": "motogp_fp2",
+            "title": "MotoGP: GP Portogallo - Prove Libere 2",
+            "_silo": "motor-sports",
+            "category": "motor-sports",
+            "date": base_ts + 45 * 60 * 1000,
+            "end_date": base_ts + 90 * 60 * 1000,
+            "sources": [{"canonical": "sky_sport_motogp", "tag": "fp2"}],
+        }
+        q1 = {
+            "id": "motogp_q1",
+            "title": "MotoGP: GP Portogallo - Qualifiche 1",
+            "_silo": "motor-sports",
+            "category": "motor-sports",
+            "date": base_ts + 120 * 60 * 1000,
+            "end_date": base_ts + 135 * 60 * 1000,
+            "sources": [{"canonical": "sky_sport_motogp", "tag": "q1"}],
+        }
+        q2 = {
+            "id": "motogp_q2",
+            "title": "MotoGP: GP Portogallo - Qualifiche 2",
+            "_silo": "motor-sports",
+            "category": "motor-sports",
+            "date": base_ts + 140 * 60 * 1000,
+            "end_date": base_ts + 155 * 60 * 1000,
+            "sources": [{"canonical": "sky_sport_motogp", "tag": "q2"}],
+        }
+        race = {
+            "id": "motogp_race",
+            "title": "MotoGP: GP Portogallo - Gara",
+            "_silo": "motor-sports",
+            "category": "motor-sports",
+            "date": base_ts + 180 * 60 * 1000,
+            "end_date": base_ts + 240 * 60 * 1000,
+            "sources": [{"canonical": "sky_sport_motogp", "tag": "race"}],
+        }
+
+        events = [fp1, fp2, q1, q2, race]
+        deduped = self.service._deduplicate_epg_events(events)
+        # All 5 sessions MUST remain distinct
+        self.assertEqual(len(deduped), 5)
+        titles = [e["title"] for e in deduped]
+        self.assertIn("MotoGP: GP Portogallo - Prove Libere 1", titles)
+        self.assertIn("MotoGP: GP Portogallo - Prove Libere 2", titles)
+        self.assertIn("MotoGP: GP Portogallo - Qualifiche 1", titles)
+        self.assertIn("MotoGP: GP Portogallo - Qualifiche 2", titles)
+        self.assertIn("MotoGP: GP Portogallo - Gara", titles)
+
+    def test_tennis_singles_vs_doubles_never_merged_and_no_title_overwrite(self):
+        """
+        Verifies Tennis Singles and Doubles semifinal sessions are NEVER merged,
+        and catalog item titles/posters are never swapped or overwritten.
+        """
+        ts = 1763730000000
+        singles_session = {
+            "id": "atp_singles_semi",
+            "title": "ATP Finals: Singolare: 1a Semifinale",
+            "competition": "ATP Finals",
+            "_silo": "tennis",
+            "category": "tennis",
+            "date": ts,
+            "end_date": ts + 120 * 60 * 1000,
+            "poster": "https://apid.sky.it/poster/singles_semi.jpg",
+            "sources": [{"canonical": "sky_sport_tennis", "tag": "singles"}],
+        }
+        doubles_session = {
+            "id": "atp_doubles_semi",
+            "title": "ATP Finals: Doubles: 2a Semifinale",
+            "competition": "ATP Finals",
+            "_silo": "tennis",
+            "category": "tennis",
+            "date": ts + 15 * 60 * 1000,  # 15 minutes apart
+            "end_date": ts + 135 * 60 * 1000,
+            "poster": "https://apid.sky.it/poster/doubles_semi.jpg",
+            "sources": [{"canonical": "sky_sport_tennis", "tag": "doubles"}],
+        }
+
+        # 1. In deduplicator, they must remain 2 separate cards
+        deduped = self.service._deduplicate_epg_events([singles_session, doubles_session])
+        self.assertEqual(len(deduped), 2)
+
+        # 2. In enrich_matches_with_epg_channels, titles must NEVER overwrite each other
+        import asyncio
+        import time
+        catalog_matches = [
+            {
+                "id": "cat_doubles",
+                "title": "ATP Finals: Doubles: 2a Semifinale",
+                "competition": "ATP Finals Doubles",
+                "_silo": "tennis",
+                "category": "tennis",
+                "date": ts + 15 * 60 * 1000,
+                "poster": "https://apid.sky.it/poster/doubles_semi.jpg",
+                "sources": [],
+            }
+        ]
+        self.service._cached_matches = [singles_session]
+        self.service._last_fetch_time = time.time()
+        asyncio.run(self.service.enrich_matches_with_epg_channels(catalog_matches))
+
+        # Title MUST stay Doubles, never overwritten to Singolare!
+        self.assertEqual(catalog_matches[0]["title"], "ATP Finals: Doubles: 2a Semifinale")
+        self.assertEqual(catalog_matches[0]["poster"], "https://apid.sky.it/poster/doubles_semi.jpg")
+        # Should not have matched singles_session
+        self.assertNotIn("singles", [s.get("tag") for s in catalog_matches[0].get("sources", [])])
+
+    def test_rolling_cache_does_not_retain_adjusted_schedule_time_duplicate(self):
+        """
+        Verifies that when a broadcaster updates the schedule start time of a session
+        (e.g. from 15:55 to 15:30 on Sky Sport MotoGP), the stale 15:55 entry in rolling
+        cache is NOT retained as a duplicate ghost event.
+        """
+        old_time = 1763735700000   # 15:55
+        new_time = 1763734200000   # 15:30 (25 min earlier)
+        now_ms = old_time + (60 * 60 * 1000)  # 1 hour later
+
+        prev_cached = [
+            {
+                "id": "sky_208_gp-portogallo-sprint-race_1763735700",
+                "title": "GP Portogallo: Sprint Race",
+                "_silo": "motor-sports",
+                "category": "motor-sports",
+                "date": old_time,
+                "sources": [{"canonical": "sky_sport_motogp", "name": "Sky Sport MotoGP"}],
+            }
+        ]
+        self.service._cached_matches = prev_cached
+
+        new_fetched = [
+            {
+                "id": "sky_208_gp-portogallo-sprint-race_1763734200",
+                "title": "GP Portogallo: Sprint Race",
+                "_silo": "motor-sports",
+                "category": "motor-sports",
+                "date": new_time,
+                "sources": [{"canonical": "sky_sport_motogp", "name": "Sky Sport MotoGP"}],
+            }
+        ]
+
+        # Simulate get_matches rolling cache logic
+        merged_epg = self.service._deduplicate_epg_events(new_fetched)
+        retained_old = []
+        for prev_m in self.service._cached_matches:
+            p_date = prev_m.get("date", 0)
+            if p_date and (now_ms - p_date) < (3.5 * 3600 * 1000):
+                if any(curr.get("id") == prev_m.get("id") for curr in merged_epg):
+                    continue
+                prev_title = self.service._clean_tokens(prev_m.get("title", ""))
+                prev_chans = {s.get("canonical") for s in prev_m.get("sources", []) if isinstance(s, dict) and s.get("canonical")}
+                is_time_shifted = False
+                for curr in merged_epg:
+                    curr_chans = {s.get("canonical") for s in curr.get("sources", []) if isinstance(s, dict) and s.get("canonical")}
+                    if prev_chans and curr_chans and (prev_chans & curr_chans):
+                        if abs(curr.get("date", 0) - p_date) <= (90 * 60 * 1000):
+                            curr_title = self.service._clean_tokens(curr.get("title", ""))
+                            if prev_title and curr_title and (prev_title == curr_title or (len(prev_title) >= 5 and prev_title in curr_title) or (len(curr_title) >= 5 and curr_title in prev_title)):
+                                is_time_shifted = True
+                                break
+                if not is_time_shifted:
+                    retained_old.append(prev_m)
+
+        final_matches = retained_old + merged_epg
+        # Exactly 1 event retained (the updated 15:30 one, NOT duplicated with 15:55)
+        self.assertEqual(len(final_matches), 1)
+        self.assertEqual(final_matches[0]["date"], new_time)
+
 
 if __name__ == "__main__":
     unittest.main()

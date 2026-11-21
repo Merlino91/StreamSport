@@ -834,14 +834,29 @@ class CatalogService:
                                 if isinstance(src, dict) and str(src.get("id")) not in existing_src_ids:
                                     existing_src_ids.add(str(src.get("id")))
                                     off.setdefault("sources", []).append(src)
+                            # Extend streaming time window to cover full broadcast
+                            off["date"] = min(off.get("date", ep_date), ep_date)
+                            if off.get("end_date") and ep.get("end_date"):
+                                off["end_date"] = max(off.get("end_date", 0), ep.get("end_date", 0))
+                            elif ep.get("end_date") and not off.get("end_date"):
+                                off["end_date"] = ep.get("end_date")
                             break
                 elif ep_silo == "tennis":
                     # Tennis multicourt/tournament channel sessions (e.g. "ATP 1000 - Sky Sport Tennis")
                     # are distinct from single 1v1 matches
                     if " vs " not in ep_title.lower() and " vs " in off_title.lower():
                         continue
+                    # Never merge Singles with Doubles
+                    from app.services.italian_epg_service import ItalianEPGService
+                    if ItalianEPGService._is_tennis_doubles(ep_title) != ItalianEPGService._is_tennis_doubles(off_title):
+                        continue
                     if ep_title.lower() == off_title.lower():
                         already_covered = True
+                        off["date"] = min(off.get("date", ep_date), ep_date)
+                        if off.get("end_date") and ep.get("end_date"):
+                            off["end_date"] = max(off.get("end_date", 0), ep.get("end_date", 0))
+                        elif ep.get("end_date") and not off.get("end_date"):
+                            off["end_date"] = ep.get("end_date")
                         break
                 else:
                     clean_ep = re.sub(r"[^a-zA-Z0-9]+", " ", ep_title.lower()).strip()
@@ -853,7 +868,10 @@ class CatalogService:
             if not already_covered:
                 orphan_epg.append(ep)
 
-        linked_schedule.extend(orphan_epg)
+        # Deduplicate orphan EPG events among themselves before extending linked_schedule
+        from app.services.italian_epg_service import ItalianEPGService
+        deduped_orphans = ItalianEPGService._deduplicate_epg_events(orphan_epg)
+        linked_schedule.extend(deduped_orphans)
 
     def _append_historical_replays(
         self,
